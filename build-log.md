@@ -117,3 +117,7 @@
 - Dashboard: "Upload again" on uploaded clip cards, in the editor footer, and on Alerts (deleted / processing failed). Cards show the YouTube state (Deleted on YouTube, Removed by YouTube (reason), Blocked).
 - Explained: Approve is disabled on uploaded clips by design (they are locked); use Upload again.
 - Tests: 6/6 pass.
+
+## 2026-11-20 — Task 20: Approve bug fix
+- Bug: editor Approve/Upload now first saves; the editor always sends caption_style, so clips with caption_style=None counted as "changed", went back to draft and Approve failed ("Clip is draft; render it first"). Fix: compare a normalised render signature (_render_sig) instead of raw fields. Test 2/2.
+- Re-upload of Big Buck Bunny (clip #1 -> copy #4) done on request; Foody resumed for it.

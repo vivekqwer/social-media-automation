@@ -398,20 +398,32 @@ def get_clip(cid: int):
         return _clip_card(c, {c.project_id: s.get(Project, c.project_id)}, full=True)
 
 
+def _render_sig(c: Clip) -> tuple:
+    """What the rendered video actually depends on, with defaults filled in (None == off == default)."""
+    r2 = lambda x, d=0.0: round(float(x if x is not None else d), 2)  # noqa: E731
+    ovs = tuple((str(o.get("text", "")).strip(), r2(o.get("start")), r2(o.get("end"), 3), o.get("pos") or "bottom",
+                 o.get("anim") or "fade", int(o.get("size") or 56), str(o.get("color") or "#ffffff").lower())
+                for o in (c.overlays or []) if str(o.get("text", "")).strip())
+    st = c.caption_style or {}
+    caps = (tuple((r2(x.get("s")), r2(x.get("e")), str(x.get("t", "")).strip()) for x in (c.captions or [])),
+            st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
+    return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
+            r2(c.orig_volume, 1.0), caps, c.credit_on is not False)
+
+
 @app.put("/api/clips/{cid}")
 def update_clip(cid: int, body: ClipUpdate):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
-        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume", "captions", "caption_style", "credit_on"}
-        changed = False
+        before = _render_sig(c)
         for k, v in body.model_dump(exclude_unset=True).items():
             if getattr(c, k) != v:
-                changed = changed or k in render_keys
                 setattr(c, k, v)
         if (c.end or 0) <= (c.start or 0):
             raise HTTPException(400, "end must be greater than start")
+        changed = _render_sig(c) != before  # only real changes to the video need a new render
         if changed and c.status in ("rendered", "queued", "failed"):
             c.status = "draft"
         s.commit()
