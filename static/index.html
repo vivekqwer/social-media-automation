@@ -361,6 +361,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <input id="e-when" type="datetime-local" style="width:auto" title="Publish time (optional)">
     <select id="e-dest" style="width:auto" title="Upload to which YouTube channel"></select>
     <button class="btn outline" id="e-now"><i data-ico="upload"></i>Upload now</button>
+    <button class="btn brand hide" id="e-again"><i data-ico="refresh"></i>Upload again (new copy)</button>
     <span style="flex:1"></span>
     <button class="btn bad" id="e-del"><i data-ico="trash"></i>Discard</button>
   </div>
@@ -514,9 +515,9 @@ async function loadAlerts(){
         ${row('Original video',x.source_url?`<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_title||x.source_url)}</a>`:'')}
         ${row('Part used',x.clip_range?`${T(x.clip_range[0])}–${T(x.clip_range[1])} · ${esc(x.source_mode||'')}`:'')}
       </div>
-      <div class="row" style="margin-top:12px">${x.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://studio.youtube.com/video/${esc(x.youtube_id)}/copyright">${ico('youtube')}Open in YouTube Studio</a>`:''}<button class="btn ghost sm" data-open="${a.clip_id}">Open clip</button></div>
+      <div class="row" style="margin-top:12px">${x.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://studio.youtube.com/video/${esc(x.youtube_id)}/copyright">${ico('youtube')}Open in YouTube Studio</a>`:''}<button class="btn ghost sm" data-open="${a.clip_id}">Open clip</button>${['removed','failed'].includes(a.kind)?`<button class="btn outline sm" data-again="${a.clip_id}" data-ys="${a.kind}">${ico('refresh')}Upload again</button>`:''}</div>
     </div></div>`}).join(''):empty('bell','No problems found',d.watching?'All your uploaded videos are fine on YouTube.':'Alerts appear here once videos are uploaded.');
-  wireOpen($('#al-list'));
+  wireOpen($('#al-list'));wireAgain($('#al-list'));
   if(d.alerts.some(a=>!a.seen)){try{await api('/api/alerts/seen','POST');$('#b-alerts').style.display='none'}catch(e){}}
 }
 $('#al-check').onclick=()=>once(async()=>{const r=await api('/api/alerts/check','POST');toast(`Checked ${r.checked} video${r.checked===1?'':'s'} — ${r.new_alerts} new alert${r.new_alerts===1?'':'s'}`);await loadAlerts();loadOverview()},$('#al-check'));
@@ -640,9 +641,20 @@ async function loadClips(){
   $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
     <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
     ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc(x.error).slice(0,120)}</div>`:''}
-    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}</div></div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
-  wireOpen($('#clip-grid'));
+    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
+    ${x.yt_state&&x.yt_state!=='ok'?`<div class="sm" style="color:var(--bad);margin-top:6px">${ico('alert')} ${ytLabel(x.yt_state)}</div>`:''}</div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
+  wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));
 }
+function ytLabel(st){return st==='removed'?'Deleted on YouTube':st.startsWith('rejected:')?'Removed by YouTube ('+st.slice(9)+')':st.startsWith('blocked')?'Blocked in some countries':st.startsWith('failed')?'YouTube processing failed':st}
+const NO_AGAIN=st=>/^rejected:(copyright|claim|trademark|legal)/.test(st||'')||(st||'').startsWith('blocked');
+async function uploadAgain(id,st){
+  if(NO_AGAIN(st))throw new Error('YouTube removed this for copyright — uploading the same content again can bring another strike, so it is blocked.');
+  const msg=(st==='removed'?'This video is gone from YouTube. If YouTube removed it (not you), check the reason in YouTube Studio first — the same content can bring a strike.'+String.fromCharCode(10)+String.fromCharCode(10):'')
+    +'A new copy of this clip will be made with all your edits, voice, captions, title and thumbnail. You can check it and then Approve. Continue?';
+  if(!confirm(msg))return;
+  const r=await api(`/api/clips/${id}/reupload`,'POST',{confirm:true});toast('Copy made — it is rendering now');openEditor(r.id);
+}
+function wireAgain(root){$$('[data-again]',root).forEach(b=>b.onclick=()=>once(()=>uploadAgain(+b.dataset.again,b.dataset.ys)))}
 async function approve(id){await api(`/api/clips/${id}/approve`,'POST',{});toast('Approved — queued for upload');refreshAfter()}
 function refreshAfter(){const p=$$('main section').find(s=>!s.classList.contains('hide'));if(p)go(p.id.slice(2))}
 
@@ -700,6 +712,7 @@ function setStatus(c){
   if(VIEW==='out'&&has){fr.style.display='none';fr.src='about:blank';vid.style.display='';vid.src=`/api/clips/${c.id}/video?t=${Date.now()}`}
   else{vid.pause();vid.style.display='none';fr.style.display='';if(c.video_id)fr.src=`https://www.youtube.com/embed/${c.video_id}?start=${Math.floor(c.start)}`}
   const done=c.status==='uploaded',busy=['rendering','fetching','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
+  $('#e-again').classList.toggle('hide',c.status!=='uploaded');
   $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!ok;
   $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
 }
@@ -733,6 +746,7 @@ function collect(){
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
 function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const x=await api('/api/clips/'+id);if(CUR&&CUR.id===id){fill(x);if(!['rendering','fetching'].includes(x.status)&&!x.tts_pending){clearInterval(POLL);toast(x.status==='failed'?'Something failed — see the message':'Done',x.status==='failed')}}else clearInterval(POLL)}catch(e){clearInterval(POLL)}},2500)}
 $('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
+$('#e-again').onclick=()=>once(()=>uploadAgain(CUR.id,CUR.yt_state),$('#e-again'));
 $('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at,destination_id:+$('#e-dest').value||null});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
 $('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:+$('#e-dest').value||null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
 $('#e-refetch').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/refetch`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Fetching the video again…')},$('#e-refetch'));

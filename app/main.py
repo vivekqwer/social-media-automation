@@ -721,6 +721,45 @@ def alerts_check():
     return check_uploads()
 
 
+class ReuploadIn(BaseModel):
+    confirm: bool = False
+
+
+NO_REUPLOAD = ("rejected:copyright", "rejected:claim", "rejected:trademark", "rejected:legal")
+
+
+@app.post("/api/clips/{cid}/reupload")
+def reupload_clip(cid: int, body: ReuploadIn):
+    """Copy an uploaded clip (all edits, voice, captions, title, thumbnail) into a new clip that can be uploaded again."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status != "uploaded":
+            raise HTTPException(409, "Only uploaded clips can be uploaded again — this one can still be edited.")
+        if (c.yt_state or "") in NO_REUPLOAD or (c.yt_state or "").startswith("blocked"):
+            raise HTTPException(409, "YouTube removed or blocked this video for copyright. Uploading the same content again "
+                                     "can bring another strike (3 strikes close the channel), so it is blocked.")
+        if not body.confirm:
+            raise HTTPException(400, "Confirm first")
+        new = Clip(**{k: getattr(c, k) for k in (
+            "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
+            "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
+            "credit_on")}, status="draft")
+        s.add(new)
+        s.commit()
+        old_dir, new_dir = DATA_DIR / "clips" / str(c.id), DATA_DIR / "clips" / str(new.id)
+        new_dir.mkdir(parents=True, exist_ok=True)
+        if (old_dir / "src").exists():  # reuse the downloaded source: no new download needed
+            shutil.copytree(old_dir / "src", new_dir / "src", dirs_exist_ok=True)
+        if c.voice_path and Path(c.voice_path).exists():
+            new.voice_path = str(shutil.copy(c.voice_path, new_dir / Path(c.voice_path).name))
+        if c.thumb_custom and c.thumb_path and Path(c.thumb_path).exists():
+            new.thumb_path, new.thumb_custom = str(shutil.copy(c.thumb_path, new_dir / Path(c.thumb_path).name)), True
+        s.commit()
+        nid = new.id
+    executor.submit(run_render, nid)
+    return {"id": nid}
+
+
 @app.post("/api/clips/{cid}/approve")
 def approve_clip(cid: int, body: ApproveIn):
     """Review-first flow: queue a rendered clip for upload (next free slot unless a time is given)."""

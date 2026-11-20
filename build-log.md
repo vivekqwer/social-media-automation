@@ -111,3 +111,9 @@
 - Helper PC: worker/install_autostart.bat (hidden start at Windows sign-in via Startup .vbs), run_hidden.bat restarts it, single-instance lock (port 47613), self-update (git pull --ff-only to the server's RAILWAY_GIT_COMMIT_SHA when the tree is clean, pip install if requirements changed, exit 4 = restart). Dashboard banner when jobs wait and no helper is online.
 - Quota planner (app/quota.py): units counted per Pacific day (upload 1600, thumbnail 50, search 100, read 1); uploads stop before the budget runs out; channels with fewer uploads today go first; one channel's expired login no longer stops the others; new slots skip days that already hold the daily capacity (5 uploads with 10,000 units). Dashboard card "Today's YouTube upload budget".
 - Tests (mocked YouTube): 11/12 pass; the 12th only failed because the test mocked the function that counts quota.
+
+## 2026-11-20 — Task 19: Upload again (deleted clips)
+- POST /api/clips/{id}/reupload: copies an uploaded clip (trim, aspect, overlays, effects, voice file, captions, title/description/tags, channel, credit, thumbnail settings) into a new draft, reuses the downloaded source (no new download) and renders it; user then Approves. Needs confirmation; blocked for copyright/claim/trademark/legal removals and region blocks (repeat upload = strike risk).
+- Dashboard: "Upload again" on uploaded clip cards, in the editor footer, and on Alerts (deleted / processing failed). Cards show the YouTube state (Deleted on YouTube, Removed by YouTube (reason), Blocked).
+- Explained: Approve is disabled on uploaded clips by design (they are locked); use Upload again.
+- Tests: 6/6 pass.
