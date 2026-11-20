@@ -8,3 +8,4 @@ data_test/
 .venv/
 docs/
 worker/.worker_token
+models/

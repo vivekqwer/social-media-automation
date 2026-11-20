@@ -33,6 +33,7 @@ from .policy import check_edit
 from .quick import quick_run
 from .render import run_render
 from .thumbs import make_thumbnail
+from . import faces
 from .tts import VOICES, synth
 
 MODES = {"cc", "permission", "commentary"}
@@ -598,6 +599,7 @@ def _dest_dict(d: Destination) -> dict:
         out["needs_reconnect"] = False
     except TokenError:
         out["needs_reconnect"] = True  # stored login unreadable (e.g. key changed): press Connect again
+    out["face"] = "own" if faces.face_path(d.id).exists() else ("default" if faces.DEFAULT_FACE.exists() else None)
     return out
 
 
@@ -1128,6 +1130,56 @@ def quick_status(pid: int):
 # ---------- thumbnails ----------
 class ThumbIn(BaseModel):
     text: str = Field("", max_length=80)
+    face: bool | None = None
+
+
+def _rethumb(dest_id: int | None):
+    """A face was added/changed: remake the automatic thumbnails of clips that are not on YouTube yet."""
+    with SessionLocal() as s:
+        q = s.query(Clip).filter(Clip.status.in_(["rendered", "queued"]), Clip.thumb_custom.isnot(True))
+        if dest_id:
+            q = q.filter(Clip.destination_id == dest_id)
+        for c in q.all():
+            if c.output_path and Path(c.output_path).exists():
+                try:
+                    c.thumb_path, c.thumb_note = str(make_thumbnail(c, s.get(Project, c.project_id))), None
+                except Exception as e:  # noqa: BLE001
+                    c.thumb_note = f"Thumbnail could not be made: {str(e)[:150]}"
+        s.commit()
+
+
+@app.post("/api/faces/{did}")
+def face_upload(did: int, file: UploadFile = File(...)):
+    """did = channel id, or 0 for the default face used by every channel without its own."""
+    if did:
+        with SessionLocal() as s:
+            _get(s, Destination, did)
+    data = file.file.read(8 * 1024 * 1024 + 1)
+    if len(data) > 8 * 1024 * 1024:
+        raise HTTPException(400, "Photo is larger than 8 MB")
+    try:
+        faces.save_face(did or None, data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read this photo: {str(e)[:150]}")
+    executor.submit(_rethumb, did or None)
+    return {"ok": True}
+
+
+@app.get("/api/faces/{did}")
+def face_get(did: int):
+    p = faces.face_path(did) if did else faces.DEFAULT_FACE
+    if not p.exists():
+        raise HTTPException(404, "No face uploaded")
+    return FileResponse(p, headers={"Cache-Control": "no-store"})
+
+
+@app.delete("/api/faces/{did}")
+def face_delete(did: int):
+    (faces.face_path(did) if did else faces.DEFAULT_FACE).unlink(missing_ok=True)
+    executor.submit(_rethumb, did or None)
+    return {"ok": True}
 
 
 @app.post("/api/clips/{cid}/thumbnail")
@@ -1138,6 +1190,8 @@ def thumb_generate(cid: int, body: ThumbIn):
         if not c.output_path or not Path(c.output_path).exists():
             raise HTTPException(400, "Render the clip first")
         c.thumb_text = body.text.strip() or None
+        if body.face is not None:
+            c.thumb_face = body.face
         try:
             c.thumb_path, c.thumb_custom, c.thumb_note = str(make_thumbnail(c, p)), False, None
         except Exception as e:  # noqa: BLE001

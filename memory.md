@@ -76,3 +76,7 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - More YouTube channels: My channels -> "Connect a YouTube channel" once per channel (each Google account signs in). Quick upload, editor and sources each have a channel picker.
 - Alerts page = monitor of uploaded videos (deleted / copyright-rejected / blocked). YouTube API cannot list strikes or claimant names; the alert links to YouTube Studio's copyright page.
 - FAQ answered: multi-audio tracks not possible via API; credit reduces nothing legally — CC or permission is what avoids strikes.
+
+## Thumbnails with face (2026-11-20)
+- User wants every thumbnail: video frame + their face + bold text, phone-safe, fully automatic, no external AI. Face is uploaded once in My channels (default for all channels; a channel may have its own). Model: U2-Net human-seg ONNX baked into Docker image.
+- Foody has 1 copyright strike + 1 CG warning (2026-11-20) after the IGN/GTA commentary + BBB uploads. 3 strikes = channel terminated: only CC or permission content from now on.

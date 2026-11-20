@@ -258,6 +258,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="grid cols">
           <div class="grid" style="align-content:start">
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
+            <div class="card"><div class="ch"><div><h3>Your face for thumbnails</h3><p>Upload one clear photo (face + shoulders). The background is removed automatically and your face is put on every thumbnail. Channels you connect later use it too — or give a channel its own face above.</p></div></div>
+              <div class="cb row" style="flex-wrap:nowrap;align-items:center"><div id="face-prev" style="width:96px;height:96px;border-radius:12px;background:var(--muted) center/contain no-repeat;flex:none"></div>
+                <div style="display:flex;flex-direction:column;gap:8px"><label class="btn sm"><i data-ico="image"></i><span id="face-lbl">Upload face photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-face="0" hidden></label>
+                <button class="btn ghost sm hide" id="face-del">Remove</button><span class="mut sm" id="face-note"></span></div></div></div>
             <div class="card"><div class="ch"><div><h3>How it works</h3></div></div><div class="cb">
               <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
                 <li>Add a source channel (or paste one video).</li>
@@ -344,6 +348,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <div class="f">Thumbnail <span class="mut sm" style="font-weight:400">— made automatically after render and sent to YouTube with the video</span>
         <div class="row" style="align-items:flex-start;flex-wrap:nowrap;margin-top:6px"><img id="e-thumb" alt="" style="width:170px;border-radius:8px;border:1px solid var(--border);background:var(--muted);object-fit:cover;aspect-ratio:16/9">
           <div class="grow" style="display:flex;flex-direction:column;gap:8px"><input id="e-ttext" placeholder="Big text on the thumbnail (empty = from the title)">
+            <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="e-tface" checked><i></i></span>Put my face on the thumbnail</label>
             <div class="row"><button class="btn outline sm" id="e-tgen"><i data-ico="image"></i>Make thumbnail</button><button class="btn ghost sm hide" id="e-tpush"><i data-ico="upload"></i>Send thumbnail to YouTube</button></div>
             <input type="file" id="e-tfile" accept="image/jpeg,image/png" style="height:auto;padding:4px 8px;font-size:12px"><span class="mut sm" id="e-tnote"></span></div></div></div>
     </div>
@@ -576,9 +581,18 @@ async function loadSources(){
 
 async function loadDests(){
   await loadOverview();loadCookies();loadWorkers();
-  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':'<span class="badge uploaded">Connected</span>'}<button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
+  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)} · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div><label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':'<span class="badge uploaded">Connected</span>'}<button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
+  $$('[data-face]').forEach(inp=>inp.onchange=()=>once(async()=>{const f=inp.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+    $('#face-note').textContent='Removing the background… (first time can take a minute)';
+    try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
+  loadFace();
 }
+async function loadFace(){
+  const r=await fetch('/api/faces/0',{cache:'no-store'});const has=r.ok;
+  $('#face-prev').style.backgroundImage=has?`url(/api/faces/0?t=${Date.now()})`:'';$('#face-lbl').textContent=has?'Change face photo':'Upload face photo';$('#face-del').classList.toggle('hide',!has);
+}
+$('#face-del').onclick=()=>once(async()=>{if(confirm('Remove the default face from thumbnails?')){await api('/api/faces/0','DELETE');loadDests()}});
 async function loadWorkers(){
   try{const L=await api('/api/workers');
     $('#wk-list').innerHTML=L.length?L.map(w=>`<div class="item"><div class="avatar" style="background:var(--muted);color:var(--fg)">${ico('dashboard')}</div><div class="tx"><b>${esc(w.name)}</b><span class="mut sm">${w.last_seen?'Last seen '+when(w.last_seen):'Never seen'}</span></div>
@@ -652,7 +666,7 @@ function fill(c){
   $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
   $('#e-credit').checked=c.credit_on!==false;
   $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'110px':'170px';
-  $('#e-ttext').value=c.thumb_text||'';$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
+  $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   if(c.destination_id)$('#e-dest').value=c.destination_id;else if(DESTS.length)$('#e-dest').value=DESTS[0].id;
   $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');
   setStatus(c);
@@ -713,7 +727,7 @@ $('#e-meta').onclick=()=>once(async()=>{await save();const extra=$$('#e-chips sp
 
 
 /* ---------- thumbnail ---------- */
-$('#e-tgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value});fill(await api('/api/clips/'+c.id));etab('meta');
+$('#e-tgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value,face:$('#e-tface').checked});fill(await api('/api/clips/'+c.id));etab('meta');
   if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
 $('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('meta');toast('Your thumbnail will be used')});
 $('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));

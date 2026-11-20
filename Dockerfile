@@ -5,6 +5,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-de
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# free person-cutout model for face thumbnails (no AI service)
+RUN mkdir -p models && curl -fsSL -o models/u2net_human_seg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx
 COPY app app
 COPY static static
 COPY fonts fonts
