@@ -242,7 +242,7 @@ def run_render(clip_id: int):
         s.refresh(clip)
         error, extra = None, {}
         try:
-            extra["output_path"] = str(render_clip(project, clip))
+            clip.output_path = extra["output_path"] = str(render_clip(project, clip))  # the thumbnail needs it
             final = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
             if not clip.thumb_custom:
                 try:

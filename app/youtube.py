@@ -244,12 +244,13 @@ RISKY = re.compile(r"\b(official (music )?video|lyrics?|full (movie|film|episode
 
 
 def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
-    """Creative Commons videos for a topic, most viewed first, skipping ids already used and risky titles."""
+    """Creative Commons videos (4-20 min, so we clip a moment instead of re-posting a whole Short) that match the
+    topic best, skipping ids already used and risky titles."""
     yt, out, token = client(), [], None
     for _ in range(pages):
         if not quota.can_search():
             break
-        r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="viewCount",
+        r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
                              safeSearch="moderate", maxResults=50, pageToken=token).execute()
         quota.spend("search")
         quota.note_search()
