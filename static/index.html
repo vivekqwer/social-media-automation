@@ -134,6 +134,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 .sh{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border)}
 .sh h3{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sbody{flex:1;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.sbody>*{flex-shrink:0}  /* never squeeze the tabs or the video when the editor is short */
 .sf{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-top:1px solid var(--border);background:var(--card)}
 .player{width:100%;border-radius:10px;background:#000;max-height:300px;aspect-ratio:16/9;border:0}
 .panel{display:none;flex-direction:column;gap:14px}.panel.on{display:flex}
