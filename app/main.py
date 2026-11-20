@@ -672,6 +672,7 @@ def overview():
             "quota": quota.summary(),
             "uploads_today": _uploads_today(s),
             "helper": _helper_state(s),
+            "thumbs_pending": s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count(),
         }
 
 
@@ -1325,11 +1326,7 @@ def thumb_push(cid: int):
         c = _get(s, Clip, cid)
         if not c.youtube_id or not c.thumb_path or not Path(c.thumb_path).exists():
             raise HTTPException(400, "Upload the video first and make a thumbnail")
-        try:
-            youtube.set_thumbnail(c.destination_id, c.youtube_id, c.thumb_path)
-            c.thumb_note = "Thumbnail set on YouTube"
-        except Exception as e:  # noqa: BLE001
-            c.thumb_note = youtube.thumb_error_text(e)
+        youtube.push_thumbnail(c)
         s.commit()
         return to_dict(c)
 

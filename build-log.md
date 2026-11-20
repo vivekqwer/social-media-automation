@@ -122,3 +122,7 @@
 - Bug: editor Approve/Upload now first saves; the editor always sends caption_style, so clips with caption_style=None counted as "changed", went back to draft and Approve failed ("Clip is draft; render it first"). Fix: compare a normalised render signature (_render_sig) instead of raw fields. Test 2/2.
 - Re-upload of Big Buck Bunny (clip #1 -> copy #4) done on request; Foody resumed for it.
 - Live: copy #4 uploaded to Foody as 1G3SLayg4t8 (publish time 11:42 PM IST set by user in editor -> public at upload). Custom thumbnail refused (403): channel needs phone verification at youtube.com/verify. Quota counter live (1652 units).
+
+## 2026-11-20 — Task 21: Thumbnails retried automatically
+- Refused thumbnails (403: channel phone not verified) are marked thumb_pending and retried every 30 min (one try per channel per round, quota kept for uploads, up to 30 days). As soon as the owner verifies, all waiting thumbnails go up without clicks. Dashboard banner with "Verify phone" link. youtube.push_thumbnail used by the scheduler and the editor button. Test 2/2.
+- Foody: Studio shows Intermediate features "Eligible" (phone not verified on this channel yet).

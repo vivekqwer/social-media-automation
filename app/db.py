@@ -66,6 +66,7 @@ class Clip(Base):
     thumb_path = Column(String(500))
     thumb_custom = Column(Boolean, default=False)  # user uploaded their own image
     thumb_note = Column(Text)  # result of setting the thumbnail on YouTube
+    thumb_pending = Column(Boolean, default=False)  # YouTube refused it; retried automatically until it works
     credit_on = Column(Boolean, default=True)  # small 'Credit: channel' text on the video
     thumb_face = Column(Boolean, default=True)  # put my face (channel's or default) on the thumbnail
     yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...

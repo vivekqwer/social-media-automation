@@ -85,11 +85,7 @@ def process_queue():
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error = "uploaded", None
                 if c.thumb_path and Path(c.thumb_path).exists():
-                    try:
-                        youtube.set_thumbnail(c.destination_id, c.youtube_id, c.thumb_path)
-                        c.thumb_note = "Thumbnail set on YouTube"
-                    except Exception as te:  # noqa: BLE001  (video is up; only the thumbnail failed)
-                        c.thumb_note = youtube.thumb_error_text(te)
+                    youtube.push_thumbnail(c)  # a refusal is retried by retry_thumbnails()
             except (RefreshError, TokenError):
                 c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
                 s.commit()
@@ -109,12 +105,35 @@ def process_queue():
             s.commit()
 
 
+def retry_thumbnails():
+    """Thumbnails YouTube refused (e.g. phone not verified yet): try again, per channel, until they go through."""
+    with SessionLocal() as s:
+        since = utcnow() - timedelta(days=30)
+        rows = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.youtube_id.isnot(None),
+                                    Clip.status == "uploaded", Clip.attempted_at >= since).order_by(Clip.id).all()
+        tried = set()
+        for c in rows:
+            if not c.thumb_path or not Path(c.thumb_path).exists():
+                c.thumb_pending = False
+                continue
+            if c.destination_id in tried and c.thumb_pending:
+                continue
+            if quota.DAILY_UNITS - quota.used() < quota.UPLOAD_COST + quota.COST["thumbnail"]:
+                break  # keep the budget for uploads
+            ok = youtube.push_thumbnail(c)
+            if not ok:
+                tried.add(c.destination_id)  # one refusal per channel per round is enough
+        s.commit()
+
+
 def start():
     recover()
     sch = BackgroundScheduler(timezone="UTC")
     sch.add_job(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     hours = int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6")
     sch.add_job(lambda: executor.submit(autopilot_tick), "interval", hours=hours, max_instances=1, coalesce=True)
+    sch.add_job(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)
     every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")
     sch.add_job(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,

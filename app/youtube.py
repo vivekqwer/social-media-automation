@@ -270,6 +270,17 @@ def set_thumbnail(dest_id: int | None, video_id: str, path: str):
 def thumb_error_text(e) -> str:
     m = str(e)
     if "forbidden" in m.lower() or "permission" in m.lower() or "403" in m:
-        return ("YouTube did not allow a custom thumbnail. Verify the channel's phone number at "
-                "youtube.com/verify, then press 'Send thumbnail to YouTube'.")
-    return "Thumbnail upload failed: " + m[:200]
+        return ("Waiting: YouTube allows custom thumbnails only after the channel's phone number is verified "
+                "(youtube.com/verify). It is sent automatically as soon as that is done.")
+    return "Thumbnail not sent yet (retrying automatically): " + m[:200]
+
+
+def push_thumbnail(c) -> bool:
+    """Set the clip's thumbnail on YouTube. On failure the clip is marked pending and retried later."""
+    try:
+        set_thumbnail(c.destination_id, c.youtube_id, c.thumb_path)
+        c.thumb_note, c.thumb_pending = "Thumbnail set on YouTube", False
+        return True
+    except Exception as e:  # noqa: BLE001
+        c.thumb_note, c.thumb_pending = thumb_error_text(e), True
+        return False
