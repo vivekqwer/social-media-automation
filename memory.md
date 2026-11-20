@@ -84,4 +84,10 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 ## Automation set (2026-11-20)
 - Channel auto-pauses on removed/rejected/blocked alerts; user resumes from dashboard. Topic sources = CC-only search. Helper: install_autostart.bat (user runs once; assistant must not add startup entries itself). Quota: ~5 uploads/day across ALL channels (one Google project).
 
-- Foody custom thumbnails need phone verification (youtube.com/verify) — user task. Re-uploaded BBB = 1G3SLayg4t8 (2026-11-20).
+- Foody phone verified 2026-11-21: custom thumbnails work.
+
+## Review + hardening (2026-11-21)
+- New helper PCs need the 6-digit pairing code (shown in helper window / worker\helper.log) when pressing Approve.
+- Shorts: YouTube ignores API thumbnails in the Shorts feed; the system now shows the thumbnail in the first 0.7 s of each new Short so the auto cover is the thumbnail. Already-uploaded Shorts can't be changed (YouTube doesn't allow replacing a video) — pick the cover in the YouTube app instead.
+- Past publish times are refused; "Upload now" asks for confirmation (goes public at once).
+- Basic auth removed; logout ends all sessions; ADMIN_EMAIL alone controls password reset.
