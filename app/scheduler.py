@@ -71,15 +71,14 @@ def sweep_stale():
         for p in s.query(Project).filter(Project.analysis_pending.is_(True)).all():
             if (p.analysis_since or p.created_at) < now - timedelta(hours=6):
                 p.analysis_pending = False  # continue without the helper's analysis
-                q = dict(p.quick or {})
-                q["helper_analysed"] = True
-                p.quick = q
+                if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
+                    p.quick = {**p.quick, "helper_analysed": True}
                 resume.append(p.id)
         s.commit()
     if resume:
-        from .quick import quick_run
+        from .autopilot import resume_after_analysis
         for pid in resume:
-            executor.submit(quick_run, pid)
+            executor.submit(resume_after_analysis, pid)
 
 
 def cleanup_disk():

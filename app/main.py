@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
 from . import auth, quota, scheduler, workers, youtube
-from .autopilot import _next_slot, run_channel
+from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
@@ -1102,10 +1102,9 @@ def worker_jobs(request: Request):
                 continue
             if (p.analysis_tries or 0) >= MAX_JOB_TRIES:
                 p.analysis_pending = False  # carry on without the helper's data
-                q = dict(p.quick or {})
-                q["helper_analysed"] = True
-                p.quick = q
-                executor.submit(quick_run, p.id)
+                if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
+                    p.quick = {**p.quick, "helper_analysed": True}
+                executor.submit(resume_after_analysis, p.id)
                 continue
             p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
             jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
@@ -1175,11 +1174,10 @@ def worker_fail(cid: int, body: WorkerFailIn, request: Request):
         with SessionLocal() as s:
             p = _get(s, Project, cid)
             p.analysis_pending = False
-            q = dict(p.quick or {})
-            q["helper_analysed"] = True
-            p.quick = q
+            if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
+                p.quick = {**p.quick, "helper_analysed": True}
             s.commit()
-        executor.submit(quick_run, cid)
+        executor.submit(resume_after_analysis, cid)
         return {"ok": True}
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
@@ -1235,22 +1233,23 @@ def worker_analysis(pid: int, body: AnalysisIn, request: Request):
         p = _get(s, Project, pid)
         if not p.analysis_pending:
             raise HTTPException(409, "No analysis is waiting for this video")
-        fmt = (p.quick or {}).get("format", "shorts")
-        want = min({"shorts": 35, "video": 60}[fmt], p.duration or 35)
+        ch = s.get(Channel, p.channel_ref) if p.channel_ref and not p.quick else None
+        if ch:  # autopilot source: its own clip length and clips per video
+            want, n = min(ch.clip_len, p.duration or ch.clip_len), ch.clips_per_video
+        else:
+            fmt = (p.quick or {}).get("format", "shorts")
+            want, n = min({"shorts": 35, "video": 60}.get(fmt, 35), p.duration or 35), 3
         if body.heatmap:
             p.heatmap = body.heatmap
         secs = parse_timestamps([str(t)[:2000] for t in body.comments], p.duration)
-        p.moments = rank_moments(p.duration, p.heatmap or [], secs, want, 3)
+        p.moments = rank_moments(p.duration, p.heatmap or [], secs, want, n)
         if body.caption_track:
             p.caption_track = body.caption_track
         p.analysis_pending = False
-        q = dict(p.quick or {})
-        q["helper_analysed"] = True
-        p.quick = q
+        if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
+            p.quick = {**p.quick, "helper_analysed": True}
         s.commit()
-        is_quick = bool(p.quick)
-    if is_quick:
-        executor.submit(quick_run, pid)
+    executor.submit(resume_after_analysis, pid)
     return {"ok": True, "moments": len(p.moments or [])}
 
 

@@ -8,7 +8,8 @@ from sqlalchemy import func
 
 from .db import Channel, Clip, Destination, Project, SessionLocal, utcnow
 from . import quota, youtube
-from .captions import fetch_cues
+from . import workers
+from .captions import fetch_cues, parse_json3
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
@@ -120,18 +121,56 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
     p.moments = rank_moments(p.duration, p.heatmap, secs, ch.clip_len, ch.clips_per_video)
     s.add(p)
     s.commit()
+    if not p.moments and workers.any_recent():
+        # the server can't see "most replayed" / comments (YouTube blocks it): the helper PC reads them
+        p.analysis_pending, p.analysis_since, p.analysis_tries = True, utcnow(), 0
+        s.commit()
+        log.append(f"{vid}: helper PC is finding the best moment")
+        return True
+    _make_clips(s, ch, p, log)
+    return True
+
+
+def _fallback_moments(p: Project, length: int, n: int) -> list:
+    """No replay/comment signal at all: evenly spread slices from the middle part of the video."""
+    dur = float(p.duration or 0)
+    if dur <= length:
+        return [{"start": 0.0, "end": dur or float(length)}] if dur > 5 else []
+    marks = [0.3, 0.5, 0.7, 0.4, 0.6][:max(1, n)]
+    return [{"start": round(dur * f, 1), "end": round(min(dur, dur * f + length), 1)} for f in marks]
+
+
+def make_clips_for_project(pid: int):
+    """Continue an autopilot video after the helper PC's analysis (or after giving up on it)."""
+    with SessionLocal() as s:
+        p = s.get(Project, pid)
+        ch = s.get(Channel, p.channel_ref) if p and p.channel_ref else None
+        if not ch or s.query(Clip).filter(Clip.project_id == pid).count():
+            return
+        log = []
+        _make_clips(s, ch, p, log)
+        ch.last_status = ((ch.last_status or "") + "; " + "; ".join(log))[-1000:]
+        s.commit()
+
+
+def _make_clips(s, ch: Channel, p: Project, log: list):
+    moments = p.moments or _fallback_moments(p, ch.clip_len, ch.clips_per_video)
+    if not moments:
+        log.append(f"skip {p.video_id}: video too short")
+        return
     if not p.moments:
-        log.append(f"skip {vid}: no hot moments found")
-        return False
-    for m in p.moments:
+        log.append(f"{p.video_id}: no replay data, using the middle of the video")
+    for m in moments[:ch.clips_per_video]:
         c = Clip(project_id=p.id, start=m["start"], end=m["end"], aspect=ch.aspect, effects=["fade"],
                  destination_id=ch.destination_id)
         s.add(c)
         s.commit()
         if ch.captions:
             try:
-                c.captions = fetch_cues(p.video_id, c.start, c.end)
-                c.caption_style = {"on": True, "lang": "auto", "pos": "bottom", "size": "M", "color": "#ffffff"}
+                c.captions = parse_json3(p.caption_track, c.start, c.end) if p.caption_track else \
+                    fetch_cues(p.video_id, c.start, c.end)
+                if c.captions:
+                    c.caption_style = {"on": True, "lang": "auto", "pos": "bottom", "size": "M", "color": "#ffffff"}
                 s.commit()
             except Exception as e:  # noqa: BLE001
                 log.append(f"clip {c.id}: no captions ({str(e)[:70]})")
@@ -157,7 +196,6 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
         c.publish_at, c.status, c.autoqueue = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0), "queued", True
         s.commit()
         log.append(f"queued clip {c.id} for {c.publish_at}")
-    return True
 
 
 def run_channel(channel_id: int):
@@ -225,3 +263,16 @@ def autopilot_tick():
             run_channel(i)
         except Exception:  # noqa: BLE001
             continue
+
+
+def resume_after_analysis(pid: int):
+    """The helper PC finished (or gave up) reading a video: continue the Quick upload or the autopilot source."""
+    with SessionLocal() as s:
+        p = s.get(Project, pid)
+        quick = bool(p and p.quick)
+    if quick:
+        from .quick import quick_run
+
+        quick_run(pid)
+    else:
+        make_clips_for_project(pid)

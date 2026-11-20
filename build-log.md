@@ -138,3 +138,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Tests: review 24/24, automation 11/12 (known mock artifact), re-upload 6/6, save 2/2, thumbnail retry 2/2; UI checked locally (no console errors).
 - 2026-11-21: Foody phone verified; thumbnails for 1G3SLayg4t8 and OgGQXVL-xAE set on YouTube (confirmed via i.ytimg.com).
 - 2026-11-21: Thumbnail moved to its own editor tab (opens first for uploaded clips); clip cards show my thumbnail. Bug fixed: editor tabs were squeezed to a 6px line (flex-shrink) so the owner never saw Text/Voice/Captions/Details tabs.
+
+## 2026-11-21 — Task 23: Autopilot works when the server is blocked
+- Topic/channel sources: when the server sees no replay/comment data (YouTube blocks it), the helper PC analyses the video (same as Quick upload) and clips are made afterwards (make_clips_for_project); without a helper, slices from the middle of the video are used instead of skipping. Captions from the helper caption track. Fixed: analysis results no longer turned autopilot videos into "quick" projects; analysis uses the source clip length. Test 5/5.
