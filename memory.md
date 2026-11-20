@@ -91,3 +91,5 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Shorts: YouTube ignores API thumbnails in the Shorts feed; the system now shows the thumbnail in the first 0.7 s of each new Short so the auto cover is the thumbnail. Already-uploaded Shorts can't be changed (YouTube doesn't allow replacing a video) — pick the cover in the YouTube app instead.
 - Past publish times are refused; "Upload now" asks for confirmation (goes public at once).
 - Basic auth removed; logout ends all sessions; ADMIN_EMAIL alone controls password reset.
+
+- Autopilot topic source #1 "street food india" -> Foody, review first ON, posts 10:00/18:00 IST (added 2026-11-21).
