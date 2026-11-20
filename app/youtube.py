@@ -8,6 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 from .config import BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_LOCAL
+from .crypto import decrypt, encrypt
 from .db import Destination, SessionLocal, get_setting, set_setting
 
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
@@ -60,7 +61,7 @@ def handle_callback(code: str, state: str) -> int:
     cid, name = items[0]["id"], items[0]["snippet"]["title"]
     with SessionLocal() as s:
         d = s.query(Destination).filter(Destination.channel_id == cid).first() or Destination(channel_id=cid)
-        d.name, d.token = name, creds.to_json()
+        d.name, d.token = name, encrypt(creds.to_json())
         s.add(d)
         s.commit()
         return d.id
@@ -80,10 +81,10 @@ def client(dest_id: int | None = None):
         d = s.get(Destination, dest_id)
         if not d:
             raise RuntimeError(f"Destination {dest_id} not found")
-        creds = Credentials.from_authorized_user_info(json.loads(d.token), SCOPES)
+        creds = Credentials.from_authorized_user_info(json.loads(decrypt(d.token)), SCOPES)
         if not creds.valid and creds.refresh_token:
             creds.refresh(Request())
-            d.token = creds.to_json()
+            d.token = encrypt(creds.to_json())
             s.commit()
     return build("youtube", "v3", credentials=creds, cache_discovery=False)
 

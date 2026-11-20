@@ -9,6 +9,7 @@ from sqlalchemy import update
 from . import youtube
 from .autopilot import autopilot_tick
 from .config import MAX_UPLOADS_PER_DAY, UPLOAD_LEAD_HOURS
+from .crypto import TokenError
 from .db import Clip, Destination, Project, SessionLocal, utcnow
 from .jobs import executor
 from .policy import check_edit
@@ -72,8 +73,8 @@ def process_queue():
                 publish_at = c.publish_at if c.publish_at and c.publish_at > now + timedelta(minutes=15) else None
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error = "uploaded", None
-            except RefreshError:
-                c.status, c.error = "queued", "Reconnect your YouTube channel (token expired or revoked)."
+            except (RefreshError, TokenError):
+                c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
                 s.commit()
                 break
             except Exception as e:  # noqa: BLE001

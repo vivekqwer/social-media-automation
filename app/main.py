@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from . import scheduler, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
+from .crypto import encrypt_existing
 from .config import APP_PASSWORD, APP_USER, DATA_DIR, IS_LOCAL
 from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, parse_timestamps, rank_moments
@@ -49,6 +50,7 @@ def _check_yt_url(url: str):
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     migrate()
+    encrypt_existing()
     sch = scheduler.start()
     yield
     sch.shutdown(wait=False)

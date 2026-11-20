@@ -47,3 +47,7 @@
 - Added public pages /privacy, /terms, /about (exempt from dashboard auth; needed for OAuth Branding/publish and the audit). Placeholders to fill: owner name + contact email.
 - Wrote docs/youtube-api-audit-draft.md (local only, gitignored): form answers, scopes/quota text, screencast outline, caveats (yt-dlp downloading disclosure, reused-content risk, tokens stored unencrypted).
 - Verified: public pages 200 without auth, dashboard/API still 401.
+
+## 2026-11-20 — Task 9: OAuth token encryption at rest
+- app/crypto.py (Fernet): tokens stored as enc:v1:...; key from env TOKEN_ENCRYPTION_KEY or auto-created file DATA_DIR/.token_key (the /data volume). Existing plaintext rows are upgraded on startup; unreadable token => channel must reconnect (queued clips stay queued).
+- Verified: roundtrip, no plaintext in DB, legacy upgrade, wrong-key error, API never exposes tokens.
