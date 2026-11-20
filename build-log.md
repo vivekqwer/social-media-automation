@@ -26,3 +26,12 @@
 - Created Railway project from GitHub repo, added Postgres, attached volume /data to app, generated public domain, set DATABASE_URL (reference) + BASE_URL, redeployed.
 - Verified: Docker build ok, /healthz 200, unauthenticated root 503 (needs APP_PASSWORD).
 - Pending (user): APP_PASSWORD, Google OAuth client id/secret, connect YouTube channel, first live autopilot test.
+
+## 2026-11-20 — Task 5: Google OAuth setup (funny account)
+- Created Cloud project, enabled YouTube API, configured consent (External/Testing), test user, OAuth web client + redirect URI. Staged GOOGLE_CLIENT_ID in Railway.
+- Pending (user): paste client secret + APP_PASSWORD in Railway, Deploy, click Connect YouTube as funnygunction@gmail.com. Consider Branding page + Publish to avoid 7-day token expiry.
+
+## 2026-11-20 — Task 6: Review-first workflow + modern UI
+- Backend: Channel.review_first, Clip.autoqueue, auto-migration (ALTER TABLE for new model columns), /api/overview, /api/clips (list with source info), /api/clips/{id}/approve, DELETE /api/clips/{id}, /api/channels/{id}/review. Edited queued clips re-render and re-join the queue (autoqueue) automatically.
+- UI rewrite (static/index.html): sidebar app, dashboard (add-source hero, KPIs, review/up-next/recent/attention), Clips grid with tabs, Sources with Auto-upload switch, My channels, slide-over editor (preview, trim, effects, overlays, voice, metadata/keywords, approve/queue/upload-now/discard), new-clip modal with hot moments.
+- Verified: migration on old schema, endpoints via TestClient, UI renders with seeded data, no console errors, no horizontal overflow.

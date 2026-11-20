@@ -1,5 +1,6 @@
 import base64
 import secrets
+import shutil
 from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from datetime import timezone
@@ -15,14 +16,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import scheduler, youtube
-from .autopilot import run_channel
+from .autopilot import _next_slot, run_channel
 from .config import APP_PASSWORD, APP_USER, DATA_DIR, IS_LOCAL
-from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, to_dict, utcnow
+from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, parse_timestamps, rank_moments
 from .ingest import fetch_info, is_cc
 from .jobs import executor
 from .keywords import suggest
 from .metadata import auto_metadata
+from .metadata import build as build_meta
 from .policy import check_edit
 from .render import run_render
 from .tts import VOICES, synth
@@ -42,6 +44,7 @@ def _check_yt_url(url: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    migrate()
     sch = scheduler.start()
     yield
     sch.shutdown(wait=False)
@@ -150,6 +153,11 @@ class ChannelIn(BaseModel):
     aspect: Literal["16:9", "9:16", "1:1"] = "9:16"
     gap_hours: int = Field(12, ge=1, le=720)
     destination_id: int | None = None
+    review_first: bool = False
+
+
+class ApproveIn(BaseModel):
+    publish_at: str | None = None
 
 
 def _get(s, model, id_):
@@ -221,7 +229,8 @@ def create_clip(pid: int, body: ClipIn):
 @app.get("/api/clips/{cid}")
 def get_clip(cid: int):
     with SessionLocal() as s:
-        return to_dict(_get(s, Clip, cid))
+        c = _get(s, Clip, cid)
+        return _clip_card(c, {c.project_id: s.get(Project, c.project_id)}, full=True)
 
 
 @app.put("/api/clips/{cid}")
@@ -360,7 +369,7 @@ def schedule(cid: int, body: ScheduleIn):
                 raise HTTPException(400, "publish_at must be a valid ISO datetime")
         else:
             c.publish_at = None
-        c.status, c.error = "queued", None
+        c.status, c.error, c.autoqueue = "queued", None, True
         s.commit()
         return to_dict(c)
 
@@ -370,7 +379,7 @@ def unschedule(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         if c.status == "queued":
-            c.status = "rendered"
+            c.status, c.autoqueue = "rendered", False
             s.commit()
         return to_dict(c)
 
@@ -380,6 +389,105 @@ def queue():
     with SessionLocal() as s:
         rows = s.query(Clip).filter(Clip.status.in_(["queued", "uploading", "uploaded", "failed"])).order_by(Clip.id.desc()).limit(50)
         return [to_dict(c) for c in rows]
+
+
+def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
+    p = projects.get(c.project_id)
+    d = to_dict(c)
+    if not full:
+        d.pop("description", None)
+    d["video_id"] = p.video_id if p else None
+    d["source_title"] = p.title if p else None
+    d["source_channel"] = p.channel if p else None
+    d["source_channel_url"] = p.channel_url if p else None
+    d["mode"] = p.mode if p else None
+    d["license"] = p.license if p else None
+    d["duration"] = p.duration if p else None
+    return d
+
+
+def _cards(s, rows) -> list[dict]:
+    ids = {c.project_id for c in rows}
+    projects = {p.id: p for p in s.query(Project).filter(Project.id.in_(ids)).all()} if ids else {}
+    return [_clip_card(c, projects) for c in rows]
+
+
+@app.get("/api/clips")
+def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
+    with SessionLocal() as s:
+        q = s.query(Clip)
+        if status:
+            q = q.filter(Clip.status.in_(status.split(",")))
+        return _cards(s, q.order_by(Clip.id.desc()).limit(limit).all())
+
+
+@app.get("/api/overview")
+def overview():
+    with SessionLocal() as s:
+        statuses = ("draft", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
+        counts = {k: s.query(Clip).filter(Clip.status == k).count() for k in statuses}
+        upcoming = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(8).all()
+        recent = s.query(Clip).filter(Clip.status == "uploaded").order_by(Clip.id.desc()).limit(6).all()
+        failed = s.query(Clip).filter(Clip.status == "failed").order_by(Clip.id.desc()).limit(5).all()
+        review = s.query(Clip).filter(Clip.status == "rendered").order_by(Clip.id.desc()).limit(6).all()
+        return {
+            "counts": counts,
+            "sources": s.query(Channel).count(),
+            "videos_analyzed": s.query(Project).count(),
+            "destinations": [to_dict(d) for d in s.query(Destination).order_by(Destination.id)],
+            "upcoming": _cards(s, upcoming),
+            "recent": _cards(s, recent),
+            "failed": _cards(s, failed),
+            "review": _cards(s, review),
+            "youtube_configured": youtube.configured(),
+        }
+
+
+@app.post("/api/clips/{cid}/approve")
+def approve_clip(cid: int, body: ApproveIn):
+    """Review-first flow: queue a rendered clip for upload (next free slot unless a time is given)."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = _get(s, Project, c.project_id)
+        if c.status not in ("rendered", "queued", "failed"):
+            raise HTTPException(409, f"Clip is '{c.status}'; render it first.")
+        errs = check_edit(p, c)
+        if errs:
+            raise HTTPException(400, " ".join(errs))
+        if not c.output_path or not Path(c.output_path).exists():
+            raise HTTPException(400, "Render the clip first")
+        if not c.title or not c.description:
+            meta = build_meta(p, c, [])
+            c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]
+        if not c.destination_id:
+            first = s.query(Destination).order_by(Destination.id).first()
+            if not first:
+                raise HTTPException(400, "Connect your YouTube channel first.")
+            c.destination_id = first.id
+        if body.publish_at:
+            try:
+                dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
+                c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+            except (ValueError, OverflowError):
+                raise HTTPException(400, "publish_at must be a valid ISO datetime")
+        else:
+            ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
+            c.publish_at = _next_slot(s, ch.gap_hours if ch else 12, c.destination_id)
+        c.autoqueue, c.status, c.error = True, "queued", None
+        s.commit()
+        return to_dict(c)
+
+
+@app.delete("/api/clips/{cid}")
+def discard_clip(cid: int):
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status in ("uploading", "uploaded"):
+            raise HTTPException(409, "Already uploaded; delete it on YouTube instead.")
+        shutil.rmtree(DATA_DIR / "clips" / str(cid), ignore_errors=True)
+        s.delete(c)
+        s.commit()
+        return {"deleted": True}
 
 
 # ---------- autopilot channels ----------
@@ -427,6 +535,20 @@ def toggle_channel(chid: int):
     with SessionLocal() as s:
         ch = _get(s, Channel, chid)
         ch.auto = not ch.auto
+        s.commit()
+        return to_dict(ch)
+
+
+class ReviewIn(BaseModel):
+    review_first: bool
+
+
+@app.post("/api/channels/{chid}/review")
+def set_review(chid: int, body: ReviewIn):
+    """Switch a source between 'auto upload' and 'review first'."""
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        ch.review_first = body.review_first
         s.commit()
         return to_dict(ch)
 

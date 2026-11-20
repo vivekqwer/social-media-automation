@@ -123,7 +123,7 @@ def run_render(clip_id: int):
         s.commit()
         try:
             clip.output_path = str(render_clip(project, clip))
-            clip.status = "rendered"
+            clip.status = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
         except Exception as e:  # noqa: BLE001
             clip.status, clip.error = "failed", str(e)[-800:]
         s.commit()

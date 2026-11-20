@@ -55,6 +55,7 @@ class Clip(Base):
     publish_at = Column(DateTime)  # UTC, naive
     destination_id = Column(Integer)
     attempted_at = Column(DateTime)  # last upload attempt (quota accounting)
+    autoqueue = Column(Boolean, default=False)  # re-queue automatically after a re-render
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -80,6 +81,7 @@ class Channel(Base):
     aspect = Column(String(8), default="9:16")
     gap_hours = Column(Integer, default=12)  # spacing between scheduled uploads
     destination_id = Column(Integer)  # which of my channels receives the uploads
+    review_first = Column(Boolean, default=False)  # True: clips wait for my approval instead of auto-queueing
     seen = Column(JSON, default=list)
     last_run = Column(DateTime)
     last_status = Column(Text)
@@ -123,3 +125,19 @@ def set_setting(key: str, value: str):
     with SessionLocal() as s:
         s.merge(Setting(key=key, value=value))
         s.commit()
+
+
+def migrate():
+    """Tiny auto-migration: add columns that exist in the models but not in the database yet."""
+    from sqlalchemy import inspect, text
+
+    insp = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not insp.has_table(table.name):
+            continue
+        existing = {c["name"] for c in insp.get_columns(table.name)}
+        for col in table.columns:
+            if col.name not in existing:
+                ddl = col.type.compile(engine.dialect)
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}"))

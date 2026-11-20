@@ -84,7 +84,10 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
             continue
         auto_metadata(c.id)
         s.refresh(c)
-        c.publish_at, c.status = _next_slot(s, ch.gap_hours, ch.destination_id), "queued"
+        if ch.review_first:
+            log.append(f"clip {c.id} ready for review")
+            continue
+        c.publish_at, c.status, c.autoqueue = _next_slot(s, ch.gap_hours, ch.destination_id), "queued", True
         s.commit()
         log.append(f"queued clip {c.id} for {c.publish_at}")
     return True

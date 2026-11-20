@@ -31,11 +31,23 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 ## Browser
 - claude-in-chrome: user's GitHub (vivekqwer, admin) + Railway login are in the Chrome extension named "Browser 4" (deviceId 411776ae-6568-44cf-b4ad-06636a82af53, onThisComputer). Use select_browser with it; never act (create/deploy/enter secrets) without user ask. Credentials/secrets (APP_PASSWORD, Google client secret) must be typed by the user.
 
+- Upload-target YouTube account = user's own "funny" account: funnygunction@gmail.com, channel "Foody", logged in the Chrome extension named "Browser 1" (deviceId 7abd1242-b83a-4844-8447-95466ade7d22, Windows, this computer). Railway/GitHub live in the other browser (411776ae). Device names/IDs change on reconnect: re-run list_connected_browsers.
+- RULE: assistant must not type passwords/API keys/secrets into any field even if the user asks (APP_PASSWORD, GOOGLE_CLIENT_SECRET). Prepare everything else; user pastes.
+- Lesson: Railway auto-adds "suggested variables" from .env.example on deploy (APP_PASSWORD=change-me went live!). Keep placeholders non-functional in .env.example.
+
 ## Railway (deployed 2026-11-20)
 - Project `responsible-charisma` (id 7db63f26-8956-4fb5-a98b-3654cd65d070), env production. Services: app (GitHub repo, Dockerfile build, auto-deploy on push) + Postgres (volume) + app volume at /data.
 - URL: https://social-media-automation-production-f5543fa3.up.railway.app (BASE_URL set; DATABASE_URL = ${{Postgres.DATABASE_URL}}).
-- /healthz = 200. Root returns 503 until APP_PASSWORD is set (fail-closed, intended).
+- /healthz = 200. APP_PASSWORD currently deleted on purpose: app returns 503 (fail-closed) until the user sets a real one. (Was briefly admin/change-me; removed + redeployed, verified 503.)
 - Still needed from user: APP_PASSWORD, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google OAuth redirect: BASE_URL/auth/callback; consent screen In production).
+
+## Product workflow (user's wish, 2026-11-20)
+- User gives channel link(s) -> system cuts clips automatically -> uploads to user's own account (Foody). Per-source switch: Auto upload (default) or Review first. If user edits a clip, only that clip re-renders and returns to the queue (autoqueue). New features wanted next: captions, title templates, notifications (ideas listed in chat).
 
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
+
+## Google Cloud (2026-11-20)
+- Project `clip-studio` (id striped-temple-515313-d3) under funnygunction@gmail.com (Funnyvideo). YouTube Data API v3 enabled. Consent screen: External, Testing mode, test user funnygunction@gmail.com (refresh tokens expire after 7 days in Testing; "Publish app" disabled until Branding page is completed).
+- OAuth Web client "Web client 1": ID 178933708936-13mvap558vf95eccjh9a4pmpgkeq7l3i.apps.googleusercontent.com (public id). Redirect URI = Railway URL + /auth/callback. Secret hidden by Google after creation; new secret was copied to clipboard for the user to paste into Railway GOOGLE_CLIENT_SECRET (assistant never types secrets).
+- Railway: GOOGLE_CLIENT_ID staged by assistant; GOOGLE_CLIENT_SECRET + APP_PASSWORD to be added by user; then Deploy.
