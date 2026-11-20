@@ -31,5 +31,11 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 ## Browser
 - claude-in-chrome: user's GitHub (vivekqwer, admin) + Railway login are in the Chrome extension named "Browser 4" (deviceId 411776ae-6568-44cf-b4ad-06636a82af53, onThisComputer). Use select_browser with it; never act (create/deploy/enter secrets) without user ask. Credentials/secrets (APP_PASSWORD, Google client secret) must be typed by the user.
 
+## Railway (deployed 2026-11-20)
+- Project `responsible-charisma` (id 7db63f26-8956-4fb5-a98b-3654cd65d070), env production. Services: app (GitHub repo, Dockerfile build, auto-deploy on push) + Postgres (volume) + app volume at /data.
+- URL: https://social-media-automation-production-f5543fa3.up.railway.app (BASE_URL set; DATABASE_URL = ${{Postgres.DATABASE_URL}}).
+- /healthz = 200. Root returns 503 until APP_PASSWORD is set (fail-closed, intended).
+- Still needed from user: APP_PASSWORD, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET (Google OAuth redirect: BASE_URL/auth/callback; consent screen In production).
+
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.

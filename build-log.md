@@ -21,3 +21,8 @@
 - Open: Google OAuth must be "In production" (Testing tokens expire in 7 days); bot-check cookies/proxy on Railway; Chrome access for Railway setup not granted yet.
 - UI/edge-case review fixes: update_clip resets to draft only on real change (schedule no longer 409 after save), pydantic validation (bounds, Literals, Overlay model, NaN-safe 422 handler), analyze clip_len bounds, overflow-safe publish_at, destination delete blocked while clips queued, UI: saveClip errors propagate, poll bound to clip id, double-submit lock, editor reset on new project, NaN time guard.
 - Verified via TestClient: 17 edge cases (see Task 3). Browser pane note: Chrome device "Browser 4" (this computer) holds vivekqwer admin session; Railway/Google Cloud/GitHub tabs opened there (no actions taken).
+
+## 2026-11-20 — Task 4: Railway deploy
+- Created Railway project from GitHub repo, added Postgres, attached volume /data to app, generated public domain, set DATABASE_URL (reference) + BASE_URL, redeployed.
+- Verified: Docker build ok, /healthz 200, unauthenticated root 503 (needs APP_PASSWORD).
+- Pending (user): APP_PASSWORD, Google OAuth client id/secret, connect YouTube channel, first live autopilot test.
