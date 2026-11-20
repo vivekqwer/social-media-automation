@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Clip Studio</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--line:#2a2f3a;--tx:#e8eaf0;--mut:#8b93a5;--ac:#5b8cff;--ok:#3ecf8e;--bad:#ff5b6e}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif}
+header{display:flex;gap:12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+header h1{font-size:16px;margin:0;flex:1}
+nav button{background:none;border:0;color:var(--mut);padding:6px 10px;cursor:pointer;font:inherit}
+nav button.on{color:var(--tx);border-bottom:2px solid var(--ac)}
+main{max-width:1100px;margin:0 auto;padding:16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:14px}
+h2{font-size:14px;margin:0 0 10px}
+input,select,textarea,button{font:inherit;color:var(--tx);background:#0d0f14;border:1px solid var(--line);border-radius:6px;padding:6px 8px}
+textarea{width:100%;min-height:60px}input[type=text],input:not([type]),input[type=url]{width:100%}
+button{cursor:pointer;background:var(--ac);border:0;color:#fff;padding:7px 12px}button.sec{background:#2a2f3a}button.bad{background:var(--bad)}
+button:disabled{opacity:.5;cursor:wait}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px}.row>*{flex:0 1 auto}.grow{flex:1 1 200px!important}
+.mut{color:var(--mut)}.ok{color:var(--ok)}.bad-t{color:var(--bad)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:800px){.grid{grid-template-columns:1fr}}
+.pill{display:inline-block;padding:1px 8px;border-radius:99px;background:#2a2f3a;font-size:12px}
+.mom{display:flex;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)}
+iframe,video{width:100%;aspect-ratio:16/9;border:0;border-radius:6px;background:#000}
+video.v{aspect-ratio:auto;max-height:420px}
+.chips span{display:inline-block;background:#2a2f3a;border-radius:99px;padding:2px 9px;margin:2px;cursor:pointer;font-size:12px}
+.ov{border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:8px}
+.hide{display:none}table{width:100%;border-collapse:collapse}td,th{padding:5px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+</style>
+</head>
+<body>
+<header>
+  <h1>Clip Studio</h1>
+  <nav><button id="t-auto" class="on" onclick="tab('auto')">Autopilot</button><button id="t-manual" onclick="tab('manual')">Manual editor</button><button id="t-queue" onclick="tab('queue')">Queue</button></nav>
+  <span id="yt" class="mut">YouTube: …</span>
+</header>
+<main>
+
+<!-- AUTOPILOT -->
+<section id="auto">
+  <div class="card"><h2>Dashboard</h2><div id="stats" class="row mut">…</div></div>
+  <div class="card">
+    <h2>My channels (uploads go here)</h2>
+    <div id="dests" class="mut" style="margin-bottom:8px">…</div>
+    <div class="row"><a href="/auth/login"><button type="button">+ Connect my YouTube channel</button></a>
+      <span class="mut">Sign in with the Google account that owns the channel. Repeat to add more channels.</span></div>
+  </div>
+  <div class="card">
+    <h2>Add source channel (take videos from) — name, @handle or URL; system does the rest</h2>
+    <div class="row"><textarea id="ch-q" class="grow" style="min-height:70px" placeholder="One source channel per line (name, @handle or URL)&#10;Blender&#10;@somechannel&#10;https://youtube.com/@..."></textarea></div>
+    <div class="row">
+      <select id="ch-dest" title="Upload to my channel"></select>
+      <select id="ch-mode"><option value="cc">CC videos only</option><option value="permission">I have creator permission</option></select>
+      <input id="ch-note" class="grow" placeholder="Permission proof/note (required for permission mode)">
+    </div>
+    <div class="row">
+      <label>Videos/run <input id="ch-v" type="number" value="3" min="1" max="10" style="width:60px"></label>
+      <label>Clips/video <input id="ch-c" type="number" value="2" min="1" max="5" style="width:60px"></label>
+      <label>Clip sec <input id="ch-l" type="number" value="30" min="10" max="90" style="width:60px"></label>
+      <label>Gap hrs <input id="ch-g" type="number" value="12" min="1" style="width:60px"></label>
+      <select id="ch-a"><option value="9:16">9:16 Shorts</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select>
+      <button onclick="addChannel()">Add channel</button>
+    </div>
+    <div class="mut">Autopilot: finds latest videos → hot moments → clips → renders → credit + tags + keywords → schedules uploads. Runs every few hours and on “Run now”.</div>
+  </div>
+  <div class="card"><h2>Channels</h2><div id="channels" class="mut">…</div></div>
+</section>
+
+<!-- MANUAL -->
+<section id="manual" class="hide">
+  <div class="card">
+    <h2>1. Video link</h2>
+    <div class="row"><input id="p-url" class="grow" placeholder="https://www.youtube.com/watch?v=..."></div>
+    <div class="row">
+      <select id="p-mode"><option value="cc">CC video</option><option value="permission">Creator permission</option><option value="commentary">Commentary / transformative</option></select>
+      <input id="p-note" class="grow" placeholder="Permission note (permission mode)">
+      <button onclick="addProject()">Load</button>
+    </div>
+  </div>
+  <div id="proj" class="hide">
+    <div class="grid">
+      <div class="card"><h2 id="p-title"></h2><div id="p-meta" class="mut"></div><iframe id="player" allowfullscreen></iframe></div>
+      <div class="card"><h2>Hot moments <button class="sec" onclick="analyze()" id="an-btn">Re-analyze</button></h2><div id="moments" class="mut">…</div>
+        <div class="row" style="margin-top:10px"><input id="m-s" type="number" placeholder="start s" style="width:90px"><input id="m-e" type="number" placeholder="end s" style="width:90px"><button class="sec" onclick="manualClip()">Make clip from range</button></div>
+        <div id="p-clips"></div>
+      </div>
+    </div>
+  </div>
+  <div id="editor" class="hide">
+    <div class="card">
+      <h2>2. Edit clip <span id="c-id" class="pill"></span> <span id="c-status" class="pill"></span></h2>
+      <div class="row">
+        <label>Start <input id="c-s" type="number" step="0.1" style="width:80px"></label>
+        <label>End <input id="c-e" type="number" step="0.1" style="width:80px"></label>
+        <select id="c-asp"><option>16:9</option><option>9:16</option><option>1:1</option></select>
+        <label><input type="checkbox" class="fx" value="fade"> fade</label>
+        <label><input type="checkbox" class="fx" value="punch_in"> punch-in</label>
+        <label><input type="checkbox" class="fx" value="shake"> shake</label>
+        <label><input type="checkbox" class="fx" value="bw"> B&amp;W</label>
+        <label>Orig volume <input id="c-vol" type="number" step="0.1" min="0" max="3" value="1" style="width:60px"></label>
+      </div>
+      <h2>Text overlays <button class="sec" onclick="addOv()">+ text</button></h2>
+      <div id="ovs"></div>
+      <h2>Voice-over</h2>
+      <div class="row"><select id="v-voice"></select><label>Offset s <input id="v-off" type="number" step="0.1" value="0" style="width:70px"></label><button class="sec" onclick="makeTts()">Generate voice</button>
+        <input type="file" id="v-file" accept="audio/*" onchange="uploadVoice()"></div>
+      <textarea id="v-text" placeholder="Voice-over script (Hindi/English)"></textarea>
+      <div id="v-state" class="mut"></div>
+      <div class="row" style="margin-top:10px"><button onclick="saveClip()" class="sec">Save</button><button onclick="renderClip()" id="r-btn">Save &amp; Render</button><span id="c-err" class="bad-t"></span></div>
+      <video id="vid" class="v hide" controls></video>
+    </div>
+    <div class="card">
+      <h2>3. Title, description, tags</h2>
+      <div class="row"><input id="k-q" class="grow" placeholder="Keyword research seed"><button class="sec" onclick="kw()">Find keywords</button><button class="sec" onclick="genMeta()">Auto-fill metadata</button></div>
+      <div id="k-chips" class="chips"></div>
+      <input id="m-title" placeholder="Title" style="margin:6px 0">
+      <textarea id="m-desc" style="min-height:140px" placeholder="Description (credit is auto-added)"></textarea>
+      <input id="m-tags" placeholder="tags, comma separated" style="margin-top:6px">
+    </div>
+    <div class="card">
+      <h2>4. Schedule upload</h2>
+      <div class="row"><select id="s-dest"></select><input id="s-when" type="datetime-local"><button onclick="schedule(true)">Schedule</button><button class="sec" onclick="schedule(false)">Upload now</button></div>
+      <div class="mut">Uploads need a connected channel (dashboard). Scheduled clips are uploaded early as private and go public at the chosen time.</div>
+    </div>
+  </div>
+</section>
+
+<!-- QUEUE -->
+<section id="queue" class="hide"><div class="card"><h2>Upload queue</h2><div id="q">…</div></div></section>
+</main>
+
+<script>
+const $=id=>document.getElementById(id);
+let P=null,C=null,poll=null;
+async function api(path,method='GET',body){
+  const o={method,headers:{}};
+  if(body instanceof FormData){o.body=body}else if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+  const r=await fetch(path,o);
+  if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(typeof m==='string'?m:JSON.stringify(m))}
+  return r.json();
+}
+const T=s=>{s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const fail=e=>alert(e.message||e);
+function tab(n){for(const k of['auto','manual','queue']){$(k).classList.toggle('hide',k!==n);$('t-'+k).classList.toggle('on',k===n)}
+  if(n==='auto')loadChannels();if(n==='queue')loadQueue()}
+
+let DESTS=[];
+async function ytStatus(){
+  try{const st=await api('/api/youtube/status');DESTS=await api('/api/destinations');
+    $('yt').innerHTML=!st.configured?'<span class="bad-t">Set GOOGLE_CLIENT_ID/SECRET</span>':DESTS.length?`<span class="ok">${DESTS.length} channel(s) connected</span>`:'<span class="bad-t">No channel connected</span>';
+    const opts=DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}</option>`).join('')||'<option value="">(connect a channel first)</option>';
+    $('ch-dest').innerHTML=opts;$('s-dest').innerHTML=opts;
+    $('dests').innerHTML=DESTS.length?DESTS.map(d=>`<span class="pill">${esc(d.name)}</span> <button class="bad" style="padding:1px 7px" onclick="delDest(${d.id})">✕</button> `).join(' '):'None yet.';
+  }catch(e){}
+}
+async function delDest(id){if(!confirm('Disconnect this channel?'))return;try{await api('/api/destinations/'+id,'DELETE');ytStatus()}catch(e){fail(e)}}
+async function loadStats(){
+  try{const t=await api('/api/stats');const c=t.clips;
+    $('stats').innerHTML=[['Source channels',t.sources],['My channels',t.destinations],['Videos analyzed',t.videos_analyzed],['Queued',c.queued],['Uploaded',c.uploaded],['Failed',c.failed],['Drafts',c.draft+c.rendered]]
+      .map(([k,v])=>`<span class="pill" style="padding:6px 12px"><b>${v}</b> ${k}</span>`).join('')}catch(e){}
+}
+
+/* ---------- autopilot ---------- */
+async function addChannel(){
+  const NL=String.fromCharCode(10);
+  const lines=$('ch-q').value.split(NL).map(x=>x.trim()).filter(Boolean);
+  if(!lines.length)return alert('Enter at least one channel');
+  const errs=[];
+  for(const q of lines){
+    try{await api('/api/channels','POST',{query:q,mode:$('ch-mode').value,permission_note:$('ch-note').value,destination_id:+$('ch-dest').value||null,
+      videos_per_run:+$('ch-v').value,clips_per_video:+$('ch-c').value,clip_len:+$('ch-l').value,gap_hours:+$('ch-g').value,aspect:$('ch-a').value})}
+    catch(e){errs.push(q+': '+e.message)}
+  }
+  if(errs.length)alert(errs.join(NL));else $('ch-q').value='';
+  loadChannels();
+}
+async function loadChannels(){
+  loadStats();
+  const L=await api('/api/channels');
+  $('channels').innerHTML=L.length?`<table><tr><th>Source channel</th><th>Uploads to</th><th>Mode</th><th>Auto</th><th>Last run</th><th></th></tr>`+L.map(c=>`<tr>
+   <td>${esc(c.name||c.query)}</td><td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'-')}</td><td>${c.mode}</td><td>${c.auto?'<span class="ok">on</span>':'off'}</td>
+   <td class="mut">${c.last_run||'never'}<br>${esc(c.last_status||'')}</td>
+   <td><button onclick="chRun(${c.id})">Run now</button> <button class="sec" onclick="chToggle(${c.id})">${c.auto?'Pause':'Resume'}</button> <button class="bad" onclick="chDel(${c.id})">✕</button></td></tr>`).join('')+'</table>':'No channels yet.';
+}
+async function chRun(id){try{await api(`/api/channels/${id}/run`,'POST');alert('Started. Check Queue/Last run in a few minutes.')}catch(e){fail(e)}}
+async function chToggle(id){await api(`/api/channels/${id}/toggle`,'POST');loadChannels()}
+async function chDel(id){if(confirm('Remove channel?')){await api(`/api/channels/${id}`,'DELETE');loadChannels()}}
+
+/* ---------- manual ---------- */
+async function addProject(){
+  try{P=await api('/api/projects','POST',{url:$('p-url').value,mode:$('p-mode').value,permission_note:$('p-note').value});showProject();analyze()}catch(e){fail(e)}
+}
+function showProject(){
+  $('proj').classList.remove('hide');
+  $('p-title').textContent=P.title;
+  $('p-meta').innerHTML=`${esc(P.channel)} · ${T(P.duration)} · license: ${esc(P.license||'Standard YouTube')} · mode: <b>${P.mode}</b>`;
+  $('player').src=`https://www.youtube.com/embed/${P.video_id}`;
+  loadProjClips();
+}
+function seek(s){$('player').src=`https://www.youtube.com/embed/${P.video_id}?start=${Math.floor(s)}&autoplay=1`}
+async function analyze(){
+  $('an-btn').disabled=true;$('moments').textContent='Analyzing heatmap + comments…';
+  try{const r=await api(`/api/projects/${P.id}/analyze`,'POST');
+    $('moments').innerHTML=(r.moments.length?r.moments.map(m=>`<div class="mom"><b>${T(m.start)}–${T(m.end)}</b><span class="pill">score ${m.score}</span><span class="mut grow">replay ${m.heat} · ${m.comments} comment mentions</span>
+      <button class="sec" onclick="seek(${m.start})">▶</button><button onclick="mkClip(${m.start},${m.end})">Clip</button></div>`).join(''):'No signal (no heatmap/timestamp comments). Use a manual range.')
+      +`<div class="mut" style="margin-top:6px">heatmap: ${r.has_heatmap?'yes':'no'} · comment timestamps: ${r.comment_timestamps}</div>`}catch(e){fail(e)}
+  $('an-btn').disabled=false;
+}
+function manualClip(){mkClip(+$('m-s').value,+$('m-e').value)}
+async function mkClip(s,e){try{C=await api(`/api/projects/${P.id}/clips`,'POST',{start:s,end:e});loadProjClips();openClip(C)}catch(x){fail(x)}}
+async function loadProjClips(){
+  const p=await api(`/api/projects/${P.id}`);
+  $('p-clips').innerHTML=p.clips.length?'<h2 style="margin-top:10px">Clips</h2>'+p.clips.map(c=>`<div class="mom"><b>#${c.id}</b> ${T(c.start)}–${T(c.end)} <span class="pill">${c.status}</span><span class="grow"></span><button class="sec" onclick="pick(${c.id})">Open</button></div>`).join(''):'';
+}
+async function pick(id){C=await api('/api/clips/'+id);openClip(C)}
+function openClip(c){
+  C=c;$('editor').classList.remove('hide');$('c-id').textContent='#'+c.id;
+  $('c-s').value=c.start;$('c-e').value=c.end;$('c-asp').value=c.aspect;$('c-vol').value=c.orig_volume??1;$('v-off').value=c.voice_offset||0;
+  document.querySelectorAll('.fx').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
+  $('ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
+  $('v-text').value=c.voice_text||'';$('v-state').textContent=c.voice_path?'Voice attached ✔':'';
+  $('m-title').value=c.title||'';$('m-desc').value=c.description||'';$('m-tags').value=(c.tags||[]).join(', ');
+  setStatus(c);$('editor').scrollIntoView({behavior:'smooth'});
+}
+function setStatus(c){
+  $('c-status').textContent=c.status;$('c-err').textContent=c.error||'';
+  const v=$('vid');
+  if(['rendered','queued','uploading','uploaded'].includes(c.status)){v.src=`/api/clips/${c.id}/video?t=${Date.now()}`;v.classList.remove('hide')}else v.classList.add('hide');
+  $('r-btn').disabled=c.status==='rendering';
+}
+function addOv(o){
+  o=(o&&o.text!==undefined)?o:{text:'',start:0,end:3,pos:'bottom',size:56,color:'#ffffff',anim:'fade'};
+  const d=document.createElement('div');d.className='ov';
+  d.innerHTML=`<div class="row"><input class="o-text grow" placeholder="Text" value="${esc(o.text)}"><button class="bad" onclick="this.closest('.ov').remove()">✕</button></div>
+  <div class="row"><label>from <input class="o-s" type="number" step="0.1" value="${o.start}" style="width:70px"></label><label>to <input class="o-e" type="number" step="0.1" value="${o.end}" style="width:70px"></label>
+  <select class="o-pos"><option>top</option><option>center</option><option>bottom</option></select>
+  <select class="o-anim"><option value="fade">fade</option><option value="slide_up">slide up</option><option value="none">none</option></select>
+  <label>size <input class="o-size" type="number" value="${o.size}" style="width:60px"></label><input class="o-color" type="color" value="${esc(o.color||'#ffffff')}"></div>`;
+  d.querySelector('.o-pos').value=o.pos;d.querySelector('.o-anim').value=o.anim;$('ovs').appendChild(d);
+}
+function collect(){
+  return{start:+$('c-s').value,end:+$('c-e').value,aspect:$('c-asp').value,orig_volume:+$('c-vol').value,voice_offset:+$('v-off').value,
+    effects:[...document.querySelectorAll('.fx:checked')].map(x=>x.value),
+    overlays:[...document.querySelectorAll('.ov')].map(d=>({text:d.querySelector('.o-text').value,start:+d.querySelector('.o-s').value,end:+d.querySelector('.o-e').value,
+      pos:d.querySelector('.o-pos').value,anim:d.querySelector('.o-anim').value,size:+d.querySelector('.o-size').value,color:d.querySelector('.o-color').value})).filter(o=>o.text.trim()),
+    title:$('m-title').value,description:$('m-desc').value,tags:$('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('v-text').value};
+}
+async function saveClip(){try{C=await api('/api/clips/'+C.id,'PUT',collect());setStatus(C)}catch(e){fail(e)}}
+async function renderClip(){
+  try{await saveClip();await api(`/api/clips/${C.id}/render`,'POST');C.status='rendering';setStatus(C);
+    clearInterval(poll);poll=setInterval(async()=>{C=await api('/api/clips/'+C.id);setStatus(C);if(C.status!=='rendering')clearInterval(poll)},3000)}catch(e){fail(e)}
+}
+async function makeTts(){try{await saveClip();C=await api(`/api/clips/${C.id}/tts`,'POST',{text:$('v-text').value,voice:$('v-voice').value});$('v-state').textContent='Voice generated ✔';setStatus(C)}catch(e){fail(e)}}
+async function uploadVoice(){const f=$('v-file').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+  try{C=await api(`/api/clips/${C.id}/voice-upload`,'POST',fd);$('v-state').textContent='Voice uploaded ✔';setStatus(C)}catch(e){fail(e)}}
+async function kw(){
+  const q=$('k-q').value||(P&&P.title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
+  $('k-chips').innerHTML=r.keywords.map(k=>`<span onclick="addTag('${esc(k).replace(/'/g,"\\'")}')">${esc(k)}</span>`).join('')||'<span class="mut">no suggestions</span>';
+}
+function addTag(k){const t=$('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean);if(!t.includes(k))t.push(k);$('m-tags').value=t.join(', ')}
+async function genMeta(){
+  try{await saveClip();const extra=[...document.querySelectorAll('#k-chips span')].map(s=>s.textContent).slice(0,10);
+    const m=await api(`/api/clips/${C.id}/metadata`,'POST',{extra_keywords:extra});$('m-title').value=m.title;$('m-desc').value=m.description;$('m-tags').value=m.tags.join(', ')}catch(e){fail(e)}
+}
+async function schedule(timed){
+  try{await saveClip();let at=null;if(timed){if(!$('s-when').value)return alert('Pick date/time');at=new Date($('s-when').value).toISOString()}
+    C=await api(`/api/clips/${C.id}/schedule`,'POST',{publish_at:at,destination_id:+$('s-dest').value||null});setStatus(C);alert('Queued ✔ (see Queue tab)')}catch(e){fail(e)}
+}
+async function loadQueue(){
+  const L=await api('/api/queue');
+  $('q').innerHTML=L.length?'<table><tr><th>Clip</th><th>Title</th><th>Publish at (UTC)</th><th>Status</th></tr>'+L.map(c=>`<tr><td>#${c.id}</td><td>${esc(c.title)}</td><td>${c.publish_at||'now'}</td>
+    <td>${c.status}${c.youtube_id?` · <a style="color:var(--ac)" target="_blank" href="https://youtu.be/${c.youtube_id}">open</a>`:''}${c.error?`<br><span class="bad-t">${esc(c.error)}</span>`:''}
+    ${c.status==='queued'?` <button class="sec" onclick="unsched(${c.id})">cancel</button>`:''}</td></tr>`).join('')+'</table>':'Queue is empty.';
+}
+async function unsched(id){await api(`/api/clips/${id}/unschedule`,'POST');loadQueue()}
+
+(async()=>{
+  const v=await api('/api/voices');$('v-voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${n}</option>`).join('');
+  await ytStatus();loadChannels();
+})();
+</script>
+</body>
+</html>
