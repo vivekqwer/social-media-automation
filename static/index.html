@@ -154,6 +154,22 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 .hide{display:none!important}
 .hero-in{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .hero-in .inp{position:relative;flex:1 1 280px}.hero-in .inp .ico{position:absolute;left:12px;top:10px;color:var(--mfg)}.hero-in .inp input{padding-left:36px}
+.nav.quick{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;margin-top:6px}
+.nav.quick .ico{color:#fff}.nav.quick:hover{opacity:.92;color:#fff}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:6px}
+.opt{text-align:left;border:1px solid var(--border);background:var(--card);border-radius:10px;padding:12px 14px;cursor:pointer;display:flex;flex-direction:column;gap:2px}
+.opt b{font-size:14px}.opt span{font-size:12px;color:var(--mfg)}
+.opt.on{border-color:var(--brand);background:var(--brand-soft)}.opt.on b{color:var(--brand)}
+.opt:disabled{opacity:.45;cursor:not-allowed}
+.steps{display:flex;flex-direction:column;gap:2px;margin:6px 0 4px}
+.step{display:flex;gap:12px;align-items:center;padding:9px 0}
+.step .dot{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;border:1px solid var(--border);color:var(--mfg);flex:none;font-size:12px}
+.step.done .dot{background:var(--ok);border-color:var(--ok);color:#fff}
+.step.now .dot{border-color:var(--brand);color:var(--brand)}.step.now b{color:var(--brand)}
+.step.bad .dot{background:var(--bad);border-color:var(--bad);color:#fff}
+.step b{font-weight:500}.step .mut{font-size:12px}
+.spin{width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:1000px){
   .shell{grid-template-columns:1fr}
   aside{position:fixed;left:0;top:0;width:260px;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow-lg)}
@@ -170,6 +186,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="nav on" data-p="dashboard"><i data-ico="dashboard"></i>Dashboard</button>
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
     <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
+    <button class="nav" data-p="alerts"><i data-ico="bell"></i>Alerts<span class="count" id="b-alerts" style="display:none;background:var(--bad)"></span></button>
+    <button class="nav quick" id="nav-quick"><i data-ico="zap"></i>Quick upload</button>
     <div class="grp">Account</div>
     <button class="nav" data-p="settings"><i data-ico="youtube"></i>My channels</button>
     <div class="user"><div class="avatar" id="av">A</div><div class="t"><b id="un">admin</b><span id="uf">Owner</span></div><button class="btn ghost icon" id="logout" title="Log out"><i data-ico="logout"></i></button></div>
@@ -181,6 +199,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <button class="btn ghost icon burger" id="burger"><i data-ico="menu"></i></button>
       <div class="crumb"><span>Clip Studio</span><span>/</span><b id="crumb">Dashboard</b></div>
       <div class="sp"></div>
+      <button class="btn brand sm" id="top-quick"><i data-ico="zap"></i>Quick upload</button>
       <button class="btn outline sm" id="top-new"><i data-ico="scissors"></i>New clip</button>
       <button class="btn sm" id="top-add"><i data-ico="plus"></i>Add source</button>
     </header>
@@ -226,6 +245,12 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <section id="p-sources" class="hide">
         <div class="page-h"><div><h1>Sources</h1><div class="desc">Channels the system takes videos from.</div></div><button class="btn" id="open-add"><i data-ico="plus"></i>Add sources</button></div>
         <div class="card"><div class="tw" id="src-list"></div></div>
+      </section>
+
+      <section id="p-alerts" class="hide">
+        <div class="page-h"><div><h1>Alerts</h1><div class="desc" id="al-desc">Your uploaded videos are checked on YouTube every 2 hours: deleted, removed for copyright, rejected or blocked.</div></div><button class="btn" id="al-check"><i data-ico="refresh"></i>Check now</button></div>
+        <div class="alert" style="margin-bottom:16px"><i data-ico="alert"></i><span class="sm">YouTube's API shows what happened to a video (removed, rejected with a reason, blocked in countries), but not strikes or the claimant's name — use “Open in YouTube Studio” on an alert for that.</span></div>
+        <div id="al-list"></div>
       </section>
 
       <section id="p-settings" class="hide">
@@ -277,10 +302,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <div class="row">
         <label class="f">Start (s)<input id="e-s" type="number" step="0.1" style="width:110px"></label>
         <label class="f">End (s)<input id="e-e" type="number" step="0.1" style="width:110px"></label>
-        <label class="f">Format<select id="e-asp"><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
+        <label class="f">Upload as<select id="e-asp"><option value="9:16">Shorts (9:16)</option><option value="16:9">Video (16:9)</option><option value="1:1">Square (1:1)</option></select></label>
         <label class="f">Original volume<input id="e-vol" type="number" step="0.1" min="0" max="3" style="width:120px"></label>
       </div>
       <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
+      <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
 
@@ -315,12 +341,18 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="f">Title<input id="e-mt" placeholder="Title"></label>
       <label class="f">Description<textarea id="e-md" style="min-height:160px" placeholder="Description (credit to the original channel is added automatically)"></textarea></label>
       <label class="f">Tags<input id="e-mg" placeholder="comma separated"></label>
+      <div class="f">Thumbnail <span class="mut sm" style="font-weight:400">— made automatically after render and sent to YouTube with the video</span>
+        <div class="row" style="align-items:flex-start;flex-wrap:nowrap;margin-top:6px"><img id="e-thumb" alt="" style="width:170px;border-radius:8px;border:1px solid var(--border);background:var(--muted);object-fit:cover;aspect-ratio:16/9">
+          <div class="grow" style="display:flex;flex-direction:column;gap:8px"><input id="e-ttext" placeholder="Big text on the thumbnail (empty = from the title)">
+            <div class="row"><button class="btn outline sm" id="e-tgen"><i data-ico="image"></i>Make thumbnail</button><button class="btn ghost sm hide" id="e-tpush"><i data-ico="upload"></i>Send thumbnail to YouTube</button></div>
+            <input type="file" id="e-tfile" accept="image/jpeg,image/png" style="height:auto;padding:4px 8px;font-size:12px"><span class="mut sm" id="e-tnote"></span></div></div></div>
     </div>
   </div>
   <div class="sf">
     <button class="btn" id="e-render"><i data-ico="refresh"></i>Save &amp; re-render</button>
     <button class="btn ok" id="e-approve"><i data-ico="check"></i>Approve &amp; queue</button>
     <input id="e-when" type="datetime-local" style="width:auto" title="Publish time (optional)">
+    <select id="e-dest" style="width:auto" title="Upload to which YouTube channel"></select>
     <button class="btn outline" id="e-now"><i data-ico="upload"></i>Upload now</button>
     <span style="flex:1"></span>
     <button class="btn bad" id="e-del"><i data-ico="trash"></i>Discard</button>
@@ -334,7 +366,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
       <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
       <label class="f">Upload to<select id="s-dest"></select></label>
-      <label class="f">Format<select id="s-a"><option value="9:16">9:16 Shorts</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
+      <label class="f">Upload as<select id="s-a"><option value="9:16">Shorts (9:16)</option><option value="16:9">Video (16:9)</option><option value="1:1">Square (1:1)</option></select></label>
       <label class="f">Videos per run<input id="s-v" type="number" value="3" min="1" max="20"></label>
       <label class="f">Clips per video<input id="s-c" type="number" value="2" min="1" max="10"></label>
       <label class="f">Clip length (s)<input id="s-l" type="number" value="30" min="10" max="120"></label>
@@ -356,6 +388,29 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <div class="row"><input id="n-url" class="grow" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
     <input id="n-note" style="margin-top:10px" placeholder="Permission note (permission mode)">
     <div id="n-out" style="margin-top:14px"></div>
+  </div>
+</div></div>
+
+<div class="modal" id="m-quick"><div class="card" style="width:min(640px,100%)">
+  <div class="ch"><div><h3>Quick upload</h3><p>Paste a video link. Everything else is automatic — you only choose the format and when it goes live.</p></div><button class="btn ghost icon" id="q-close"><i data-ico="x"></i></button></div>
+  <div class="cb" id="q-form">
+    <label class="f">Video link<input id="q-url" placeholder="https://www.youtube.com/watch?v=..."></label>
+    <label class="f" style="margin-top:14px">Upload to which YouTube channel?<select id="q-dest"></select></label>
+    <div class="f" style="margin-top:14px">Upload as<div class="opts" id="q-fmt"><button class="opt on" data-v="shorts"><b>Shorts</b><span>Vertical 9:16 · best ~35 seconds</span></button><button class="opt" data-v="video"><b>Video</b><span>Landscape 16:9 · best minute or whole video</span></button></div></div>
+    <div class="f" style="margin-top:14px">Length<div class="opts" id="q-len"><button class="opt on" data-v="auto"><b>Best moment</b><span>Most replayed / most talked-about part</span></button><button class="opt" data-v="whole" disabled><b>Whole video</b><span>Only for Video</span></button></div></div>
+    <div class="row" style="margin-top:14px;align-items:flex-end"><label class="f grow">When should it go live?<input id="q-when" type="datetime-local"></label><label class="row sm" style="gap:8px;padding-bottom:9px"><input type="checkbox" id="q-asap"> As soon as it's ready</label></div>
+    <label class="row" style="gap:10px;margin-top:14px"><span class="switch"><input type="checkbox" id="q-caps" checked><i></i></span>Add captions (from the video's own subtitles)</label>
+    <div class="mut sm" style="margin-top:10px">Automatic: credit to the creator (description + on video), original tags & description, keyword research, thumbnail, upload to your channel.</div>
+    <div class="alert hide" id="q-perm" style="margin-top:14px;flex-direction:column;align-items:stretch;gap:10px"><div id="q-perm-msg"></div>
+      <input id="q-note" placeholder="How did you get the creator's permission? (e.g. email from … on …)">
+      <div class="row"><button class="btn sm" id="q-perm-go">I have permission — continue</button><button class="btn outline sm" id="q-editor">Make a commentary clip in the editor instead</button></div></div>
+    <div class="row" style="justify-content:flex-end;margin-top:18px"><button class="btn outline" id="q-cancel">Cancel</button><button class="btn brand" id="q-go"><i data-ico="zap"></i>Start</button></div>
+  </div>
+  <div class="cb hide" id="q-prog">
+    <div class="row" style="flex-wrap:nowrap;margin-bottom:6px"><img id="q-thumb" style="width:110px;border-radius:8px" alt=""><div><b id="q-title"></b><div class="mut sm" id="q-sub"></div></div></div>
+    <div class="steps" id="q-steps"></div>
+    <div class="alert bad hide" id="q-err"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn outline" id="q-open">Open in editor</button><button class="btn" id="q-done">Close</button></div>
   </div>
 </div></div>
 
@@ -388,7 +443,10 @@ const P={
  refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
  pause:'<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
  inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
- arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'
+ arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+ zap:'<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+ image:'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+ bell:'<path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/>'
 };
 const ico=(n,c='')=>`<svg class="ico ${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||''}</svg>`;
 function paintIcons(root=document){$$('[data-ico]',root).forEach(e=>{e.outerHTML=ico(e.dataset.ico)})}
@@ -408,12 +466,12 @@ async function once(fn,btn){if(LOCK)return;LOCK=true;if(btn)btn.disabled=true;tr
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',settings:'My channels'};
+const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  if(p==='dashboard')loadDash();if(p==='clips')loadClips();if(p==='sources')loadSources();if(p==='settings')loadDests();
+  if(p==='dashboard')loadDash();if(p==='clips')loadClips();if(p==='sources')loadSources();if(p==='settings')loadDests();if(p==='alerts')loadAlerts();
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -424,10 +482,36 @@ $('#top-add').onclick=()=>openAdd();$('#top-new').onclick=()=>openNewModal();
 async function loadOverview(){
   OV=await api('/api/overview');DESTS=OV.destinations;
   const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}</option>`).join(''):'<option value="">Connect a channel first</option>';
-  $('#h-dest').innerHTML=opts;$('#s-dest').innerHTML=opts;
+  $('#h-dest').innerHTML=opts;$('#s-dest').innerHTML=opts;$('#q-dest').innerHTML=opts;$('#e-dest').innerHTML=opts;
   const rv=OV.counts.rendered;const b=$('#b-review');b.style.display=rv?'':'none';b.textContent=rv;
+  const na=OV.alerts_unseen||0;const ba=$('#b-alerts');ba.style.display=na?'':'none';ba.textContent=na;
   return OV;
 }
+const AKIND={removed:['Deleted','failed'],rejected:['Removed by YouTube','failed'],failed:['Processing failed','failed'],blocked:['Blocked / claimed','queued'],restored:['Available again','uploaded']};
+async function loadAlerts(){
+  $('#al-list').innerHTML=skel(2);
+  let d;try{d=await api('/api/alerts')}catch(e){return fail(e)}
+  $('#al-desc').textContent=`Watching ${d.watching} uploaded video${d.watching===1?'':'s'} on YouTube every 2 hours`+(d.last_check?` · last check ${when(d.last_check)}`:'')+'.';
+  $('#al-list').innerHTML=d.alerts.length?d.alerts.map(a=>{const x=a.details||{},[lab,cls]=AKIND[a.kind]||[a.kind,'outline'];
+    const row=(k,v)=>v?`<div><span class="mut sm">${k}</span><div>${v}</div></div>`:'';
+    return `<div class="card" style="margin-bottom:12px${a.seen?'':';border-color:var(--bad)'}"><div class="cb">
+      <div class="row" style="justify-content:space-between"><div class="row"><span class="badge ${cls}">${lab}</span>${a.seen?'':'<span class="badge failed">new</span>'}<b>${esc(x.title||'Clip #'+a.clip_id)}</b></div><span class="mut sm">detected ${when(a.created_at)}</span></div>
+      <p style="margin:10px 0">${esc(a.message)}</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        ${row('Your channel',esc(x.my_channel||''))}
+        ${row('Video on YouTube',x.youtube_id?`<a href="https://youtu.be/${esc(x.youtube_id)}" target="_blank" rel="noopener">youtu.be/${esc(x.youtube_id)}</a>`:'')}
+        ${row('Uploaded',x.uploaded_at?when(x.uploaded_at):'')}
+        ${row('Went / goes live',x.publish_at?when(x.publish_at):'')}
+        ${row('Original creator',esc(x.source_channel||''))}
+        ${row('Original video',x.source_url?`<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_title||x.source_url)}</a>`:'')}
+        ${row('Part used',x.clip_range?`${T(x.clip_range[0])}–${T(x.clip_range[1])} · ${esc(x.source_mode||'')}`:'')}
+      </div>
+      <div class="row" style="margin-top:12px">${x.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://studio.youtube.com/video/${esc(x.youtube_id)}/copyright">${ico('youtube')}Open in YouTube Studio</a>`:''}<button class="btn ghost sm" data-open="${a.clip_id}">Open clip</button></div>
+    </div></div>`}).join(''):empty('bell','No problems found',d.watching?'All your uploaded videos are fine on YouTube.':'Alerts appear here once videos are uploaded.');
+  wireOpen($('#al-list'));
+  if(d.alerts.some(a=>!a.seen)){try{await api('/api/alerts/seen','POST');$('#b-alerts').style.display='none'}catch(e){}}
+}
+$('#al-check').onclick=()=>once(async()=>{const r=await api('/api/alerts/check','POST');toast(`Checked ${r.checked} video${r.checked===1?'':'s'} — ${r.new_alerts} new alert${r.new_alerts===1?'':'s'}`);await loadAlerts();loadOverview()},$('#al-check'));
 function clipMini(c,actions){
   return `<div class="item"><div class="th" style="background-image:url('${thumb(c.video_id)}')" data-open="${c.id}"></div>
   <div class="tx"><b>${esc(c.title||c.source_title||'Clip #'+c.id)}</b><span class="mut sm">${esc(c.source_channel||'')} · ${T(c.start)}–${T(c.end)}${c.status==='queued'?' · '+when(c.publish_at):''}</span>${c.error?`<span class="sm" style="color:var(--bad);display:block">${esc(c.error).slice(0,110)}</span>`:''}</div>${actions||''}</div>`;
@@ -444,6 +528,7 @@ async function loadDash(){
   if(!OV.youtube_configured)al+=`<div class="alert bad">${ico('alert')}Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>`;
   else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
   if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
+  if(OV.alerts_unseen)al+=`<div class="alert bad">${ico('bell')}${OV.alerts_unseen} of your uploaded videos had a problem on YouTube (deleted, copyright or blocked).<button class="btn sm" onclick="go('alerts')">See details</button></div>`;
   $('#alerts').innerHTML=al;
   $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering+(c.fetching||0)],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
   $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
@@ -565,6 +650,10 @@ function fill(c){
   $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.tts_pending?'Helper PC is making the voice…':(c.voice_path?'Voice attached ✔':'');
   const cs=c.caption_style||{};$('#e-con').checked=!!cs.on;$('#e-clang').value=cs.lang||'auto';$('#e-cpos').value=cs.pos||'bottom';$('#e-csize').value=cs.size||'M';$('#e-ccol').value=cs.color||'#ffffff';
   $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
+  $('#e-credit').checked=c.credit_on!==false;
+  $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'110px':'170px';
+  $('#e-ttext').value=c.thumb_text||'';$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
+  if(c.destination_id)$('#e-dest').value=c.destination_id;else if(DESTS.length)$('#e-dest').value=DESTS[0].id;
   $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');
   setStatus(c);
 }
@@ -605,13 +694,14 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
+    credit_on:$('#e-credit').checked,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
 function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const x=await api('/api/clips/'+id);if(CUR&&CUR.id===id){fill(x);if(!['rendering','fetching'].includes(x.status)&&!x.tts_pending){clearInterval(POLL);toast(x.status==='failed'?'Something failed — see the message':'Done',x.status==='failed')}}else clearInterval(POLL)}catch(e){clearInterval(POLL)}},2500)}
 $('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
-$('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
-$('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
+$('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at,destination_id:+$('#e-dest').value||null});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
+$('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:+$('#e-dest').value||null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
 $('#e-refetch').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/refetch`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Fetching the video again…')},$('#e-refetch'));
 $('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
 $('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);const c2=await api('/api/clips/'+CUR.id);fill(c2);etab('voice');if(c2.tts_pending){startPoll(c2.id);toast('Your helper PC is making the voice…')}else toast('Voice generated — press Save & re-render')},$('#e-tts'));
@@ -621,8 +711,65 @@ $('#e-kw').onclick=()=>once(async()=>{const q=$('#e-kq').value||(CUR&&CUR.source
 $('#e-chips').onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k)return;const t=$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean);if(!t.includes(k))t.push(k);$('#e-mg').value=t.join(', ')};
 $('#e-meta').onclick=()=>once(async()=>{await save();const extra=$$('#e-chips span').map(s=>s.dataset.k).filter(Boolean).slice(0,10);const m=await api(`/api/clips/${CUR.id}/metadata`,'POST',{extra_keywords:extra});$('#e-mt').value=m.title;$('#e-md').value=m.description;$('#e-mg').value=m.tags.join(', ');toast('Metadata filled (credit + original tags + keywords)')},$('#e-meta'));
 
+
+/* ---------- thumbnail ---------- */
+$('#e-tgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value});fill(await api('/api/clips/'+c.id));etab('meta');
+  if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
+$('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('meta');toast('Your thumbnail will be used')});
+$('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));
+
+/* ---------- quick upload ---------- */
+let QF='shorts',QL='auto',QMODE='cc',QPID=null,QPOLL=null;
+const pad=n=>String(n).padStart(2,'0');
+function localInput(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}
+function qSet(group,v){$$('#'+group+' .opt').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+function openQuick(){
+  QF='shorts';QL='auto';QMODE='cc';QPID=null;clearInterval(QPOLL);
+  qSet('q-fmt','shorts');qSet('q-len','auto');$('#q-len .opt[data-v=whole]').disabled=true;
+  const t=new Date();t.setDate(t.getDate()+1);t.setHours(10,0,0,0);$('#q-when').value=localInput(t);$('#q-asap').checked=false;$('#q-when').disabled=false;
+  $('#q-url').value='';$('#q-caps').checked=true;$('#q-perm').classList.add('hide');$('#q-note').value='';
+  $('#q-form').classList.remove('hide');$('#q-prog').classList.add('hide');$('#m-quick').classList.add('on');setTimeout(()=>$('#q-url').focus(),50);
+}
+$$('#q-fmt .opt').forEach(b=>b.onclick=()=>{QF=b.dataset.v;qSet('q-fmt',QF);const w=$('#q-len .opt[data-v=whole]');w.disabled=QF!=='video';if(QF!=='video'){QL='auto';qSet('q-len','auto')}});
+$$('#q-len .opt').forEach(b=>b.onclick=()=>{if(b.disabled)return;QL=b.dataset.v;qSet('q-len',QL)});
+$('#q-asap').onchange=()=>{$('#q-when').disabled=$('#q-asap').checked};
+$('#nav-quick').onclick=openQuick;$('#top-quick').onclick=openQuick;
+$('#q-close').onclick=$('#q-cancel').onclick=$('#q-done').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);refreshAfter()};
+async function qStart(){
+  const url=$('#q-url').value.trim();if(!url)throw new Error('Paste a video link first');
+  let at=null;if(!$('#q-asap').checked){if(!$('#q-when').value)throw new Error('Pick when it should go live');const d=new Date($('#q-when').value);if(d<new Date())throw new Error('That time is in the past — pick a future time or tick “As soon as it\'s ready”');at=d.toISOString()}
+  const body={url,format:QF,length:QL,publish_at:at,captions:$('#q-caps').checked,mode:QMODE,permission_note:$('#q-note').value,destination_id:+$('#q-dest').value||null};
+  const r=await fetch('/api/quick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status===401){location.href='/login';return}
+  const j=await r.json().catch(()=>({}));
+  if(r.status===409&&j.detail&&j.detail.code==='not_cc'){
+    $('#q-perm-msg').innerHTML=`<b>“${esc(j.detail.title)}”</b> by ${esc(j.detail.channel)} is not Creative Commons (${esc(j.detail.license)}). Uploading it without the creator's permission can get your channel a copyright strike — credit alone does not prevent that.`;
+    $('#q-perm').classList.remove('hide');return}
+  if(!r.ok)throw new Error(typeof j.detail==='string'?j.detail:'Could not start');
+  QPID=j.project_id;$('#q-form').classList.add('hide');$('#q-prog').classList.remove('hide');qPoll();clearInterval(QPOLL);QPOLL=setInterval(qPoll,3000);
+}
+$('#q-go').onclick=()=>once(async()=>{QMODE='cc';await qStart()},$('#q-go'));
+$('#q-perm-go').onclick=()=>once(async()=>{if(!$('#q-note').value.trim())throw new Error('Write how you got permission');QMODE='permission';await qStart()},$('#q-perm-go'));
+$('#q-editor').onclick=()=>{const u=$('#q-url').value.trim();$('#m-quick').classList.remove('on');openNew(u,'commentary','')};
+const QSTEPS=[['read','Read the video','title, licence, tags, description'],['moment','Find the best moment','most replayed + most talked-about'],['fetch','Get the video','downloaded in full quality'],['render','Cut, captions & credit','rendered for your format'],['thumb','Thumbnail','made automatically'],['sched','Schedule upload','goes live at your time']];
+async function qPoll(){
+  let d;try{d=await api('/api/quick/'+QPID)}catch(e){return}
+  $('#q-thumb').src=thumb(d.video_id);$('#q-title').textContent=d.title||'';$('#q-sub').textContent=`${d.channel||''} · ${d.format==='video'?'Video (16:9)':'Shorts (9:16)'}${d.length==='whole'?' · whole video':''}${d.dest_name?' → '+d.dest_name:''}`;
+  const c=d.clip,st=c?c.status:null;
+  const doneIdx=d.state==='failed'?-1:!c?(d.state==='starting'?0:1):({fetching:2,draft:2,rendering:2,rendered:4,queued:5,uploading:5,uploaded:6,failed:2}[st]??2);
+  const thumbDone=c&&c.thumb;const failed=d.state==='failed'||st==='failed';
+  $('#q-steps').innerHTML=QSTEPS.map(([k,l,sub],i)=>{let cls=i<doneIdx||(k==='thumb'&&thumbDone)?'done':i===doneIdx?'now':'';if(failed&&i===doneIdx)cls='bad';
+    let extra=sub;if(k==='moment'&&c)extra=`${T(c.start)}–${T(c.end)}`;if(k==='fetch'&&st==='fetching')extra='your helper PC is downloading it…';if(k==='moment'&&d.state==='analyzing')extra=d.step||extra;
+    if(k==='sched'&&c&&['queued','uploading','uploaded'].includes(st))extra=st==='uploaded'?(c.youtube_id?'uploaded to YouTube ✓':'uploaded'):`goes live ${when(c.publish_at)}`;
+    if(k==='thumb'&&c&&c.thumb_note)extra=c.thumb_note;
+    return `<div class="step ${cls}"><span class="dot">${cls==='done'?ico('check'):cls==='now'?'<span class="spin"></span>':cls==='bad'?ico('x'):i+1}</span><div><b>${l}</b><div class="mut">${esc(extra)}</div></div></div>`}).join('');
+  const er=$('#q-err');const msg=d.state==='failed'?d.step:(st==='failed'?c.error:'');er.classList.toggle('hide',!msg);er.innerHTML=msg?ico('alert')+esc(msg):'';
+  $('#q-open').classList.toggle('hide',!c);$('#q-open').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);openEditor(c.id)};
+  if(failed||['queued','uploaded'].includes(st)){clearInterval(QPOLL);if(!failed)toast(st==='uploaded'?'Uploaded to YouTube':'All set — it will upload by itself')}
+}
+
 ['m-add','m-new'].forEach(id=>$('#'+id).addEventListener('mousedown',e=>{if(e.target.id===id)$('#'+id).classList.remove('on')}));
-document.addEventListener('keydown',e=>{if(e.key==='Escape'){['m-add','m-new'].forEach(id=>$('#'+id).classList.remove('on'));if(CUR)closeEditor()}});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){['m-add','m-new','m-quick'].forEach(id=>$('#'+id).classList.remove('on'));clearInterval(QPOLL);if(CUR)closeEditor()}});
 
 paintIcons();
 go('dashboard');

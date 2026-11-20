@@ -1,5 +1,6 @@
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -12,6 +13,7 @@ from .config import MAX_UPLOADS_PER_DAY, UPLOAD_LEAD_HOURS
 from .crypto import TokenError
 from .db import Clip, Destination, Project, SessionLocal, utcnow
 from .jobs import executor
+from .monitor import check_uploads
 from .policy import check_edit
 
 PT = ZoneInfo("America/Los_Angeles")  # YouTube API quota resets at midnight Pacific
@@ -73,6 +75,12 @@ def process_queue():
                 publish_at = c.publish_at if c.publish_at and c.publish_at > now + timedelta(minutes=15) else None
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error = "uploaded", None
+                if c.thumb_path and Path(c.thumb_path).exists():
+                    try:
+                        youtube.set_thumbnail(c.destination_id, c.youtube_id, c.thumb_path)
+                        c.thumb_note = "Thumbnail set on YouTube"
+                    except Exception as te:  # noqa: BLE001  (video is up; only the thumbnail failed)
+                        c.thumb_note = youtube.thumb_error_text(te)
             except (RefreshError, TokenError):
                 c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
                 s.commit()
@@ -96,5 +104,9 @@ def start():
     sch.add_job(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     hours = int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6")
     sch.add_job(lambda: executor.submit(autopilot_tick), "interval", hours=hours, max_instances=1, coalesce=True)
+    # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)
+    every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")
+    sch.add_job(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
     sch.start()
     return sch

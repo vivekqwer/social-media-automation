@@ -71,3 +71,8 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Project `clip-studio` (id striped-temple-515313-d3) under funnygunction@gmail.com (Funnyvideo). YouTube Data API v3 enabled. Consent screen: External, Testing mode, test user funnygunction@gmail.com (refresh tokens expire after 7 days in Testing; "Publish app" disabled until Branding page is completed).
 - OAuth Web client "Web client 1": ID 178933708936-13mvap558vf95eccjh9a4pmpgkeq7l3i.apps.googleusercontent.com (public id). Redirect URI = Railway URL + /auth/callback. Secret hidden by Google after creation; new secret was copied to clipboard for the user to paste into Railway GOOGLE_CLIENT_SECRET (assistant never types secrets).
 - Railway: GOOGLE_CLIENT_ID staged by assistant; GOOGLE_CLIENT_SECRET + APP_PASSWORD to be added by user; then Deploy.
+
+## Multi-channel + alerts (2026-11-20)
+- More YouTube channels: My channels -> "Connect a YouTube channel" once per channel (each Google account signs in). Quick upload, editor and sources each have a channel picker.
+- Alerts page = monitor of uploaded videos (deleted / copyright-rejected / blocked). YouTube API cannot list strikes or claimant names; the alert links to YouTube Studio's copyright page.
+- FAQ answered: multi-audio tracks not possible via API; credit reduces nothing legally — CC or permission is what avoids strikes.

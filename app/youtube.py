@@ -113,6 +113,16 @@ def upload(dest_id: int | None, path: str, title: str, description: str, tags: l
     return resp["id"]
 
 
+def video_status(dest_id: int, ids: list[str]) -> dict:
+    """{video_id: item} for my own videos (owner view, so private/scheduled ones are included).
+    A missing id means the video no longer exists on YouTube."""
+    yt, out = client(dest_id), {}
+    for i in range(0, len(ids), 50):
+        r = yt.videos().list(part="status,contentDetails", id=",".join(ids[i:i + 50]), maxResults=50).execute()
+        out.update({it["id"]: it for it in r.get("items", [])})
+    return out
+
+
 def _email_from(creds) -> str | None:
     """Verified e-mail of the signed-in Google account, from the OpenID id_token."""
     try:
@@ -219,3 +229,16 @@ def api_list_video_ids(channel_url: str, n: int) -> list[str]:
         raise ValueError("not a channel-id url")
     r = client().playlistItems().list(part="contentDetails", playlistId="UU" + m.group(1)[2:], maxResults=min(n, 50)).execute()
     return [i["contentDetails"]["videoId"] for i in r.get("items", [])]
+
+
+def set_thumbnail(dest_id: int | None, video_id: str, path: str):
+    mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    client(dest_id).thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype=mime)).execute()
+
+
+def thumb_error_text(e) -> str:
+    m = str(e)
+    if "forbidden" in m.lower() or "permission" in m.lower() or "403" in m:
+        return ("YouTube did not allow a custom thumbnail. Verify the channel's phone number at "
+                "youtube.com/verify, then press 'Send thumbnail to YouTube'.")
+    return "Thumbnail upload failed: " + m[:200]

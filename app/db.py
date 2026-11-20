@@ -33,6 +33,9 @@ class Project(Base):
     mode = Column(String(20))  # cc | permission | commentary
     permission_note = Column(Text)
     channel_ref = Column(Integer, index=True)  # set when created by autopilot
+    quick = Column(JSON)  # Quick upload settings + progress {format, length, publish_at, captions, state, step, clip_id}
+    caption_track = Column(JSON)  # whole json3 caption track (from the helper PC), sliced per clip
+    analysis_pending = Column(Boolean, default=False)  # waiting for the helper PC to read replays/comments
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -59,6 +62,13 @@ class Clip(Base):
     captions = Column(JSON, default=list)  # [{s, e, t}] relative to clip start
     caption_style = Column(JSON)  # {on, lang, pos, size, color}
     tts_pending = Column(Text)  # JSON {text, voice} waiting for the helper PC
+    thumb_text = Column(String(120))  # big text on the auto thumbnail (empty = from title)
+    thumb_path = Column(String(500))
+    thumb_custom = Column(Boolean, default=False)  # user uploaded their own image
+    thumb_note = Column(Text)  # result of setting the thumbnail on YouTube
+    credit_on = Column(Boolean, default=True)  # small 'Credit: channel' text on the video
+    yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...
+    yt_checked_at = Column(DateTime)
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -114,6 +124,19 @@ class Worker(Base):
     token_hash = Column(String(64), unique=True)
     approved = Column(Boolean, default=False)
     last_seen = Column(DateTime)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class Alert(Base):
+    """Something happened to an uploaded video on YouTube (deleted, rejected for copyright, blocked...)."""
+
+    __tablename__ = "alerts"
+    id = Column(Integer, primary_key=True)
+    clip_id = Column(Integer, index=True)
+    kind = Column(String(30))  # removed | rejected | failed | blocked | restored
+    message = Column(Text)
+    details = Column(JSON)  # video title/link, my channel, source creator, upload time
+    seen = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow)
 
 

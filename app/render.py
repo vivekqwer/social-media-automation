@@ -22,7 +22,7 @@ def _ass_time(t: float) -> str:
     return f"{int(t // 3600)}:{int(t % 3600 // 60):02d}:{t % 60:05.2f}"
 
 
-def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: list | None = None):
+def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: list | None = None, credit: str = ""):
     size = {"S": 0.034, "M": 0.044, "L": 0.056}.get((style or {}).get("size"), 0.044)
     fs = int(H * size)
     m = COLOR_RE.match((style or {}).get("color") or "#ffffff")
@@ -43,6 +43,10 @@ def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: lis
         text = str(c.get("t", "")).replace("{", "(").replace("}", ")").replace(chr(10), "\\N").strip()
         if text:
             lines.append(f"Dialogue: 0,{_ass_time(float(c['s']))},{_ass_time(float(c['e']))},Default,,0,0,0,,{text}")
+    if credit:  # small, always-visible credit to the original creator (top-left)
+        csz = max(18, int(H * 0.022))
+        ctext = credit.replace("{", "(").replace("}", ")")
+        lines.append(f"Dialogue: 2,0:00:00.00,9:59:59.00,Default,,0,0,0,,{{\\an7\\pos({int(W * 0.03)},{int(H * 0.025)})\\fs{csz}\\bord2\\shad0\\c&HFFFFFF&\\1a&H30&}}{ctext}")
     for o in overlays or []:  # text overlays that need font fallback (Hindi + English in one line)
         text = str(o.get("text", "")).replace("{", "(").replace("}", ")").replace(chr(10), "\\N").strip()
         if not text:
@@ -103,7 +107,8 @@ def _has_audio(path) -> bool:
     return "Audio:" in r.stderr
 
 
-def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True) -> str:
+def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
+                 credit: str = "") -> str:
     if clip.aspect == "16:9":
         chain = [f"scale={W}:{H}:force_original_aspect_ratio=decrease", f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"]
     else:
@@ -131,8 +136,8 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
             chain.append(_drawtext(i, o, W, workdir))
     st = clip.caption_style or {}
     cues = clip.captions if (st.get("on") and clip.captions) else []
-    if cues or ass_ovs:
-        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs)
+    if cues or ass_ovs or credit:
+        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit)
         chain.append(f"ass=captions.ass:fontsdir='{_esc(FONTS_DIR)}'")
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
     fc = f"[0:v]{','.join(chain)}[v];"
@@ -162,7 +167,8 @@ def render_clip(project: Project, clip: Clip) -> Path:
     if has_voice:
         cmd += ["-i", str(clip.voice_path)]
     cmd += [
-        "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio),
+        "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
+                                         f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else ""),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "out.mp4",
@@ -188,6 +194,13 @@ def run_render(clip_id: int):
         try:
             clip.output_path = str(render_clip(project, clip))
             clip.status = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
+            if not clip.thumb_custom:
+                try:
+                    from .thumbs import make_thumbnail
+
+                    clip.thumb_path, clip.thumb_note = str(make_thumbnail(clip, project)), None
+                except Exception as te:  # noqa: BLE001  (a thumbnail problem must not block the upload)
+                    clip.thumb_note = f"Thumbnail could not be made: {str(te)[:150]}"
         except Exception as e:  # noqa: BLE001
             if is_bot_block(e) and workers.any_approved():
                 clip.status, clip.error = "fetching", None  # the helper PC downloads the section, then we render

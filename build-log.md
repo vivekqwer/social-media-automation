@@ -84,3 +84,16 @@
 - Approved clips #1 and #2 from the dashboard -> uploaded to Foody: k1xahUpFFWQ (Big Buck Bunny, Studio shows "Scheduled", recognised as a Short) and DwkHI7Mq2K4 (GTA 6 commentary). Publish times 2026-11-21 09:51 and 21:51 IST.
 - Google Auth Platform: Branding links saved (home /about, /privacy, /terms), app pushed to "In production" (no more 7-day token expiry for new logins; unverified-app warning remains until verification).
 - Not done: Windows auto-start of the helper (blocked by the permission system - user must add worker\run_worker.bat to shell:startup); Foody reconnect after publishing (user); API audit submission + screencast (user).
+
+## 2026-11-20 — Task 15: Quick upload, thumbnails, on-screen credit, Shorts/Video choice
+- Sidebar/topbar "Quick upload": paste a link, pick Shorts (9:16, ~35 s) or Video (16:9, best minute or whole video), date/time, captions -> app/quick.py finds the moment (heatmap + comments; the helper PC analyses when the server is blocked), cuts, captions, credits, metadata, thumbnail, queues. Non-CC gives 409 with a "permission / commentary" choice.
+- app/thumbs.py: automatic thumbnail (frame at 35%, contrast/saturation, 2-line bold title, 2nd line yellow) after every render; editor can change text, upload own image, push to YouTube. The scheduler sets it right after upload (403 = channel needs phone verification).
+- On-screen "Credit: <channel>" (top-left, toggle in editor) besides the description credit.
+- ingest: ffmpeg reconnect args, 3 attempts, whole-video fallback (<=30 min), duration-aware completeness check.
+- E2E (simulated block + real helper): queued 9:16 clip, thumbnail made, credit on.
+
+## 2026-11-20 — Task 16: Multiple channels + YouTube problem alerts
+- Channel picker: Quick upload ("Upload to which YouTube channel?") and editor footer (used by Approve and Upload now). QuickIn/ApproveIn take destination_id; invalid id = 404.
+- app/monitor.py: every 2 h (MONITOR_INTERVAL_HOURS) videos.list for all uploaded clips per channel -> Alert rows on state change: deleted/missing, rejected (copyright, claim, duplicate, guidelines, ToS, trademark...), processing failed, region-blocked (usually a claim), available again. A channel whose login fails is skipped (never marks videos deleted on an error).
+- Dashboard: "Alerts" page (badge + dashboard banner) with your channel, YouTube link, upload/live time, original creator/video, part used, "Open in YouTube Studio". Limitation shown: API gives no strike list or claimant name.
+- Tests: mocked monitor (2 alerts, no duplicates, failing channel skipped, blocked alert), approve to channel #2, UI checked.

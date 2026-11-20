@@ -22,6 +22,8 @@ import httpx  # noqa: E402
 
 from app.ingest import download_section, friendly_error  # noqa: E402
 from app.tts import synth  # noqa: E402
+from app.captions import fetch_track  # noqa: E402
+from app.hot import _comments_ytdlp, fetch_heatmap  # noqa: E402
 
 DEFAULT_SERVER = "https://social-media-automation-production-f5543fa3.up.railway.app"
 SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFAULT_SERVER)).rstrip("/")
@@ -44,7 +46,32 @@ def get_token() -> str:
     return tok
 
 
+def analyze(job: dict, headers: dict):
+    pid, vid = job["project_id"], job["video_id"]
+    log(f"video {vid}: reading replays, comments and captions")
+    try:
+        heat = fetch_heatmap(vid)
+        try:
+            comments = _comments_ytdlp(vid, 300)
+        except Exception:  # noqa: BLE001
+            comments = []
+        track = None
+        if job.get("captions"):
+            try:
+                track = fetch_track(vid)
+            except Exception:  # noqa: BLE001  (video has no captions)
+                track = None
+        r = httpx.post(f"{SERVER}/api/worker/analysis/{pid}", headers=headers, timeout=120,
+                       json={"heatmap": heat, "comments": comments[:3000], "caption_track": track})
+        log(f"video {vid}: {len(heat)} replay points, {len(comments)} comments, captions {'yes' if track else 'no'} -> {r.status_code}")
+    except Exception as e:  # noqa: BLE001
+        log(f"video {vid}: analysis failed: {str(e)[:150]}")
+        httpx.post(f"{SERVER}/api/worker/fail/{pid}", headers=headers, json={"kind": "analyze", "error": str(e)[:300]}, timeout=30)
+
+
 def handle(job: dict, headers: dict):
+    if job["type"] == "analyze":
+        return analyze(job, headers)
     cid = job["clip_id"]
     with tempfile.TemporaryDirectory() as d:
         try:

@@ -83,6 +83,14 @@ def parse_json3(data: dict, start: float, end: float) -> list[dict]:
 
 
 def fetch_cues(video_id: str, start: float, end: float, lang: str = "auto") -> list[dict]:
+    cues = parse_json3(fetch_track(video_id, lang), start, end)
+    if not cues:
+        raise ValueError("No speech captions inside this clip's time range")
+    return cues
+
+
+def fetch_track(video_id: str, lang: str = "auto") -> dict:
+    """The whole caption track (json3) of a video; slice it later with parse_json3."""
     url = f"https://www.youtube.com/watch?v={video_id}"
     with yt_dlp.YoutubeDL(_opts({"skip_download": True})) as y:
         info = y.extract_info(url, download=False)
@@ -102,7 +110,4 @@ def fetch_cues(video_id: str, start: float, end: float, lang: str = "auto") -> l
     if not files:
         raise ValueError("Captions could not be downloaded (YouTube may be rate-limiting this server)")
     with open(files[0], encoding="utf-8") as f:
-        cues = parse_json3(json.load(f), start, end)
-    if not cues:
-        raise ValueError("No speech captions inside this clip's time range")
-    return cues
+        return json.load(f)

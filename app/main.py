@@ -21,7 +21,8 @@ from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
-from .db import Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
+from .monitor import check_uploads
+from .db import Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc
 from .jobs import executor
@@ -29,7 +30,9 @@ from .keywords import suggest
 from .metadata import auto_metadata
 from .metadata import build as build_meta
 from .policy import check_edit
+from .quick import quick_run
 from .render import run_render
+from .thumbs import make_thumbnail
 from .tts import VOICES, synth
 
 MODES = {"cc", "permission", "commentary"}
@@ -266,6 +269,7 @@ class ClipUpdate(BaseModel):
     tags: list[str] | None = Field(None, max_length=60)
     captions: list[Cue] | None = Field(None, max_length=400)
     caption_style: CaptionStyle | None = None
+    credit_on: bool | None = None
 
 
 class TtsIn(BaseModel):
@@ -305,6 +309,7 @@ class CookiesIn(BaseModel):
 
 class ApproveIn(BaseModel):
     publish_at: str | None = None
+    destination_id: int | None = None
 
 
 def _get(s, model, id_):
@@ -394,7 +399,7 @@ def update_clip(cid: int, body: ClipUpdate):
         c = _get(s, Clip, cid)
         if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
-        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume", "captions", "caption_style"}
+        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume", "captions", "caption_style", "credit_on"}
         changed = False
         for k, v in body.model_dump(exclude_unset=True).items():
             if getattr(c, k) != v:
@@ -645,7 +650,32 @@ def overview():
             "failed": _cards(s, failed),
             "review": _cards(s, review),
             "youtube_configured": youtube.configured(),
+            "alerts_unseen": s.query(Alert).filter(Alert.seen.is_(False)).count(),
         }
+
+
+# ---------- alerts: my uploaded videos deleted / rejected / blocked on YouTube ----------
+@app.get("/api/alerts")
+def list_alerts():
+    with SessionLocal() as s:
+        rows = s.query(Alert).order_by(Alert.id.desc()).limit(200).all()
+        last = s.query(Clip.yt_checked_at).filter(Clip.yt_checked_at.isnot(None)).order_by(Clip.yt_checked_at.desc()).first()
+        watching = s.query(Clip).filter(Clip.status == "uploaded", Clip.youtube_id.isnot(None)).count()
+        return {"alerts": [to_dict(a) for a in rows], "watching": watching,
+                "last_check": (last[0].isoformat() + "Z") if last else None}
+
+
+@app.post("/api/alerts/seen")
+def alerts_seen():
+    with SessionLocal() as s:
+        s.query(Alert).filter(Alert.seen.is_(False)).update({"seen": True})
+        s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/alerts/check")
+def alerts_check():
+    return check_uploads()
 
 
 @app.post("/api/clips/{cid}/approve")
@@ -664,6 +694,9 @@ def approve_clip(cid: int, body: ApproveIn):
         if not c.title or not c.description:
             meta = build_meta(p, c, [])
             c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]
+        if body.destination_id:
+            _get(s, Destination, body.destination_id)
+            c.destination_id = body.destination_id
         if not c.destination_id:
             first = s.query(Destination).order_by(Destination.id).first()
             if not first:
@@ -888,6 +921,9 @@ def worker_jobs(request: Request):
         for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
             t = json.loads(c.tts_pending)
             jobs.append({"type": "tts", "clip_id": c.id, "text": t.get("text", ""), "voice": t.get("voice", "")})
+        for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(2):
+            jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
+                         "captions": bool((p.quick or {}).get("captions", True))})
     return {"jobs": jobs}
 
 
@@ -936,6 +972,16 @@ def worker_voice(cid: int, request: Request, file: UploadFile = File(...)):
 @app.post("/api/worker/fail/{cid}")
 def worker_fail(cid: int, body: WorkerFailIn, request: Request):
     _worker_or_401(request)
+    if body.kind == "analyze":  # cid is a project id here: continue with a fallback slice
+        with SessionLocal() as s:
+            p = _get(s, Project, cid)
+            p.analysis_pending = False
+            q = dict(p.quick or {})
+            q["helper_analysed"] = True
+            p.quick = q
+            s.commit()
+        executor.submit(quick_run, cid)
+        return {"ok": True}
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         if body.kind == "tts":
@@ -968,6 +1014,174 @@ def delete_worker(wid: int):
         s.delete(_get(s, Worker, wid))
         s.commit()
         return {"deleted": True}
+
+
+class AnalysisIn(BaseModel):
+    heatmap: list[dict] = Field(default_factory=list, max_length=2000)
+    comments: list[str] = Field(default_factory=list, max_length=3000)
+    caption_track: dict | None = None
+
+
+@app.post("/api/worker/analysis/{pid}")
+def worker_analysis(pid: int, body: AnalysisIn, request: Request):
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        p = _get(s, Project, pid)
+        fmt = (p.quick or {}).get("format", "shorts")
+        want = min({"shorts": 35, "video": 60}[fmt], p.duration or 35)
+        if body.heatmap:
+            p.heatmap = body.heatmap
+        secs = parse_timestamps([str(t)[:2000] for t in body.comments], p.duration)
+        p.moments = rank_moments(p.duration, p.heatmap or [], secs, want, 3)
+        if body.caption_track:
+            p.caption_track = body.caption_track
+        p.analysis_pending = False
+        q = dict(p.quick or {})
+        q["helper_analysed"] = True
+        p.quick = q
+        s.commit()
+        is_quick = bool(p.quick)
+    if is_quick:
+        executor.submit(quick_run, pid)
+    return {"ok": True, "moments": len(p.moments or [])}
+
+
+# ---------- quick upload ----------
+class QuickIn(BaseModel):
+    url: str = Field(max_length=500)
+    format: Literal["shorts", "video"] = "shorts"
+    length: Literal["auto", "whole"] = "auto"
+    publish_at: str | None = None
+    captions: bool = True
+    mode: Literal["cc", "permission"] = "cc"
+    permission_note: str = Field("", max_length=2000)
+    destination_id: int | None = None  # which of my channels to upload to
+
+
+@app.post("/api/quick")
+def quick_start(body: QuickIn):
+    _check_yt_url(body.url)
+    if body.length == "whole" and body.format == "shorts":
+        raise HTTPException(400, "Shorts can be at most 3 minutes. Choose Video to upload the whole video.")
+    if body.publish_at:
+        try:
+            datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
+        except (ValueError, OverflowError):
+            raise HTTPException(400, "Pick a valid date and time")
+    with SessionLocal() as s:
+        if not s.query(Destination).count():
+            raise HTTPException(400, "Connect your YouTube channel first (My channels).")
+        if body.destination_id:
+            _get(s, Destination, body.destination_id)
+    try:
+        info = fetch_info(body.url)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Could not read video: {friendly_error(e)}")
+    if body.mode == "cc" and not is_cc(info["license"]):
+        raise HTTPException(409, {"code": "not_cc", "license": info["license"] or "Standard YouTube License",
+                                  "title": info["title"], "channel": info["channel"]})
+    if body.mode == "permission" and not body.permission_note.strip():
+        raise HTTPException(400, "Write how you got the creator's permission.")
+    if body.length == "whole" and info["duration"] > 4 * 3600:
+        raise HTTPException(400, "That video is longer than 4 hours.")
+    with SessionLocal() as s:
+        p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note,
+                    quick={"format": body.format, "length": body.length, "publish_at": body.publish_at,
+                           "captions": body.captions, "destination_id": body.destination_id,
+                           "state": "starting", "step": "Reading the video"}, **info)
+        s.add(p)
+        s.commit()
+        pid = p.id
+    executor.submit(quick_run, pid)
+    return {"project_id": pid}
+
+
+def _quick_dict(s, p: Project) -> dict:
+    q = p.quick or {}
+    out = {"project_id": p.id, "state": q.get("state"), "step": q.get("step"), "format": q.get("format"),
+           "length": q.get("length"), "title": p.title, "channel": p.channel, "video_id": p.video_id, "clip": None,
+           "dest_name": None}
+    if q.get("clip_id"):
+        c = s.get(Clip, q["clip_id"])
+        if c:
+            d = s.get(Destination, c.destination_id) if c.destination_id else None
+            out["dest_name"] = d.name if d else None
+            out["clip"] = {"id": c.id, "status": c.status, "error": c.error, "youtube_id": c.youtube_id,
+                           "publish_at": (c.publish_at.isoformat() + "Z") if c.publish_at else None,
+                           "thumb": bool(c.thumb_path), "thumb_note": c.thumb_note, "start": c.start, "end": c.end}
+    return out
+
+
+@app.get("/api/quick")
+def quick_list():
+    with SessionLocal() as s:
+        rows = s.query(Project).filter(Project.quick.isnot(None)).order_by(Project.id.desc()).limit(8).all()
+        return [_quick_dict(s, p) for p in rows if p.quick]
+
+
+@app.get("/api/quick/{pid}")
+def quick_status(pid: int):
+    with SessionLocal() as s:
+        return _quick_dict(s, _get(s, Project, pid))
+
+
+# ---------- thumbnails ----------
+class ThumbIn(BaseModel):
+    text: str = Field("", max_length=80)
+
+
+@app.post("/api/clips/{cid}/thumbnail")
+def thumb_generate(cid: int, body: ThumbIn):
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = _get(s, Project, c.project_id)
+        if not c.output_path or not Path(c.output_path).exists():
+            raise HTTPException(400, "Render the clip first")
+        c.thumb_text = body.text.strip() or None
+        try:
+            c.thumb_path, c.thumb_custom, c.thumb_note = str(make_thumbnail(c, p)), False, None
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, str(e)[:200])
+        s.commit()
+        return to_dict(c)
+
+
+@app.post("/api/clips/{cid}/thumbnail-upload")
+def thumb_upload(cid: int, file: UploadFile = File(...)):
+    ext = Path(file.filename or "t.jpg").suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png"):
+        raise HTTPException(400, "Use a JPG or PNG image")
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        dest = DATA_DIR / "clips" / str(cid) / ("thumb_custom" + (".png" if ext == ".png" else ".jpg"))
+        _save_upload(file, dest, 2 * 1024 * 1024)
+        c.thumb_path, c.thumb_custom, c.thumb_note = str(dest), True, None
+        s.commit()
+        return to_dict(c)
+
+
+@app.get("/api/clips/{cid}/thumbnail")
+def thumb_get(cid: int):
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if not c.thumb_path or not Path(c.thumb_path).exists():
+            raise HTTPException(404, "No thumbnail yet")
+        return FileResponse(c.thumb_path)
+
+
+@app.post("/api/clips/{cid}/thumbnail/push")
+def thumb_push(cid: int):
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if not c.youtube_id or not c.thumb_path or not Path(c.thumb_path).exists():
+            raise HTTPException(400, "Upload the video first and make a thumbnail")
+        try:
+            youtube.set_thumbnail(c.destination_id, c.youtube_id, c.thumb_path)
+            c.thumb_note = "Thumbnail set on YouTube"
+        except Exception as e:  # noqa: BLE001
+            c.thumb_note = youtube.thumb_error_text(e)
+        s.commit()
+        return to_dict(c)
 
 
 @app.get("/api/youtube/status")

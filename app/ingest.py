@@ -66,20 +66,43 @@ def download_section(video_id: str, start: float, end: float, out_dir: Path) -> 
             "outtmpl": str(out_dir / f"src_{s}_{e}.%(ext)s"),
             "download_ranges": download_range_func(None, [(s, e)]),
             "force_keyframes_at_cuts": True,
+            # YouTube sometimes drops long-lived connections; let ffmpeg resume instead of ending the file early
+            "external_downloader_args": {"ffmpeg_i": ["-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5"]},
         }
     )
-    with yt_dlp.YoutubeDL(opts) as y:
-        info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
-    path = Path(info["requested_downloads"][0]["filepath"])
-    if path != cached:
-        path.replace(cached)
-    want = e - s
-    if stream_seconds(cached, "v:0") < want * 0.9:  # incomplete download: don't render a cut-short clip
-        cached.unlink(missing_ok=True)
-        raise RuntimeError("The video section downloaded incompletely. Please try again.")
+    url = f"https://www.youtube.com/watch?v={video_id}"
+    for attempt in (1, 2, 3):
+        if attempt < 3:
+            with yt_dlp.YoutubeDL(opts) as y:
+                info = y.extract_info(url, download=True)
+            path = Path(info["requested_downloads"][0]["filepath"])
+            if path != cached:
+                path.replace(cached)
+        else:  # last resort: whole video, then cut the section locally (only for videos up to 30 minutes)
+            if int(info.get("duration") or 0) > 1800:
+                raise RuntimeError("The video section downloaded incompletely. Please try again.")
+            _download_whole_and_cut(url, cached, s, e, out_dir)
+        # the clip may run past the end of the video, so compare with what can exist
+        want = max(1, min(e, int(info.get("duration") or e)) - s)
+        if stream_seconds(cached, "v:0") >= want * 0.9:
+            break
+        cached.unlink(missing_ok=True)  # never render a cut-short clip
+        if attempt == 3:
+            raise RuntimeError("The video section downloaded incompletely. Please try again.")
     if 0 < stream_seconds(cached, "a:0") < want * 0.9:  # ranged audio downloads sometimes stop early
         _repair_audio(video_id, cached, s, want, out_dir)
     return cached
+
+
+def _download_whole_and_cut(url: str, cached: Path, s: int, e: int, out_dir: Path):
+    opts = _opts({"format": "bv*[height<=1080]+ba/b[height<=1080]/b", "merge_output_format": "mp4",
+                  "outtmpl": str(out_dir / "whole.%(ext)s")})
+    with yt_dlp.YoutubeDL(opts) as y:
+        info = y.extract_info(url, download=True)
+    whole = Path(info["requested_downloads"][0]["filepath"])
+    subprocess.run([ffmpeg_bin(), "-y", "-ss", str(s), "-i", str(whole), "-t", str(e - s), "-c:v", "libx264", "-preset", "veryfast",
+                    "-crf", "18", "-c:a", "aac", "-b:a", "192k", str(cached)], capture_output=True, text=True)
+    whole.unlink(missing_ok=True)
 
 
 def stream_seconds(path: Path, sel: str) -> float:
