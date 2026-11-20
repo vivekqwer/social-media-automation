@@ -56,6 +56,8 @@ class Clip(Base):
     destination_id = Column(Integer)
     attempted_at = Column(DateTime)  # last upload attempt (quota accounting)
     autoqueue = Column(Boolean, default=False)  # re-queue automatically after a re-render
+    captions = Column(JSON, default=list)  # [{s, e, t}] relative to clip start
+    caption_style = Column(JSON)  # {on, lang, pos, size, color}
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -81,6 +83,9 @@ class Channel(Base):
     aspect = Column(String(8), default="9:16")
     gap_hours = Column(Integer, default=12)  # spacing between scheduled uploads
     destination_id = Column(Integer)  # which of my channels receives the uploads
+    captions = Column(Boolean, default=False)  # add YouTube captions to every clip
+    post_times = Column(String(100))  # daily upload times, e.g. '10:00,18:30' (user's local time)
+    tz_offset = Column(Integer, default=0)  # minutes, JS getTimezoneOffset(): utc = local + offset
     review_first = Column(Boolean, default=False)  # True: clips wait for my approval instead of auto-queueing
     seen = Column(JSON, default=list)
     last_run = Column(DateTime)

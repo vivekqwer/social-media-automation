@@ -1,4 +1,5 @@
 """Autopilot: channel name/URL in -> latest videos -> hot moments -> clips -> render -> metadata -> scheduled."""
+import re
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -6,6 +7,7 @@ import yt_dlp
 from sqlalchemy import func
 
 from .db import Channel, Clip, Project, SessionLocal, utcnow
+from .captions import fetch_cues
 from .hot import fetch_comments, parse_timestamps, rank_moments
 from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
@@ -41,7 +43,23 @@ def list_video_ids(channel_url: str, n: int) -> list[str]:
     return [e["id"] for e in (info.get("entries") or []) if e and e.get("id")]
 
 
-def _next_slot(s, gap_hours: int, dest_id):
+def _slot_from_times(after, post_times: str, tz_offset: int):
+    """First daily slot (user's local clock) strictly after `after` (naive UTC). None if no valid times."""
+    times = sorted({tuple(int(x) for x in t.strip().split(":")) for t in (post_times or "").split(",")
+                    if re.match(r"^\d{1,2}:\d{2}$", t.strip()) and int(t.strip().split(":")[0]) < 24 and int(t.strip().split(":")[1]) < 60})
+    if not times:
+        return None
+    local_after = after - timedelta(minutes=tz_offset or 0)
+    for d in range(0, 90):
+        day = (local_after + timedelta(days=d)).replace(hour=0, minute=0, second=0, microsecond=0)
+        for h, m in times:
+            cand = day + timedelta(hours=h, minutes=m)
+            if cand > local_after:
+                return cand + timedelta(minutes=tz_offset or 0)
+    return None
+
+
+def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_offset: int = 0):
     """Next free publish slot for this destination (only counts clips still holding a future slot)."""
     now = utcnow()
     last = (
@@ -54,7 +72,9 @@ def _next_slot(s, gap_hours: int, dest_id):
         )
         .scalar()
     )
-    return (last or now) + timedelta(hours=gap_hours)
+    base = max(last, now) if last else now
+    slot = _slot_from_times(base, post_times, tz_offset) if post_times else None
+    return slot or (base + timedelta(hours=gap_hours))
 
 
 def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
@@ -77,6 +97,13 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
                  destination_id=ch.destination_id)
         s.add(c)
         s.commit()
+        if ch.captions:
+            try:
+                c.captions = fetch_cues(p.video_id, c.start, c.end)
+                c.caption_style = {"on": True, "lang": "auto", "pos": "bottom", "size": "M", "color": "#ffffff"}
+                s.commit()
+            except Exception as e:  # noqa: BLE001
+                log.append(f"clip {c.id}: no captions ({str(e)[:70]})")
         run_render(c.id)
         s.refresh(c)
         if c.status != "rendered":
@@ -87,7 +114,7 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
         if ch.review_first:
             log.append(f"clip {c.id} ready for review")
             continue
-        c.publish_at, c.status, c.autoqueue = _next_slot(s, ch.gap_hours, ch.destination_id), "queued", True
+        c.publish_at, c.status, c.autoqueue = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0), "queued", True
         s.commit()
         log.append(f"queued clip {c.id} for {c.publish_at}")
     return True

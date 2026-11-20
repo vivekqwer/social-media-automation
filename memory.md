@@ -44,6 +44,10 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 ## Product workflow (user's wish, 2026-11-20)
 - User gives channel link(s) -> system cuts clips automatically -> uploads to user's own account (Foody). Per-source switch: Auto upload (default) or Review first. If user edits a clip, only that clip re-renders and returns to the queue (autoqueue). New features wanted next: captions, title templates, notifications (ideas listed in chat).
 
+## Captions & scheduling (2026-11-20)
+- Captions = YouTube's own subtitle tracks (free, no AI). No captions on a video -> none (Whisper fallback not built). Bundled fonts in fonts/ (Noto Sans, Noto Sans Devanagari) are needed in the Docker image.
+- Scheduling: per-clip date/time picker in editor; per-source daily "Post at" times; uploads happen up to 48h early as private with publishAt. WARNING: unaudited API projects stay private-locked until YouTube API compliance audit -> scheduled public release won't happen until audit passes.
+
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
 

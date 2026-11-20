@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import scheduler, youtube
 from .autopilot import _next_slot, run_channel
+from .captions import fetch_cues
 from .config import APP_PASSWORD, APP_USER, DATA_DIR, IS_LOCAL
 from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, parse_timestamps, rank_moments
@@ -114,6 +115,24 @@ class Overlay(BaseModel):
     color: str = Field("#ffffff", max_length=20)
 
 
+class Cue(BaseModel):
+    s: float = Field(ge=0, le=36000, allow_inf_nan=False)
+    e: float = Field(ge=0, le=36000, allow_inf_nan=False)
+    t: str = Field("", max_length=200)
+
+
+class CaptionStyle(BaseModel):
+    on: bool = False
+    lang: str = Field("auto", max_length=12)
+    pos: Literal["top", "center", "bottom"] = "bottom"
+    size: Literal["S", "M", "L"] = "M"
+    color: str = Field("#ffffff", max_length=20)
+
+
+class CaptionsIn(BaseModel):
+    lang: str = Field("auto", max_length=12)
+
+
 class ClipUpdate(BaseModel):
     start: float | None = Field(None, ge=0, allow_inf_nan=False)
     end: float | None = Field(None, gt=0, allow_inf_nan=False)
@@ -126,6 +145,8 @@ class ClipUpdate(BaseModel):
     title: str | None = Field(None, max_length=200)
     description: str | None = Field(None, max_length=5000)
     tags: list[str] | None = Field(None, max_length=60)
+    captions: list[Cue] | None = Field(None, max_length=400)
+    caption_style: CaptionStyle | None = None
 
 
 class TtsIn(BaseModel):
@@ -154,6 +175,9 @@ class ChannelIn(BaseModel):
     gap_hours: int = Field(12, ge=1, le=720)
     destination_id: int | None = None
     review_first: bool = False
+    captions: bool = False
+    post_times: str = Field("", max_length=100)
+    tz_offset: int = Field(0, ge=-900, le=900)
 
 
 class ApproveIn(BaseModel):
@@ -239,7 +263,7 @@ def update_clip(cid: int, body: ClipUpdate):
         c = _get(s, Clip, cid)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
-        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume"}
+        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume", "captions", "caption_style"}
         changed = False
         for k, v in body.model_dump(exclude_unset=True).items():
             if getattr(c, k) != v:
@@ -268,6 +292,27 @@ def make_tts(cid: int, body: TtsIn):
             raise HTTPException(502, f"TTS failed: {str(e)[:200]}")
         c.voice_path, c.voice_text = str(path), body.text
         c.status = "draft" if c.status in ("rendered", "queued", "failed") else c.status
+        s.commit()
+        return to_dict(c)
+
+
+@app.post("/api/clips/{cid}/captions")
+def make_captions(cid: int, body: CaptionsIn):
+    """Pull the video's own YouTube captions for this clip's time range (editable afterwards)."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status in ("rendering", "uploading", "uploaded"):
+            raise HTTPException(409, f"Clip is {c.status}.")
+        p = _get(s, Project, c.project_id)
+        try:
+            cues = fetch_cues(p.video_id, c.start, c.end, body.lang)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, str(e)[:300])
+        style = dict(c.caption_style or {"pos": "bottom", "size": "M", "color": "#ffffff"})
+        style.update({"on": True, "lang": body.lang})
+        c.captions, c.caption_style = cues, style
+        if c.status in ("rendered", "queued", "failed"):
+            c.status = "draft"
         s.commit()
         return to_dict(c)
 
@@ -472,7 +517,8 @@ def approve_clip(cid: int, body: ApproveIn):
                 raise HTTPException(400, "publish_at must be a valid ISO datetime")
         else:
             ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
-            c.publish_at = _next_slot(s, ch.gap_hours if ch else 12, c.destination_id)
+            c.publish_at = _next_slot(s, ch.gap_hours if ch else 12, c.destination_id,
+                                      ch.post_times if ch else None, (ch.tz_offset or 0) if ch else 0)
         c.autoqueue, c.status, c.error = True, "queued", None
         s.commit()
         return to_dict(c)

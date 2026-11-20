@@ -36,8 +36,12 @@ UPLOAD_LEAD_HOURS = int(os.getenv("UPLOAD_LEAD_HOURS") or "48")
 MAX_UPLOADS_PER_DAY = int(os.getenv("MAX_UPLOADS_PER_DAY") or "5")  # API quota: ~6/day by default
 
 
+FONTS_DIR = Path(os.getenv("FONTS_DIR") or (Path(__file__).resolve().parent.parent / "fonts"))
+
+
 def _default_font() -> str:
     for p in (
+        str(FONTS_DIR / "NotoSans-Bold.ttf"),
         "C:/Windows/Fonts/arialbd.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf",

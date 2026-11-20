@@ -35,3 +35,10 @@
 - Backend: Channel.review_first, Clip.autoqueue, auto-migration (ALTER TABLE for new model columns), /api/overview, /api/clips (list with source info), /api/clips/{id}/approve, DELETE /api/clips/{id}, /api/channels/{id}/review. Edited queued clips re-render and re-join the queue (autoqueue) automatically.
 - UI rewrite (static/index.html): sidebar app, dashboard (add-source hero, KPIs, review/up-next/recent/attention), Clips grid with tabs, Sources with Auto-upload switch, My channels, slide-over editor (preview, trim, effects, overlays, voice, metadata/keywords, approve/queue/upload-now/discard), new-clip modal with hot moments.
 - Verified: migration on old schema, endpoints via TestClient, UI renders with seeded data, no console errors, no horizontal overflow.
+
+## 2026-11-20 — Task 7: Captions + daily posting times
+- Captions: app/captions.py pulls the video's own YouTube subtitle track (manual or auto, Hindi/English, json3) for the clip's time range via yt-dlp (no AI, no cost); cues are editable; burned in with libass (ASS) using bundled Noto Sans + Noto Sans Devanagari (fonts/). Hindi/mixed-script text overlays now also go through ASS (drawtext can't font-fallback).
+- Per-source "Auto captions" switch (autopilot fetches cues before rendering); editor Captions card (language, position, size, colour, edit/delete lines).
+- Per-source "Post at" daily times (e.g. 10:00, 18:30 in user's local time, tz_offset from browser) -> next free slot; falls back to gap hours.
+- Verified: json3 parser (noise removal, chunking, overlap), real YouTube captions fetch (8 cues), ASS render with Hindi (frame inspected), slot math for IST, UI card, regression tests.
+- Note: videos with no YouTube captions get none (a local Whisper fallback is possible later, CPU-heavy).
