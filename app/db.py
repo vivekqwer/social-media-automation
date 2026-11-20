@@ -83,7 +83,8 @@ class Channel(Base):
 
     __tablename__ = "channels"
     id = Column(Integer, primary_key=True)
-    query = Column(String(300))  # name, @handle or URL as typed by user
+    kind = Column(String(10), default="channel")  # channel | topic (search Creative Commons videos by keywords)
+    query = Column(String(300))  # name, @handle or URL as typed by user; keywords for a topic
     resolved_url = Column(String(500))
     name = Column(String(300))
     mode = Column(String(20))  # cc | permission  (commentary needs manual edit -> drafts only)
@@ -113,6 +114,9 @@ class Destination(Base):
     channel_id = Column(String(64), unique=True)
     name = Column(String(300))
     token = Column(Text)
+    paused = Column(Boolean, default=False)  # uploads held (set automatically when YouTube removes/blocks a video)
+    paused_reason = Column(Text)
+    paused_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
 
 

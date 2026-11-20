@@ -1,5 +1,6 @@
 import base64
 import json
+import os
 import secrets
 import shutil
 from urllib.parse import quote, urlparse
@@ -15,8 +16,9 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 
-from . import auth, scheduler, workers, youtube
+from . import auth, quota, scheduler, workers, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt_existing
@@ -43,6 +45,7 @@ PUBLIC_PATHS = {
     "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password",
     "/auth/reset/start", "/auth/callback",
 }
+SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 VOICE_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
@@ -288,6 +291,7 @@ class ScheduleIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
+    kind: Literal["channel", "topic"] = "channel"
     query: str = Field(min_length=1, max_length=300)
     mode: str = "cc"
     permission_note: str = Field("", max_length=2000)
@@ -653,7 +657,44 @@ def overview():
             "review": _cards(s, review),
             "youtube_configured": youtube.configured(),
             "alerts_unseen": s.query(Alert).filter(Alert.seen.is_(False)).count(),
+            "quota": quota.summary(),
+            "uploads_today": _uploads_today(s),
+            "helper": _helper_state(s),
         }
+
+
+def _uploads_today(s) -> dict:
+    since = scheduler._pacific_midnight(utcnow())
+    return {str(did): n for did, n in s.query(Clip.destination_id, func.count()).filter(Clip.attempted_at >= since)
+            .group_by(Clip.destination_id)}
+
+
+def _helper_state(s) -> dict:
+    """Is a helper PC online, and is work waiting for it?"""
+    ws = [workers.as_dict(w) for w in s.query(Worker).filter(Worker.approved.is_(True))]
+    waiting = (s.query(Clip).filter(Clip.status == "fetching").count()
+               + s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").count()
+               + s.query(Project).filter(Project.analysis_pending.is_(True)).count())
+    return {"approved": len(ws), "online": sum(1 for w in ws if w["online"]), "waiting": waiting,
+            "last_seen": max((w["last_seen"] for w in ws if w["last_seen"]), default=None)}
+
+
+@app.post("/api/destinations/{did}/pause")
+def pause_destination(did: int):
+    with SessionLocal() as s:
+        d = _get(s, Destination, did)
+        d.paused, d.paused_at, d.paused_reason = True, utcnow(), "Paused by you"
+        s.commit()
+        return _dest_dict(d)
+
+
+@app.post("/api/destinations/{did}/resume")
+def resume_destination(did: int):
+    with SessionLocal() as s:
+        d = _get(s, Destination, did)
+        d.paused, d.paused_reason = False, None
+        s.commit()
+        return _dest_dict(d)
 
 
 # ---------- alerts: my uploaded videos deleted / rejected / blocked on YouTube ----------
@@ -741,7 +782,11 @@ def add_channel(body: ChannelIn):
     body.query = body.query.strip()
     if not body.query:
         raise HTTPException(400, "Channel name/URL is empty")
-    if body.query.startswith("http"):
+    if body.kind == "topic":
+        body.mode, body.permission_note = "cc", ""  # topics only ever use Creative Commons videos
+        if body.query.startswith("http"):
+            raise HTTPException(400, "A topic is words like 'street food india', not a link")
+    elif body.query.startswith("http"):
         _check_yt_url(body.query)
     with SessionLocal() as s:
         if body.destination_id:
@@ -926,7 +971,7 @@ def worker_jobs(request: Request):
         for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(2):
             jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
                          "captions": bool((p.quick or {}).get("captions", True))})
-    return {"jobs": jobs}
+    return {"jobs": jobs, "version": SERVER_VERSION}
 
 
 def _save_upload(file: UploadFile, dest: Path, limit: int):

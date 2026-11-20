@@ -6,8 +6,8 @@ from urllib.parse import quote
 import yt_dlp
 from sqlalchemy import func
 
-from .db import Channel, Clip, Project, SessionLocal, utcnow
-from . import youtube
+from .db import Channel, Clip, Destination, Project, SessionLocal, utcnow
+from . import quota, youtube
 from .captions import fetch_cues
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import _opts, fetch_info, is_cc
@@ -89,13 +89,25 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
     )
     base = max(last, now) if last else now
     slot = _slot_from_times(base, post_times, tz_offset) if post_times else None
-    return slot or (base + timedelta(hours=gap_hours))
+    slot = slot or (base + timedelta(hours=gap_hours))
+    # all channels share one daily upload budget: move to the next day while that day is full
+    cap = quota.capacity()
+    for _ in range(60):
+        day = quota.pt_day_of(slot)
+        lo, hi = slot - timedelta(hours=36), slot + timedelta(hours=36)
+        load = sum(1 for (t,) in s.query(Clip.publish_at).filter(
+            Clip.status.in_(["queued", "uploading", "uploaded"]), Clip.publish_at.between(lo, hi)) if quota.pt_day_of(t) == day)
+        if load < cap:
+            break
+        nxt = slot + timedelta(days=1)
+        slot = (_slot_from_times(nxt.replace(hour=0, minute=0) - timedelta(minutes=1), post_times, tz_offset) if post_times else None) or nxt
+    return slot
 
 
 def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
     """Returns True if the video yielded clips."""
     info = fetch_info(f"https://www.youtube.com/watch?v={vid}")
-    if ch.mode == "cc" and not is_cc(info["license"]):
+    if (ch.mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
         log.append(f"skip {vid}: not CC")
         return False
     p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=ch.mode,
@@ -153,8 +165,18 @@ def run_channel(channel_id: int):
             return
         log = []
         try:
+            dest = s.get(Destination, ch.destination_id) if ch.destination_id else None
+            if dest and dest.paused:
+                ch.last_status = f"waiting: uploads to {dest.name} are paused (press Resume on the dashboard)"
+                ch.last_run = utcnow()
+                s.commit()
+                return
+            topic = ch.kind == "topic"
             if not ch.resolved_url:
-                ch.resolved_url, ch.name = resolve_channel(ch.query)
+                if topic:
+                    ch.resolved_url, ch.name = "topic", f"Topic: {ch.query}"
+                else:
+                    ch.resolved_url, ch.name = resolve_channel(ch.query)
                 s.commit()
             backlog = s.query(Clip).filter(Clip.destination_id == ch.destination_id, Clip.status == "queued").count()
             if backlog >= MAX_QUEUED_PER_DEST:
@@ -163,7 +185,13 @@ def run_channel(channel_id: int):
                 s.commit()
                 return
             seen = set(ch.seen or [])
-            ids = [i for i in list_video_ids(ch.resolved_url, ch.videos_per_run * 4) if i not in seen]
+            if topic:  # Creative Commons videos only, found by YouTube search
+                ids = youtube.api_search_cc(ch.query, seen, ch.videos_per_run * 3)
+                if not ids:
+                    log.append("no new Creative Commons videos found for this topic" if quota.can_search()
+                               else "search skipped: today's YouTube quota is kept for uploads")
+            else:
+                ids = [i for i in list_video_ids(ch.resolved_url, ch.videos_per_run * 4) if i not in seen]
             made = 0
             for vid in ids:
                 if made >= ch.videos_per_run:

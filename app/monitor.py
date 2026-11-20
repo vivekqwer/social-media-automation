@@ -24,6 +24,9 @@ REASONS = {
 }
 
 
+PAUSE_ON = {"removed", "rejected", "blocked"}  # these may come with a strike: stop uploading until I resume
+
+
 def _state(item: dict | None) -> tuple[str, str, str]:
     """-> (state key, alert kind, message). State 'ok' means nothing is wrong."""
     if item is None:
@@ -81,6 +84,9 @@ def check_uploads() -> dict:
                         "clip_range": [c.start, c.end],
                     }))
                     new += 1
+                    if kind in PAUSE_ON and dest and not dest.paused:  # protect the channel: hold its uploads
+                        dest.paused, dest.paused_at = True, utcnow()
+                        dest.paused_reason = f"“{c.title or yid}”: {msg}"
                 c.yt_state, c.yt_checked_at = state, utcnow()
                 checked += 1
             s.commit()

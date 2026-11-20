@@ -209,9 +209,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="page-h"><div><h1>Dashboard</h1><div class="desc">Paste a source — clips are cut, credited and uploaded to your channel automatically.</div></div></div>
         <div id="alerts"></div>
         <div class="card" style="margin-bottom:16px">
-          <div class="ch"><div><h3>Add a source</h3><p>Channel link, @handle or name. Paste a single video link to clip it yourself.</p></div></div>
+          <div class="ch"><div><h3>Add a source</h3><p id="h-help">Channel link, @handle or name. Paste a single video link to clip it yourself.</p></div></div>
           <div class="cb">
             <div class="hero-in">
+              <select id="h-kind" style="width:auto"><option value="channel">Channel / video</option><option value="topic">Topic (CC videos only)</option></select>
               <div class="inp"><i data-ico="link"></i><input id="h-q" placeholder="https://youtube.com/@channel  ·  @handle  ·  video link"></div>
               <select id="h-mode" style="width:auto"><option value="cc">CC videos only</option><option value="permission">I have permission</option><option value="commentary">Commentary (manual)</option></select>
               <select id="h-dest" style="width:auto"></select>
@@ -222,6 +223,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           </div>
         </div>
         <div class="grid stats" id="kpis" style="margin-bottom:16px"></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Today's YouTube upload budget</h3><p>One daily budget from Google, shared by all your channels. Uploads are planned to fit it.</p></div><span class="badge outline" id="q-reset"></span></div><div class="cb" id="d-quota"></div></div>
         <div class="grid cols">
           <div class="grid" style="align-content:start">
             <div class="card"><div class="ch"><div><h3>Ready for your review</h3><p>Approve to queue, or edit first.</p></div></div><div class="cb" id="d-review"></div></div>
@@ -277,7 +279,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div class="sm mut" style="margin-top:10px">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
               <div id="wk-list"></div>
-              <div class="mut sm" style="margin-top:10px;line-height:1.7">Start it on your PC: open the project folder and double-click <b>worker\run_worker.bat</b>. Keep the window open. New helpers appear here — press <b>Approve</b>.</div></div></div>
+              <div class="mut sm" style="margin-top:10px;line-height:1.7"><b>Start automatically (recommended, once):</b> in the project folder double-click <b>worker\install_autostart.bat</b>. The helper then runs hidden whenever your PC is on, restarts itself if it stops, and updates itself when the server gets new code.<br>Manual start: <b>worker\run_worker.bat</b>. New helpers appear here — press <b>Approve</b>.</div></div></div>
             <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
               <ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.7"><li>Use a <b>spare Google account</b>, not your main one.</li><li>Open YouTube in a private window, sign in, then export <i>cookies.txt</i> for youtube.com (extension “Get cookies.txt LOCALLY”).</li><li>Close the private window, then paste the file here.</li></ol>
               <textarea id="ck-text" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;..." style="min-height:90px;font-size:12px"></textarea>
@@ -367,6 +369,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 <div class="modal" id="m-add"><div class="card">
   <div class="ch"><div><h3>Add sources</h3><p>One per line: channel link, @handle or name.</p></div><button class="btn ghost icon" id="m-add-close"><i data-ico="x"></i></button></div>
   <div class="cb">
+    <label class="f" style="margin-bottom:10px">Source type<select id="s-kind"><option value="channel">Channels (link, @handle or name)</option><option value="topic">Topics — the system finds Creative Commons videos itself</option></select></label>
     <textarea id="s-q" placeholder="https://youtube.com/@channel&#10;@handle&#10;Channel name"></textarea>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
       <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
@@ -533,8 +536,16 @@ async function loadDash(){
   if(!OV.youtube_configured)al+=`<div class="alert bad">${ico('alert')}Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>`;
   else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
   if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
+  (DESTS.filter(d=>d.paused)).forEach(d=>{al+=`<div class="alert bad">${ico('alert')}<span><b>Uploads to ${esc(d.name)} are paused.</b> ${esc(d.paused_reason||'')} Clips stay queued until you resume.</span><button class="btn sm" data-resume="${d.id}">Resume uploads</button></div>`});
+  const hp=OV.helper||{};if(hp.waiting&&!hp.online)al+=`<div class="alert bad">${ico('alert')}<span><b>Helper PC is offline</b> — ${hp.waiting} job${hp.waiting===1?'':'s'} waiting${hp.last_seen?' (last seen '+when(hp.last_seen)+')':''}. Start it, or run <b>worker\\install_autostart.bat</b> once so it always starts by itself.</span></div>`;
   if(OV.alerts_unseen)al+=`<div class="alert bad">${ico('bell')}${OV.alerts_unseen} of your uploaded videos had a problem on YouTube (deleted, copyright or blocked).<button class="btn sm" onclick="go('alerts')">See details</button></div>`;
   $('#alerts').innerHTML=al;
+  $$('[data-resume]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Resume uploads to this channel? Only do this if the strike/removal is dealt with.')){await api(`/api/destinations/${b.dataset.resume}/resume`,'POST');toast('Uploads resumed');loadDash()}}));
+  const Q=OV.quota;if(Q){const pct=Math.min(100,Math.round(Q.used*100/Q.limit));
+    $('#q-reset').textContent='Resets '+new Date(Q.resets_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    $('#d-quota').innerHTML=`<div class="row" style="justify-content:space-between;margin-bottom:8px"><b>${Q.uploads_left} more upload${Q.uploads_left===1?'':'s'} possible today</b><span class="mut sm">${Q.used.toLocaleString()} / ${Q.limit.toLocaleString()} units · max ${Q.capacity} uploads a day for all channels</span></div>
+      <div class="bar" style="height:8px;width:100%;max-width:none"><i style="width:${pct}%;background:${pct>85?'var(--bad)':'var(--brand)'}"></i></div>
+      <div class="row sm mut" style="margin-top:10px;gap:14px">${DESTS.map(d=>`<span>${esc(d.name)}: <b>${(OV.uploads_today||{})[d.id]||0}</b> today${d.paused?' · <span style="color:var(--bad)">paused</span>':''}</span>`).join('')||'No channel connected'}</div>`}
   $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering+(c.fetching||0)],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
   $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
   $('#d-up').innerHTML=OV.upcoming.length?OV.upcoming.map(x=>clipMini(x,`<span class="badge ${x.status}">${LABEL[x.status]}</span>`)).join(''):empty('clock','No uploads scheduled','Approved clips show up here with their publish time.');
@@ -545,7 +556,9 @@ async function loadDash(){
 $('#h-mode').onchange=()=>{$('#h-note').classList.toggle('hide',$('#h-mode').value!=='permission')};
 const isVideo=u=>/(watch\?v=|youtu\.be\/|\/shorts\/|\/live\/)/i.test(u);
 $('#h-go').onclick=()=>once(async()=>{
-  const q=$('#h-q').value.trim();if(!q)throw new Error('Paste a channel or video link first');
+  const q=$('#h-q').value.trim();if(!q)throw new Error($('#h-kind').value==='topic'?'Type a topic first, e.g. street food india':'Paste a channel or video link first');
+  if($('#h-kind').value==='topic'){await api('/api/channels','POST',{kind:'topic',query:q,mode:'cc',destination_id:+$('#h-dest').value||null,review_first:$('#h-review').checked,captions:true,tz_offset:new Date().getTimezoneOffset()});
+    $('#h-q').value='';toast('Topic added — the system finds Creative Commons videos for it every few hours');go('sources');return}
   if(isVideo(q)){await openNew(q,$('#h-mode').value,$('#h-note').value);return}
   if($('#h-mode').value==='commentary')throw new Error('Commentary needs manual editing — paste a single video link instead.');
   await api('/api/channels','POST',{query:q,mode:$('#h-mode').value,permission_note:$('#h-note').value,destination_id:+$('#h-dest').value||null,review_first:$('#h-review').checked,captions:true,tz_offset:new Date().getTimezoneOffset()});
@@ -554,11 +567,16 @@ $('#h-go').onclick=()=>once(async()=>{
 
 function openAdd(){$('#m-add').classList.add('on')}
 $('#open-add').onclick=openAdd;$('#m-add-close').onclick=$('#m-add-cancel').onclick=()=>$('#m-add').classList.remove('on');
+$('#h-kind').onchange=()=>{const t=$('#h-kind').value==='topic';$('#h-mode').classList.toggle('hide',t);if(t)$('#h-note').classList.add('hide');
+  $('#h-q').placeholder=t?'Topic, e.g.  street food india  ·  funny cats  ·  cooking hacks':'https://youtube.com/@channel  ·  @handle  ·  video link';
+  $('#h-help').textContent=t?'Give a topic — the system searches YouTube for Creative Commons videos only, clips the best moments and uploads them.':'Channel link, @handle or name. Paste a single video link to clip it yourself.'};
+$('#s-kind').onchange=()=>{const t=$('#s-kind').value==='topic';$('#s-mode').disabled=t;if(t)$('#s-mode').value='cc';
+  $('#s-q').placeholder=t?'street food india'+String.fromCharCode(10)+'funny cats'+String.fromCharCode(10)+'cooking hacks':'https://youtube.com/@channel'+String.fromCharCode(10)+'@handle'+String.fromCharCode(10)+'Channel name'};
 $('#s-add').onclick=()=>once(async()=>{
   const lines=$('#s-q').value.split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean);
   if(!lines.length)throw new Error('Add at least one channel');
   const errs=[];
-  for(const q of lines){try{await api('/api/channels','POST',{query:q,mode:$('#s-mode').value,permission_note:$('#s-note').value,destination_id:+$('#s-dest').value||null,
+  for(const q of lines){try{await api('/api/channels','POST',{kind:$('#s-kind').value,query:q,mode:$('#s-kind').value==='topic'?'cc':$('#s-mode').value,permission_note:$('#s-note').value,destination_id:+$('#s-dest').value||null,
     videos_per_run:+$('#s-v').value,clips_per_video:+$('#s-c').value,clip_len:+$('#s-l').value,gap_hours:+$('#s-g').value,aspect:$('#s-a').value,review_first:$('#s-review').checked,captions:$('#s-caps').checked,post_times:$('#s-times').value,tz_offset:new Date().getTimezoneOffset()})}catch(e){errs.push(q+': '+e.message)}}
   if(errs.length)toast(errs.join(' | '),true);else{$('#s-q').value='';toast('Sources added');$('#m-add').classList.remove('on')}
   go('sources');
@@ -568,7 +586,7 @@ async function loadSources(){
   await loadOverview();const L=await api('/api/channels');
   $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
     <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
-    <td><div class="row" style="gap:6px"><span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
+    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}<span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
     <td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
     <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
     <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
@@ -581,11 +599,12 @@ async function loadSources(){
 
 async function loadDests(){
   await loadOverview();loadCookies();loadWorkers();
-  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)} · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div><label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':'<span class="badge uploaded">Connected</span>'}<button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
+  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)} · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div><label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}<button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
   $$('[data-face]').forEach(inp=>inp.onchange=()=>once(async()=>{const f=inp.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
+  $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
   loadFace();
 }
 async function loadFace(){

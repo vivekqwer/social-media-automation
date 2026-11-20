@@ -80,3 +80,6 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 ## Thumbnails with face (2026-11-20)
 - User wants every thumbnail: video frame + their face + bold text, phone-safe, fully automatic, no external AI. Face is uploaded once in My channels (default for all channels; a channel may have its own). Model: U2-Net human-seg ONNX baked into Docker image.
 - Foody has 1 copyright strike + 1 CG warning (2026-11-20) after the IGN/GTA commentary + BBB uploads. 3 strikes = channel terminated: only CC or permission content from now on.
+
+## Automation set (2026-11-20)
+- Channel auto-pauses on removed/rejected/blocked alerts; user resumes from dashboard. Topic sources = CC-only search. Helper: install_autostart.bat (user runs once; assistant must not add startup entries itself). Quota: ~5 uploads/day across ALL channels (one Google project).

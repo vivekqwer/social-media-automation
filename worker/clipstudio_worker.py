@@ -10,6 +10,7 @@ The first start registers this PC; approve it in the dashboard under My channels
 import os
 import pathlib
 import socket
+import subprocess
 import sys
 import tempfile
 import time
@@ -29,10 +30,50 @@ DEFAULT_SERVER = "https://social-media-automation-production-f5543fa3.up.railway
 SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFAULT_SERVER)).rstrip("/")
 TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
 POLL_SECONDS = 8
+UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
+EXIT_REMOVED, EXIT_UPDATED = 3, 4  # the launchers stop on 3 and restart on 4
 
 
 def log(msg: str):
     print(time.strftime("%H:%M:%S"), msg, flush=True)
+
+
+def single_instance():
+    """Only one helper per PC (two would download the same clip twice)."""
+    lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock.bind(("127.0.0.1", 47613))
+    except OSError:
+        log("Another Clip Studio helper is already running on this PC. Closing this one.")
+        sys.exit(0)
+    return lock
+
+
+def _git(*args) -> str:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=120).stdout.strip()
+
+
+def maybe_update(server_version: str):
+    """Pull the new helper code when the server runs a newer version, then restart (exit code 4)."""
+    if not server_version or not (ROOT / ".git").exists():
+        return
+    try:
+        head = _git("rev-parse", "HEAD")
+        if not head or head == server_version or _git("status", "--porcelain", "--untracked-files=no"):
+            return  # up to date, or local edits we must not touch
+        _git("fetch", "--quiet", "origin")
+        if subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", server_version], cwd=ROOT,
+                          capture_output=True).returncode != 0:
+            return  # the server is not ahead of us (or that version is unknown here)
+        before = (ROOT / "requirements.txt").read_bytes()
+        if subprocess.run(["git", "pull", "--ff-only", "--quiet"], cwd=ROOT).returncode != 0:
+            return
+        if (ROOT / "requirements.txt").read_bytes() != before:
+            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "worker" / "requirements.txt")], cwd=ROOT / "worker")
+        log("Updated the helper to the server's version. Restarting...")
+        sys.exit(EXIT_UPDATED)
+    except subprocess.TimeoutExpired:
+        return
 
 
 def get_token() -> str:
@@ -96,7 +137,9 @@ def handle(job: dict, headers: dict):
 
 
 def main():
+    _lock = single_instance()  # noqa: F841  (held for the life of the process)
     headers = {"x-worker-token": get_token()}
+    last_update_check = 0.0
     log(f"Clip Studio helper running for {SERVER}. Keep this window open.")
     waiting = False
     while True:
@@ -108,14 +151,18 @@ def main():
                     waiting = True
             elif r.status_code == 401:
                 log("This helper was removed in the dashboard. Delete worker/.worker_token and start again.")
-                return
+                sys.exit(EXIT_REMOVED)
             else:
                 r.raise_for_status()
                 if waiting:
                     log("Approved. Waiting for jobs...")
                     waiting = False
-                for job in r.json().get("jobs", []):
+                data = r.json()
+                for job in data.get("jobs", []):
                     handle(job, headers)
+                if time.time() - last_update_check > UPDATE_EVERY:
+                    last_update_check = time.time()
+                    maybe_update(data.get("version", ""))
         except Exception as e:  # noqa: BLE001
             log(f"connection problem: {str(e)[:150]}")
         time.sleep(POLL_SECONDS)

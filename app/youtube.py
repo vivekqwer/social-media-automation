@@ -11,7 +11,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 from .config import BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_LOCAL
-from . import auth
+from . import auth, quota
 from .crypto import decrypt, encrypt
 from .db import Destination, SessionLocal, get_setting, set_setting
 
@@ -106,6 +106,7 @@ def upload(dest_id: int | None, path: str, title: str, description: str, tags: l
         body["status"]["privacyStatus"] = "private"
         body["status"]["publishAt"] = publish_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     media = MediaFileUpload(path, chunksize=8 * 1024 * 1024, resumable=True, mimetype="video/mp4")
+    quota.spend("upload")
     req = client(dest_id).videos().insert(part="snippet,status", body=body, media_body=media)
     resp = None
     while resp is None:
@@ -119,6 +120,7 @@ def video_status(dest_id: int, ids: list[str]) -> dict:
     yt, out = client(dest_id), {}
     for i in range(0, len(ids), 50):
         r = yt.videos().list(part="status,contentDetails", id=",".join(ids[i:i + 50]), maxResults=50).execute()
+        quota.spend("read")
         out.update({it["id"]: it for it in r.get("items", [])})
     return out
 
@@ -170,6 +172,7 @@ def _iso_seconds(d: str) -> int:
 
 def api_video_info(video_id: str) -> dict | None:
     r = client().videos().list(part="snippet,contentDetails,status", id=video_id).execute()
+    quota.spend("read")
     items = r.get("items") or []
     if not items:
         return None
@@ -194,6 +197,7 @@ def api_comments(video_id: str, limit: int = 300) -> list[str]:
     while len(texts) < limit:
         r = yt.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, order="relevance",
                                      textFormat="plainText", pageToken=token).execute()
+        quota.spend("read")
         texts += [i["snippet"]["topLevelComment"]["snippet"]["textDisplay"] for i in r.get("items", [])]
         token = r.get("nextPageToken")
         if not token:
@@ -216,6 +220,7 @@ def api_resolve_channel(query: str) -> tuple[str, str]:
         if not cid:  # plain name, or an old /c/ /user/ url: search once
             term = q.rstrip("/").rsplit("/", 1)[-1] if q.startswith("http") else q
             items = yt.search().list(part="snippet", q=term, type="channel", maxResults=1).execute().get("items") or []
+            quota.spend("search")
             cid = items[0]["snippet"]["channelId"] if items else None
     if not cid:
         raise ValueError(f"No channel found for '{q}'")
@@ -228,11 +233,37 @@ def api_list_video_ids(channel_url: str, n: int) -> list[str]:
     if not m:
         raise ValueError("not a channel-id url")
     r = client().playlistItems().list(part="contentDetails", playlistId="UU" + m.group(1)[2:], maxResults=min(n, 50)).execute()
+    quota.spend("read")
     return [i["contentDetails"]["videoId"] for i in r.get("items", [])]
+
+
+# titles that are often re-uploads wrongly marked Creative Commons (music, films, TV): never use them
+RISKY = re.compile(r"\b(official (music )?video|lyrics?|full (movie|film|episode)|trailer|songs?|audio|remix|"
+                   r"ft|feat|album|movie|episode|serial|t-series|zee|sony|star plus|colors tv|netflix|ipl|wwe)\b", re.I)
+
+
+def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
+    """Creative Commons videos for a topic, most viewed first, skipping ids already used and risky titles."""
+    yt, out, token = client(), [], None
+    for _ in range(pages):
+        if not quota.can_search():
+            break
+        r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="viewCount",
+                             safeSearch="moderate", maxResults=50, pageToken=token).execute()
+        quota.spend("search")
+        for it in r.get("items", []):
+            vid = it["id"].get("videoId")
+            if vid and vid not in skip and vid not in out and not RISKY.search(it["snippet"].get("title", "")):
+                out.append(vid)
+        token = r.get("nextPageToken")
+        if len(out) >= n or not token:
+            break
+    return out[:n]
 
 
 def set_thumbnail(dest_id: int | None, video_id: str, path: str):
     mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    quota.spend("thumbnail")
     client(dest_id).thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype=mime)).execute()
 
 

@@ -5,9 +5,9 @@ from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from google.auth.exceptions import RefreshError
-from sqlalchemy import update
+from sqlalchemy import func, update
 
-from . import youtube
+from . import quota, youtube
 from .autopilot import autopilot_tick
 from .config import MAX_UPLOADS_PER_DAY, UPLOAD_LEAD_HOURS
 from .crypto import TokenError
@@ -44,18 +44,27 @@ def process_queue():
     if _quota_blocked_until and now < _quota_blocked_until:
         return
     with SessionLocal() as s:
-        used = s.query(Clip).filter(Clip.attempted_at >= _pacific_midnight(now)).count()
-        ids = [i for (i,) in s.query(Clip.id).filter(Clip.status == "queued").order_by(Clip.publish_at)]
+        since = _pacific_midnight(now)
+        used = s.query(Clip).filter(Clip.attempted_at >= since).count()
+        paused = {d.id for d in s.query(Destination).filter(Destination.paused.is_(True))}
         connected = s.query(Destination).count() > 0
+        rows = s.query(Clip.id, Clip.destination_id, Clip.publish_at).filter(Clip.status == "queued").all()
+        per_dest = {}
+        for did, n in s.query(Clip.destination_id, func.count()).filter(Clip.attempted_at >= since).group_by(Clip.destination_id):
+            per_dest[did] = n
     if not connected:
         return  # keep everything queued until a channel is connected
+    # fair share: the channel with the fewest uploads today goes first, then the earliest publish time
+    rows = [r for r in rows if r.destination_id not in paused]
+    rows.sort(key=lambda r: (per_dest.get(r.destination_id, 0), r.publish_at or now))
+    ids = [r.id for r in rows]
 
     for cid in ids:
-        if used >= MAX_UPLOADS_PER_DAY:
+        if used >= MAX_UPLOADS_PER_DAY or not quota.can_upload():
             break
         with SessionLocal() as s:
             c = s.get(Clip, cid)
-            if not c or c.status != "queued":
+            if not c or c.status != "queued" or c.destination_id in paused:
                 continue
             if c.publish_at and c.publish_at > now + timedelta(hours=UPLOAD_LEAD_HOURS):
                 continue
@@ -84,12 +93,14 @@ def process_queue():
             except (RefreshError, TokenError):
                 c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
                 s.commit()
-                break
+                paused.add(c.destination_id)  # other channels keep uploading
+                continue
             except Exception as e:  # noqa: BLE001
                 msg = str(e)
                 if "quotaExceeded" in msg or "uploadLimitExceeded" in msg:
                     c.status, c.error = "queued", "YouTube quota/upload limit reached; will retry after reset."
                     _quota_blocked_until = _pacific_midnight(now, 1)
+                    quota.exhaust()
                     s.commit()
                     break
                 c.status, c.error = "failed", msg[:500]
