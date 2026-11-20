@@ -1,5 +1,7 @@
 import json
 import os
+import secrets
+import time
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -8,10 +10,12 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 from .config import BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_LOCAL
+from . import auth
 from .crypto import decrypt, encrypt
 from .db import Destination, SessionLocal, get_setting, set_setting
 
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"]
+EMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"] + EMAIL_SCOPES
 REDIRECT = f"{BASE_URL}/auth/callback"
 
 if IS_LOCAL:
@@ -23,7 +27,7 @@ def configured() -> bool:
     return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 
-def _flow() -> Flow:
+def _flow(scopes: list | None = None) -> Flow:
     cfg = {
         "web": {
             "client_id": GOOGLE_CLIENT_ID,
@@ -33,7 +37,7 @@ def _flow() -> Flow:
             "redirect_uris": [REDIRECT],
         }
     }
-    return Flow.from_client_config(cfg, scopes=SCOPES, redirect_uri=REDIRECT, autogenerate_code_verifier=False)
+    return Flow.from_client_config(cfg, scopes=scopes or SCOPES, redirect_uri=REDIRECT, autogenerate_code_verifier=False)
 
 
 def login_url() -> str:
@@ -54,6 +58,9 @@ def handle_callback(code: str, state: str) -> int:
     f = _flow()
     f.fetch_token(code=code)
     creds = f.credentials
+    email = _email_from(creds)
+    if email:  # this Google account may later reset the dashboard password
+        auth.remember_email(email)
     yt = build("youtube", "v3", credentials=creds, cache_discovery=False)
     items = yt.channels().list(part="snippet", mine=True).execute().get("items", [])
     if not items:
@@ -103,3 +110,36 @@ def upload(dest_id: int | None, path: str, title: str, description: str, tags: l
     while resp is None:
         _, resp = req.next_chunk(num_retries=5)
     return resp["id"]
+
+
+def _email_from(creds) -> str | None:
+    """Verified e-mail of the signed-in Google account, from the OpenID id_token."""
+    try:
+        from google.oauth2 import id_token
+
+        claims = id_token.verify_oauth2_token(creds.id_token, Request(), GOOGLE_CLIENT_ID)
+        return claims["email"].lower() if claims.get("email_verified") else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def reset_url() -> str:
+    """Start Google sign-in whose only purpose is proving which account the user owns (no YouTube access)."""
+    state = "reset:" + secrets.token_urlsafe(16)
+    set_setting("reset_state", f"{state}|{int(time.time()) + 600}")
+    url, _ = _flow(EMAIL_SCOPES).authorization_url(state=state, access_type="online", prompt="select_account")
+    return url
+
+
+def handle_reset_callback(code: str, state: str) -> str:
+    raw = get_setting("reset_state") or ""
+    set_setting("reset_state", "")  # single use
+    saved, _, exp = raw.partition("|")
+    if not saved or state != saved or int(exp or 0) < time.time():
+        raise ValueError("This reset link expired. Start again.")
+    f = _flow(EMAIL_SCOPES)
+    f.fetch_token(code=code)
+    email = _email_from(f.credentials)
+    if not email:
+        raise ValueError("Could not verify your Google e-mail address.")
+    return email

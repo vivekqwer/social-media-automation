@@ -51,3 +51,8 @@
 ## 2026-11-20 — Task 9: OAuth token encryption at rest
 - app/crypto.py (Fernet): tokens stored as enc:v1:...; key from env TOKEN_ENCRYPTION_KEY or auto-created file DATA_DIR/.token_key (the /data volume). Existing plaintext rows are upgraded on startup; unreadable token => channel must reconnect (queued clips stay queued).
 - Verified: roundtrip, no plaintext in DB, legacy upgrade, wrong-key error, API never exposes tokens.
+
+## 2026-11-20 — Task 10: Login page, forgot password, UI redesign
+- Auth: browser Basic-auth popup replaced by /login page + signed HttpOnly session cookie (scrypt-hashed password stored in DB, APP_PASSWORD env is the initial password; FORCE_ENV_PASSWORD=1 ignores the saved one). Logout, change-password (Settings), per-IP brute-force limiter, sessions invalidated on password change. Basic header still accepted for scripts.
+- Forgot password: "Verify with Google" (openid+email scope only, no YouTube access) -> allowed if the verified e-mail is in ADMIN_EMAIL or is a Google account that connected a channel -> short-lived reset cookie -> /reset page. 32-case test run passed.
+- UI redesign in the shadcn / 21st.dev style: neutral zinc tokens, Inter, Lucide-style icons, sidebar + topbar, stat cards, pipeline, tables, tabs, sheet editor with tabs (Trim/Text/Voice/Captions/Details), dialogs, toasts, skeleton loaders, empty states, dark mode, responsive off-canvas sidebar. Split-screen login; matching forgot/reset pages.

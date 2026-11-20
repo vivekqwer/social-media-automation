@@ -4,289 +4,351 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Clip Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#f5f6fa;--panel:#ffffff;--panel2:#f0f2f8;--line:#e3e6ef;--tx:#141824;--mut:#6b7385;
-  --ac:#5b5bf0;--ac2:#7c5cff;--acsoft:#ecebff;--ok:#12a36a;--oksoft:#e3f7ee;--warn:#c98a06;--warnsoft:#fff3d6;
-  --bad:#e5484d;--badsoft:#ffe9ea;--info:#1c7ed6;--infosoft:#e5f1fd;--shadow:0 1px 2px rgba(20,24,36,.06),0 8px 24px rgba(20,24,36,.06);
-  --r:14px;
+  --bg:#ffffff;--fg:#09090b;--card:#ffffff;--muted:#f4f4f5;--mfg:#71717a;--border:#e4e4e7;--ring:#a1a1aa;
+  --primary:#18181b;--pfg:#fafafa;--accent:#f4f4f5;--brand:#4f46e5;--brand2:#7c3aed;--brand-soft:#eef2ff;
+  --ok:#16a34a;--ok-soft:#dcfce7;--warn:#b45309;--warn-soft:#fef3c7;--bad:#dc2626;--bad-soft:#fee2e2;--info:#2563eb;--info-soft:#dbeafe;
+  --shadow:0 1px 2px rgba(0,0,0,.05);--shadow-lg:0 10px 30px rgba(0,0,0,.12);--r:10px;
 }
 @media (prefers-color-scheme:dark){:root{
-  --bg:#0c0e14;--panel:#141824;--panel2:#1a1f2e;--line:#262c3d;--tx:#eceef6;--mut:#8b93a8;
-  --ac:#7b7bff;--ac2:#9a7dff;--acsoft:#22244a;--ok:#34d399;--oksoft:#10302a;--warn:#f5b73b;--warnsoft:#3a2e10;
-  --bad:#ff6b70;--badsoft:#3a1a1d;--info:#5aa9f5;--infosoft:#10263d;--shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+  --bg:#09090b;--fg:#fafafa;--card:#0c0c0f;--muted:#18181b;--mfg:#a1a1aa;--border:#27272a;--ring:#52525b;
+  --primary:#fafafa;--pfg:#18181b;--accent:#1f1f23;--brand:#818cf8;--brand2:#a78bfa;--brand-soft:#1e1b4b;
+  --ok:#4ade80;--ok-soft:#052e16;--warn:#fbbf24;--warn-soft:#2a1d04;--bad:#f87171;--bad-soft:#2d0a0a;--info:#60a5fa;--info-soft:#0b1d3a;
+  --shadow:0 1px 2px rgba(0,0,0,.4);--shadow-lg:0 10px 30px rgba(0,0,0,.5);
 }}
 *{box-sizing:border-box}
 html,body{height:100%}
-body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-a{color:var(--ac);text-decoration:none}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+a{color:inherit}
 button,input,select,textarea{font:inherit;color:inherit}
-.app{display:grid;grid-template-columns:240px minmax(0,1fr);min-height:100%}
-aside{background:var(--panel);border-right:1px solid var(--line);padding:18px 14px;position:sticky;top:0;height:100vh;display:flex;flex-direction:column;gap:6px}
-.logo{display:flex;align-items:center;gap:10px;font-weight:700;font-size:17px;padding:4px 8px 16px}
-.logo i{width:30px;height:30px;border-radius:9px;background:linear-gradient(135deg,var(--ac),var(--ac2));display:grid;place-items:center;color:#fff;font-style:normal;font-size:15px}
-.nav{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;color:var(--mut);cursor:pointer;border:0;background:none;text-align:left;width:100%;font-weight:500}
-.nav:hover{background:var(--panel2);color:var(--tx)}
-.nav.on{background:var(--acsoft);color:var(--ac)}
-.nav .badge{margin-left:auto;background:var(--ac);color:#fff;border-radius:99px;font-size:11px;padding:0 7px;min-width:20px;text-align:center}
-.side-foot{margin-top:auto;padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--panel2);font-size:12px}
-main{padding:28px;max-width:1240px;width:100%;min-width:0}
-h1{font-size:24px;margin:0 0 4px;letter-spacing:-.02em}
-.sub{color:var(--mut);margin-bottom:22px}
-h2{font-size:15px;margin:0 0 12px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:18px;box-shadow:var(--shadow)}
-.grid{display:grid;gap:16px}
-.grid>*{min-width:0}
-.kpis{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:18px}
-.kpi{padding:14px 16px}
-.kpi b{display:block;font-size:26px;letter-spacing:-.02em}
-.kpi span{color:var(--mut);font-size:12px}
-.two{grid-template-columns:minmax(0,1.4fr) minmax(0,1fr)}
-@media(max-width:1000px){.app{grid-template-columns:1fr}aside{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center}.side-foot{display:none}.two{grid-template-columns:1fr}main{padding:16px}.logo{padding:4px 8px}}
-.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
-.grow{flex:1 1 220px}
-input[type=text],input:not([type]),input[type=url],input[type=number],input[type=datetime-local],select,textarea{width:100%;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 12px;outline:none}
-input:focus,select:focus,textarea:focus{border-color:var(--ac);box-shadow:0 0 0 3px var(--acsoft)}
-input[type=checkbox]{accent-color:var(--ac)}
-textarea{min-height:76px;resize:vertical}
-.btn{border:0;border-radius:10px;padding:9px 16px;font-weight:600;cursor:pointer;background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;transition:.15s;white-space:nowrap}
-.btn:hover{filter:brightness(1.08);transform:translateY(-1px)}
-.btn:disabled{opacity:.5;cursor:wait;transform:none}
-.btn.sec{background:var(--panel2);color:var(--tx);border:1px solid var(--line)}
-.btn.ok{background:var(--ok)}
-.btn.bad{background:var(--badsoft);color:var(--bad)}
-.btn.sm{padding:5px 11px;font-size:12px;border-radius:8px}
-.chip{display:inline-flex;align-items:center;gap:5px;padding:2px 10px;border-radius:99px;font-size:12px;font-weight:600;background:var(--panel2);color:var(--mut)}
-.chip.rendered{background:var(--infosoft);color:var(--info)}
-.chip.queued{background:var(--warnsoft);color:var(--warn)}
-.chip.uploading,.chip.rendering{background:var(--acsoft);color:var(--ac)}
-.chip.uploaded{background:var(--oksoft);color:var(--ok)}
-.chip.failed{background:var(--badsoft);color:var(--bad)}
-.chip.mode{background:var(--panel2)}
-.pulse{animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.45}}
-.hero{background:linear-gradient(135deg,var(--ac),var(--ac2));color:#fff;border:0;margin-bottom:18px}
-.hero h2{font-size:17px;margin-bottom:4px}
-.hero p{margin:0 0 12px;opacity:.9}
-.hero input,.hero select{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.3);color:#fff}
-.hero input::placeholder{color:rgba(255,255,255,.7)}
-.hero option{color:#111}
-.hero .btn{background:#fff;color:var(--ac)}
-.alert{display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:12px;margin-bottom:14px;background:var(--warnsoft);color:var(--warn);font-weight:500}
-.alert.bad{background:var(--badsoft);color:var(--bad)}
-.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:16px}
-.clip{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column}
-.thumb{position:relative;aspect-ratio:16/9;background:#000 center/cover no-repeat;cursor:pointer}
-.thumb .chip{position:absolute;top:8px;left:8px;backdrop-filter:blur(6px)}
-.thumb .dur{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.7);color:#fff;border-radius:6px;font-size:11px;padding:1px 6px}
-.clip .body{padding:12px 14px;display:flex;flex-direction:column;gap:6px;flex:1}
+.ico{width:16px;height:16px;flex:none}
+.ico.lg{width:20px;height:20px}
+.shell{display:grid;grid-template-columns:256px minmax(0,1fr);min-height:100%}
+aside{border-right:1px solid var(--border);background:var(--card);position:sticky;top:0;height:100vh;display:flex;flex-direction:column;padding:12px;z-index:30}
+.brand{display:flex;align-items:center;gap:10px;padding:8px;margin-bottom:8px}
+.brand .mark{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--brand),var(--brand2));display:grid;place-items:center;color:#fff}
+.brand b{font-size:15px;letter-spacing:-.01em;display:block;line-height:1.1}.brand span{font-size:12px;color:var(--mfg)}
+.grp{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mfg);padding:14px 10px 6px}
+.nav{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;border:0;background:none;color:var(--mfg);font-weight:500;cursor:pointer;text-align:left}
+.nav:hover{background:var(--accent);color:var(--fg)}
+.nav.on{background:var(--accent);color:var(--fg)}
+.nav.on .ico{color:var(--brand)}
+.nav .count{margin-left:auto;background:var(--brand);color:#fff;border-radius:99px;font-size:11px;font-weight:600;padding:0 7px;line-height:18px}
+.user{margin-top:auto;display:flex;align-items:center;gap:10px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--muted)}
+.avatar{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff;display:grid;place-items:center;font-weight:600;font-size:13px;flex:none}
+.user .t{min-width:0;flex:1}.user .t b{display:block;font-size:13px}.user .t span{font-size:12px;color:var(--mfg)}
+.content{min-width:0;display:flex;flex-direction:column}
+.top{position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;gap:12px;padding:0 24px;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(8px);border-bottom:1px solid var(--border)}
+.crumb{display:flex;align-items:center;gap:8px;color:var(--mfg);font-size:13px}.crumb b{color:var(--fg);font-weight:600}
+.top .sp{flex:1}
+.btn.burger{display:none}
+main{padding:24px;max-width:1240px;width:100%;margin:0 auto}
+.page-h{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:20px}
+h1{font-size:24px;font-weight:700;letter-spacing:-.02em;margin:0}
+.desc{color:var(--mfg);margin-top:2px}
+h3{font-size:15px;font-weight:600;margin:0}
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow)}
+.ch{padding:16px 20px 0;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ch p{margin:2px 0 0;color:var(--mfg);font-size:13px}
+.cb{padding:16px 20px 20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:var(--primary);color:var(--pfg);font-weight:500;cursor:pointer;white-space:nowrap;text-decoration:none;transition:background .15s,opacity .15s,box-shadow .15s}
+.btn:hover{opacity:.9}
+.btn:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible,.nav:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ring)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.outline{background:transparent;border-color:var(--border);color:var(--fg)}
+.btn.outline:hover{background:var(--accent);opacity:1}
+.btn.ghost{background:transparent;color:var(--fg)}.btn.ghost:hover{background:var(--accent);opacity:1}
+.btn.sec{background:var(--muted);color:var(--fg)}.btn.sec:hover{background:var(--accent);opacity:1}
+.btn.brand{background:linear-gradient(135deg,var(--brand),var(--brand2));color:#fff}
+.btn.ok{background:var(--ok);color:#04120a}
+.btn.bad{background:var(--bad-soft);color:var(--bad)}
+.btn.sm{height:30px;padding:0 10px;font-size:13px;border-radius:7px}
+.btn.icon{width:30px;padding:0}
+input[type=text],input:not([type]),input[type=url],input[type=number],input[type=password],input[type=datetime-local],select,textarea{width:100%;height:36px;background:transparent;border:1px solid var(--border);border-radius:8px;padding:0 12px;outline:none;transition:box-shadow .15s}
+textarea{height:auto;min-height:80px;padding:8px 12px;resize:vertical}
+select{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2371717a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 10px center;padding-right:30px}
+select option{background:var(--card);color:var(--fg)}
+input[type=checkbox]{accent-color:var(--brand)}
+label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:500;background:var(--muted);color:var(--mfg);border:1px solid transparent;white-space:nowrap}
+.badge.rendered{background:var(--info-soft);color:var(--info)}.badge.queued{background:var(--warn-soft);color:var(--warn)}
+.badge.uploading,.badge.rendering{background:var(--brand-soft);color:var(--brand)}.badge.uploaded{background:var(--ok-soft);color:var(--ok)}
+.badge.failed{background:var(--bad-soft);color:var(--bad)}.badge.outline{background:transparent;border-color:var(--border)}
+.pulse{animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.5}}
+.switch{position:relative;width:36px;height:20px;flex:none;display:inline-block}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.switch i{position:absolute;inset:0;background:var(--border);border-radius:99px;transition:.2s;cursor:pointer}
+.switch i:before{content:"";position:absolute;width:16px;height:16px;left:2px;top:2px;background:#fff;border-radius:50%;transition:.2s;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.switch input:checked+i{background:var(--ok)}.switch input:checked+i:before{transform:translateX(16px)}
+.switch input:focus-visible+i{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ring)}
+.tabs{display:inline-flex;gap:2px;background:var(--muted);padding:3px;border-radius:9px;max-width:100%;overflow:auto}
+.tab{border:0;background:none;padding:6px 12px;border-radius:7px;color:var(--mfg);font-weight:500;cursor:pointer;white-space:nowrap}
+.tab.on{background:var(--card);color:var(--fg);box-shadow:var(--shadow)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.grow{flex:1 1 200px}
+.mut{color:var(--mfg)}.sm{font-size:12px}
+.grid{display:grid;gap:16px}.grid>*{min-width:0}
+.stats{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
+.stat{padding:18px 20px}
+.stat .l{display:flex;align-items:center;justify-content:space-between;color:var(--mfg);font-size:13px;font-weight:500}
+.stat .v{font-size:30px;font-weight:700;letter-spacing:-.03em;margin-top:6px;line-height:1.1}
+.stat .d{font-size:12px;color:var(--mfg);margin-top:4px}
+.stat .ic{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;background:var(--muted)}
+.cols{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr)}
+.empty{display:flex;flex-direction:column;align-items:center;gap:8px;text-align:center;padding:30px 16px;border:1px dashed var(--border);border-radius:var(--r);color:var(--mfg)}
+.empty .ei{width:40px;height:40px;border-radius:50%;background:var(--muted);display:grid;place-items:center}
+.empty b{color:var(--fg);font-weight:600}
+.item{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.item:last-child{border:0;padding-bottom:0}.item:first-child{padding-top:0}
+.item .th{width:96px;aspect-ratio:16/9;border-radius:8px;background:var(--muted) center/cover;flex:none;cursor:pointer;border:1px solid var(--border)}
+.item .tx{flex:1;min-width:0}.item .tx b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:600}
+.alert{display:flex;gap:12px;align-items:center;padding:12px 16px;border-radius:var(--r);margin-bottom:16px;border:1px solid var(--border);background:var(--warn-soft);color:var(--warn);font-weight:500}
+.alert.bad{background:var(--bad-soft);color:var(--bad)}
+.alert .btn{margin-left:auto}
+.pipe{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.pipe .st{flex:1;min-width:84px;border:1px solid var(--border);border-radius:9px;padding:10px 12px;background:var(--card)}
+.pipe .st b{display:block;font-size:20px;letter-spacing:-.02em}.pipe .st span{font-size:12px;color:var(--mfg)}
+.pipe .ar{color:var(--mfg)}
+.clips{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
+.clip{background:var(--card);border:1px solid var(--border);border-radius:var(--r);overflow:hidden;box-shadow:var(--shadow);display:flex;flex-direction:column;transition:box-shadow .15s,transform .15s}
+.clip:hover{box-shadow:var(--shadow-lg);transform:translateY(-2px)}
+.thumb{position:relative;aspect-ratio:16/9;background:var(--muted) center/cover no-repeat;cursor:pointer}
+.thumb .badge{position:absolute;top:10px;left:10px;backdrop-filter:blur(8px)}
+.thumb .dur{position:absolute;bottom:8px;right:8px;background:rgba(0,0,0,.72);color:#fff;border-radius:6px;font-size:11px;padding:1px 6px}
+.clip .body{padding:14px;display:flex;flex-direction:column;gap:6px;flex:1}
 .clip .t{font-weight:600;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-.clip .m{color:var(--mut);font-size:12px}
-.clip .act{display:flex;gap:6px;margin-top:auto;padding-top:6px;flex-wrap:wrap}
-.list .it{display:flex;gap:12px;align-items:center;padding:10px 0;border-bottom:1px solid var(--line)}
-.list .it:last-child{border:0}
-.list .th{width:84px;aspect-ratio:16/9;border-radius:8px;background:#000 center/cover;flex:none;cursor:pointer}
-.list .tx{flex:1;min-width:0}
-.list .tx b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.mut{color:var(--mut)}.sm{font-size:12px}
-.empty{padding:30px;text-align:center;color:var(--mut);border:1px dashed var(--line);border-radius:var(--r)}
-.tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:4px;width:max-content;max-width:100%;overflow:auto;margin-bottom:16px}
-.tab{border:0;background:none;padding:7px 14px;border-radius:9px;color:var(--mut);cursor:pointer;font-weight:600;white-space:nowrap}
-.tab.on{background:var(--acsoft);color:var(--ac)}
-.src{display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:14px 0;border-bottom:1px solid var(--line)}
-.src:last-child{border:0}
-.switch{position:relative;width:38px;height:22px;flex:none}
-.switch input{opacity:0;width:0;height:0}
-.switch i{position:absolute;inset:0;background:var(--line);border-radius:99px;transition:.2s;cursor:pointer}
-.switch i:before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.2s}
-.switch input:checked+i{background:var(--ok)}
-.switch input:checked+i:before{transform:translateX(16px)}
-label.fld{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--mut);font-weight:600}
-/* drawer */
-.scrim{position:fixed;inset:0;background:rgba(10,12,20,.55);backdrop-filter:blur(3px);z-index:40;display:none}
-.scrim.on{display:block}
-.drawer{position:fixed;top:0;right:0;height:100%;width:min(760px,100%);background:var(--bg);z-index:41;transform:translateX(100%);visibility:hidden;transition:transform .25s,visibility .25s;overflow:auto}
-.drawer.on{transform:none;visibility:visible;box-shadow:-20px 0 60px rgba(0,0,0,.3)}
-.dh{position:sticky;top:0;z-index:2;background:var(--bg);padding:16px 22px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
-.dh h2{margin:0;flex:1;font-size:16px}
-.db{padding:20px 22px 24px;display:flex;flex-direction:column;gap:16px}
-.df{position:sticky;bottom:0;width:100%;background:var(--panel);border-top:1px solid var(--line);padding:12px 22px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;z-index:3}
-.player{width:100%;border-radius:12px;background:#000;max-height:360px;aspect-ratio:16/9;border:0}
-.seg{display:inline-flex;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:3px}
-.seg button{border:0;background:none;padding:5px 12px;border-radius:7px;cursor:pointer;color:var(--mut);font-weight:600}
-.seg button.on{background:var(--ac);color:#fff}
+.clip .act{display:flex;gap:6px;margin-top:auto;padding-top:8px;flex-wrap:wrap}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-size:12px;font-weight:500;color:var(--mfg);text-align:left;padding:10px 14px;border-bottom:1px solid var(--border);white-space:nowrap}
+.tbl td{padding:12px 14px;border-bottom:1px solid var(--border);vertical-align:middle}
+.tbl tr:last-child td{border:0}.tbl tbody tr:hover{background:var(--muted)}
+.tw{overflow:auto}
+.sk{background:linear-gradient(90deg,var(--muted) 25%,var(--accent) 50%,var(--muted) 75%);background-size:200% 100%;animation:sk 1.4s infinite;border-radius:8px}
+@keyframes sk{to{background-position:-200% 0}}
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(2px);z-index:40;opacity:0;pointer-events:none;transition:opacity .2s}
+.scrim.on{opacity:1;pointer-events:auto}
+.sheet{position:fixed;top:0;right:0;bottom:0;width:min(680px,100%);background:var(--bg);border-left:1px solid var(--border);z-index:41;transform:translateX(100%);visibility:hidden;transition:transform .25s,visibility .25s;display:flex;flex-direction:column}
+.sheet.on{transform:none;visibility:visible;box-shadow:var(--shadow-lg)}
+.sh{display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--border)}
+.sh h3{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sbody{flex:1;overflow:auto;padding:16px 20px;display:flex;flex-direction:column;gap:16px}
+.sf{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 20px;border-top:1px solid var(--border);background:var(--card)}
+.player{width:100%;border-radius:10px;background:#000;max-height:300px;aspect-ratio:16/9;border:0}
+.panel{display:none;flex-direction:column;gap:14px}.panel.on{display:flex}
 .fx{display:flex;gap:8px;flex-wrap:wrap}
-.fx label{display:flex;gap:6px;align-items:center;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:5px 12px;cursor:pointer;font-weight:500}
-.ov{border:1px solid var(--line);border-radius:12px;padding:12px;background:var(--panel2);display:flex;flex-direction:column;gap:8px}
-.chips span{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:99px;padding:3px 11px;margin:3px 3px 0 0;cursor:pointer;font-size:12px}
-.chips span:hover{border-color:var(--ac);color:var(--ac)}
-.toasts{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99;display:flex;flex-direction:column;gap:8px;align-items:center}
-.toast{background:var(--tx);color:var(--bg);padding:10px 18px;border-radius:12px;box-shadow:var(--shadow);font-weight:500;max-width:90vw}
-.toast.bad{background:var(--bad);color:#fff}
-.modal{position:fixed;inset:0;z-index:60;display:none;place-items:center;background:rgba(10,12,20,.6);padding:16px}
+.fx label{display:flex;gap:8px;align-items:center;border:1px solid var(--border);border-radius:8px;padding:6px 12px;cursor:pointer;font-weight:500}
+.fx label:has(input:checked){border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+.ov{border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--card)}
+.chips span{display:inline-block;border:1px solid var(--border);border-radius:99px;padding:2px 10px;margin:3px 3px 0 0;cursor:pointer;font-size:12px}
+.chips span:hover{border-color:var(--brand);color:var(--brand)}
+.modal{position:fixed;inset:0;z-index:60;display:none;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);padding:16px}
 .modal.on{display:grid}
-.modal .card{width:min(640px,100%);max-height:90vh;overflow:auto}
-.mom{display:flex;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)}
-.bar{height:6px;border-radius:9px;background:var(--panel2);overflow:hidden;width:70px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--ac),var(--ac2))}
+.modal .card{width:min(640px,100%);max-height:90vh;overflow:auto;box-shadow:var(--shadow-lg)}
+.mom{display:flex;gap:10px;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)}
+.bar{height:6px;border-radius:9px;background:var(--muted);overflow:hidden;width:70px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--brand),var(--brand2))}
+.toasts{position:fixed;bottom:20px;right:20px;z-index:99;display:flex;flex-direction:column;gap:8px;align-items:flex-end}
+.toast{display:flex;gap:10px;align-items:center;background:var(--card);color:var(--fg);border:1px solid var(--border);padding:12px 16px;border-radius:10px;box-shadow:var(--shadow-lg);font-weight:500;max-width:min(420px,90vw)}
+.toast.bad{border-color:var(--bad);color:var(--bad)}
+.hide{display:none!important}
+.hero-in{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.hero-in .inp{position:relative;flex:1 1 280px}.hero-in .inp .ico{position:absolute;left:12px;top:10px;color:var(--mfg)}.hero-in .inp input{padding-left:36px}
+@media(max-width:1000px){
+  .shell{grid-template-columns:1fr}
+  aside{position:fixed;left:0;top:0;width:260px;transform:translateX(-100%);transition:transform .2s;box-shadow:var(--shadow-lg)}
+  aside.on{transform:none}
+  .btn.burger{display:inline-flex}.cols{grid-template-columns:1fr}.top{padding:0 14px}main{padding:16px}
+}
 </style>
 </head>
 <body>
-<div class="app">
-  <aside>
-    <div class="logo"><i>▶</i> Clip Studio</div>
-    <button class="nav on" data-p="dashboard">🏠 Dashboard</button>
-    <button class="nav" data-p="clips">🎬 Clips <span class="badge" id="b-review" style="display:none"></span></button>
-    <button class="nav" data-p="sources">📡 Sources</button>
-    <button class="nav" data-p="settings">⚙️ My channels</button>
-    <div class="side-foot" id="side-foot">…</div>
+<div class="shell">
+  <aside id="sb">
+    <div class="brand"><div class="mark"><i data-ico="play"></i></div><div><b>Clip Studio</b><span>Creator workspace</span></div></div>
+    <div class="grp">Platform</div>
+    <button class="nav on" data-p="dashboard"><i data-ico="dashboard"></i>Dashboard</button>
+    <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
+    <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
+    <div class="grp">Account</div>
+    <button class="nav" data-p="settings"><i data-ico="youtube"></i>My channels</button>
+    <div class="user"><div class="avatar" id="av">A</div><div class="t"><b id="un">admin</b><span id="uf">Owner</span></div><button class="btn ghost icon" id="logout" title="Log out"><i data-ico="logout"></i></button></div>
   </aside>
+  <div class="scrim" id="sb-scrim" style="z-index:25"></div>
 
-  <main>
-    <!-- DASHBOARD -->
-    <section id="p-dashboard">
-      <h1>Dashboard</h1><div class="sub">Add a channel link — clips are cut, credited and uploaded to your channel automatically.</div>
-      <div id="alerts"></div>
-      <div class="card hero">
-        <h2>Add a source</h2>
-        <p>Paste a channel link, @handle or name — or a single video link to clip it yourself.</p>
-        <div class="row">
-          <input id="h-q" class="grow" placeholder="https://youtube.com/@channel   ·   @handle   ·   channel name   ·   video link">
-          <select id="h-mode" style="width:auto"><option value="cc">CC videos only</option><option value="permission">I have permission</option><option value="commentary">Commentary (manual)</option></select>
-          <select id="h-dest" style="width:auto"></select>
-          <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="h-review"><i></i></span>Review first</label>
-          <button class="btn" id="h-go">Add</button>
-        </div>
-        <input id="h-note" style="margin-top:10px;display:none" placeholder="Permission proof / note (required for 'I have permission')">
-      </div>
-      <div class="grid kpis" id="kpis"></div>
-      <div class="grid two">
-        <div class="grid">
-          <div class="card"><h2>Ready for your review</h2><div id="d-review" class="list"></div></div>
-          <div class="card"><h2>Up next · scheduled uploads</h2><div id="d-up" class="list"></div></div>
-        </div>
-        <div class="grid" style="align-content:start">
-          <div class="card"><h2>Recently uploaded</h2><div id="d-rec" class="list"></div></div>
-          <div class="card"><h2>Needs attention</h2><div id="d-fail" class="list"></div></div>
-        </div>
-      </div>
-    </section>
+  <div class="content">
+    <header class="top">
+      <button class="btn ghost icon burger" id="burger"><i data-ico="menu"></i></button>
+      <div class="crumb"><span>Clip Studio</span><span>/</span><b id="crumb">Dashboard</b></div>
+      <div class="sp"></div>
+      <button class="btn outline sm" id="top-new"><i data-ico="scissors"></i>New clip</button>
+      <button class="btn sm" id="top-add"><i data-ico="plus"></i>Add source</button>
+    </header>
 
-    <!-- CLIPS -->
-    <section id="p-clips" hidden>
-      <div class="row" style="justify-content:space-between;margin-bottom:6px"><div><h1>Clips</h1><div class="sub">Review, edit, approve. Anything you don't touch uploads on schedule.</div></div>
-        <button class="btn" id="new-clip">+ New clip from video link</button></div>
-      <div class="tabs" id="tabs"></div>
-      <div id="clip-grid" class="clips"></div>
-    </section>
-
-    <!-- SOURCES -->
-    <section id="p-sources" hidden>
-      <h1>Sources</h1><div class="sub">Channels the system takes videos from. One per line to add many.</div>
-      <div class="card" style="margin-bottom:16px">
-        <h2>Add sources</h2>
-        <textarea id="s-q" placeholder="One per line: channel link, @handle or name"></textarea>
-        <div class="row" style="margin-top:10px">
-          <label class="fld">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
-          <label class="fld">Upload to<select id="s-dest"></select></label>
-          <label class="fld">Videos / run<input id="s-v" type="number" value="3" min="1" max="20" style="width:90px"></label>
-          <label class="fld">Clips / video<input id="s-c" type="number" value="2" min="1" max="10" style="width:90px"></label>
-          <label class="fld">Clip length (s)<input id="s-l" type="number" value="30" min="10" max="120" style="width:100px"></label>
-          <label class="fld">Gap (hours)<input id="s-g" type="number" value="12" min="1" style="width:90px"></label>
-          <label class="fld">Format<select id="s-a"><option value="9:16">9:16 Shorts</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
-          <label class="fld">Post at (daily, optional)<input id="s-times" placeholder="10:00, 18:30" style="width:150px"></label>
-          <label class="row sm" style="gap:8px;align-self:end;padding-bottom:8px"><span class="switch"><input type="checkbox" id="s-caps" checked><i></i></span>Auto captions</label>
-          <label class="row sm" style="gap:8px;align-self:end;padding-bottom:8px"><span class="switch"><input type="checkbox" id="s-review"><i></i></span>Review first</label>
+    <main>
+      <section id="p-dashboard">
+        <div class="page-h"><div><h1>Dashboard</h1><div class="desc">Paste a source — clips are cut, credited and uploaded to your channel automatically.</div></div></div>
+        <div id="alerts"></div>
+        <div class="card" style="margin-bottom:16px">
+          <div class="ch"><div><h3>Add a source</h3><p>Channel link, @handle or name. Paste a single video link to clip it yourself.</p></div></div>
+          <div class="cb">
+            <div class="hero-in">
+              <div class="inp"><i data-ico="link"></i><input id="h-q" placeholder="https://youtube.com/@channel  ·  @handle  ·  video link"></div>
+              <select id="h-mode" style="width:auto"><option value="cc">CC videos only</option><option value="permission">I have permission</option><option value="commentary">Commentary (manual)</option></select>
+              <select id="h-dest" style="width:auto"></select>
+              <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="h-review"><i></i></span>Review first</label>
+              <button class="btn brand" id="h-go"><i data-ico="plus"></i>Add</button>
+            </div>
+            <input id="h-note" class="hide" style="margin-top:10px" placeholder="Permission proof / note (required for 'I have permission')">
+          </div>
         </div>
-        <input id="s-note" style="margin-top:10px" placeholder="Permission proof / note (for 'I have permission')">
-        <div class="row" style="margin-top:12px"><button class="btn" id="s-add">Add sources</button></div>
-      </div>
-      <div class="card"><h2>Your sources</h2><div id="src-list" class="mut">…</div></div>
-    </section>
+        <div class="grid stats" id="kpis" style="margin-bottom:16px"></div>
+        <div class="grid cols">
+          <div class="grid" style="align-content:start">
+            <div class="card"><div class="ch"><div><h3>Ready for your review</h3><p>Approve to queue, or edit first.</p></div></div><div class="cb" id="d-review"></div></div>
+            <div class="card"><div class="ch"><div><h3>Up next</h3><p>Scheduled uploads</p></div></div><div class="cb" id="d-up"></div></div>
+          </div>
+          <div class="grid" style="align-content:start">
+            <div class="card"><div class="ch"><div><h3>Pipeline</h3><p>Where your clips are right now</p></div></div><div class="cb" id="d-pipe"></div></div>
+            <div class="card"><div class="ch"><h3>Recently uploaded</h3></div><div class="cb" id="d-rec"></div></div>
+            <div class="card"><div class="ch"><h3>Needs attention</h3></div><div class="cb" id="d-fail"></div></div>
+          </div>
+        </div>
+      </section>
 
-    <!-- SETTINGS -->
-    <section id="p-settings" hidden>
-      <h1>My channels</h1><div class="sub">Where clips get uploaded. Use the Google account that owns the channel.</div>
-      <div class="card" style="margin-bottom:16px">
-        <div id="dest-list" style="margin-bottom:12px"></div>
-        <a href="/auth/login"><button class="btn">+ Connect a YouTube channel</button></a>
-        <div class="sm mut" style="margin-top:12px">While Google's consent screen is in Testing mode, the connection expires every 7 days — just press Connect again. Only added test users can connect.</div>
-      </div>
-      <div class="card"><h2>How it works</h2>
-        <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
-          <li>Add a source channel (or paste a single video).</li>
-          <li>The system finds the most-replayed / most-commented moments and cuts clips.</li>
-          <li>Credit to the original channel, original tags/description and fresh keywords are added.</li>
-          <li><b>Auto upload</b> sources queue clips straight away. <b>Review first</b> sources wait for your Approve.</li>
-          <li>Edit any clip (text, voice, trim) — it re-renders and goes back to the queue by itself.</li>
-        </ol></div>
-    </section>
-  </main>
+      <section id="p-clips" class="hide">
+        <div class="page-h"><div><h1>Clips</h1><div class="desc">Review, edit, approve. Anything you don't touch uploads on schedule.</div></div>
+          <button class="btn" id="new-clip"><i data-ico="scissors"></i>New clip from video link</button></div>
+        <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
+        <div id="clip-grid" class="clips"></div>
+      </section>
+
+      <section id="p-sources" class="hide">
+        <div class="page-h"><div><h1>Sources</h1><div class="desc">Channels the system takes videos from.</div></div><button class="btn" id="open-add"><i data-ico="plus"></i>Add sources</button></div>
+        <div class="card"><div class="tw" id="src-list"></div></div>
+      </section>
+
+      <section id="p-settings" class="hide">
+        <div class="page-h"><div><h1>My channels</h1><div class="desc">Where clips get uploaded, and your account security.</div></div><a href="/auth/login" class="btn"><i data-ico="plus"></i>Connect a YouTube channel</a></div>
+        <div class="grid cols">
+          <div class="grid" style="align-content:start">
+            <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
+            <div class="card"><div class="ch"><div><h3>How it works</h3></div></div><div class="cb">
+              <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
+                <li>Add a source channel (or paste one video).</li>
+                <li>Most-replayed and most-commented moments become clips.</li>
+                <li>Credit, original tags/description and keywords are added.</li>
+                <li><b style="color:var(--fg)">Auto upload</b> sources queue clips straight away; <b style="color:var(--fg)">Review first</b> waits for you.</li>
+                <li>Edit a clip and it re-renders and rejoins the queue by itself.</li>
+              </ol></div></div>
+          </div>
+          <div class="grid" style="align-content:start">
+            <div class="card"><div class="ch"><div><h3>Change password</h3><p>Minimum 12 characters.</p></div></div><div class="cb">
+              <div class="grid" style="gap:10px"><input id="cp-old" type="password" placeholder="Current password" autocomplete="current-password"><input id="cp-new" type="password" placeholder="New password" autocomplete="new-password"><button class="btn" id="cp-go">Update password</button></div>
+              <div class="sm mut" style="margin-top:10px">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
+            <div class="card"><div class="ch"><h3>Security</h3></div><div class="cb sm mut" style="line-height:1.8">Login tokens are encrypted at rest.<br>Google's consent in <i>Testing</i> mode expires every 7 days — just press Connect again.</div></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
 </div>
 
-<!-- EDITOR DRAWER -->
 <div class="scrim" id="scrim"></div>
-<div class="drawer" id="drawer">
-  <div class="dh"><h2 id="e-title">Clip</h2><span class="chip" id="e-status"></span><button class="btn sec sm" id="e-close">Close</button></div>
-  <div class="db">
-    <div class="card">
-      <div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="seg" id="e-seg"><button data-v="out" class="on">Rendered</button><button data-v="src">Source video</button></div><span class="mut sm" id="e-src"></span></div>
+<div class="sheet" id="drawer">
+  <div class="sh"><h3 id="e-title">Clip</h3><span class="badge" id="e-status"></span><button class="btn ghost icon" id="e-close"><i data-ico="x"></i></button></div>
+  <div class="sbody">
+    <div>
+      <div class="row" style="justify-content:space-between;margin-bottom:10px"><div class="tabs" id="e-seg"><button class="tab on" data-v="out">Rendered</button><button class="tab" data-v="src">Source</button></div><span class="mut sm" id="e-src"></span></div>
       <video id="e-video" class="player" controls></video>
       <iframe id="e-frame" class="player" allowfullscreen style="display:none"></iframe>
       <div class="alert bad" id="e-err" style="display:none;margin:12px 0 0"></div>
     </div>
-    <div class="card"><h2>Trim & look</h2>
+    <div class="tabs" id="e-tabs"><button class="tab on" data-t="trim">Trim & look</button><button class="tab" data-t="text">Text</button><button class="tab" data-t="voice">Voice</button><button class="tab" data-t="caps">Captions</button><button class="tab" data-t="meta">Details</button></div>
+
+    <div class="panel on" data-t="trim">
       <div class="row">
-        <label class="fld">Start (s)<input id="e-s" type="number" step="0.1" style="width:110px"></label>
-        <label class="fld">End (s)<input id="e-e" type="number" step="0.1" style="width:110px"></label>
-        <label class="fld">Format<select id="e-asp"><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
-        <label class="fld">Original volume<input id="e-vol" type="number" step="0.1" min="0" max="3" style="width:110px"></label>
+        <label class="f">Start (s)<input id="e-s" type="number" step="0.1" style="width:110px"></label>
+        <label class="f">End (s)<input id="e-e" type="number" step="0.1" style="width:110px"></label>
+        <label class="f">Format<select id="e-asp"><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
+        <label class="f">Original volume<input id="e-vol" type="number" step="0.1" min="0" max="3" style="width:120px"></label>
       </div>
-      <div class="fx" style="margin-top:12px" id="e-fx">
-        <label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label>
-        <label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label>
-      </div>
+      <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
-    <div class="card"><h2>Text overlays <button class="btn sec sm" id="e-addov" style="margin-left:8px">+ Add text</button></h2><div id="e-ovs" style="display:flex;flex-direction:column;gap:10px"></div></div>
-    <div class="card"><h2>Voice-over</h2>
-      <textarea id="e-vtext" placeholder="Type a script (Hindi / English) and generate a voice, or upload your own audio"></textarea>
-      <div class="row" style="margin-top:10px"><select id="e-voice" style="width:auto"></select>
-        <label class="fld" style="flex-direction:row;align-items:center;gap:8px">Delay (s)<input id="e-voff" type="number" step="0.1" min="0" value="0" style="width:80px"></label>
-        <button class="btn sec" id="e-tts">Generate voice</button><input type="file" id="e-vfile" accept="audio/*"><span class="mut sm" id="e-vstate"></span></div>
+
+    <div class="panel" data-t="text">
+      <div class="row" style="justify-content:space-between"><div class="mut sm">Text shown on the video, with timing and animation.</div><button class="btn outline sm" id="e-addov"><i data-ico="plus"></i>Add text</button></div>
+      <div id="e-ovs" style="display:flex;flex-direction:column;gap:10px"></div>
     </div>
-    <div class="card"><h2>Captions <label class="row sm" style="gap:8px;margin-left:10px;display:inline-flex"><span class="switch"><input type="checkbox" id="e-con"><i></i></span>Show on video</label></h2>
+
+    <div class="panel" data-t="voice">
+      <textarea id="e-vtext" placeholder="Type a script (Hindi / English), generate a voice, or upload your own audio"></textarea>
+      <div class="row"><select id="e-voice" style="width:auto"></select>
+        <label class="row sm" style="gap:8px">Delay (s)<input id="e-voff" type="number" step="0.1" min="0" value="0" style="width:80px"></label>
+        <button class="btn outline" id="e-tts"><i data-ico="mic"></i>Generate voice</button></div>
+      <div class="row"><input type="file" id="e-vfile" accept="audio/*" style="height:auto;padding:6px 10px"><span class="mut sm" id="e-vstate"></span></div>
+    </div>
+
+    <div class="panel" data-t="caps">
+      <div class="row" style="justify-content:space-between"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-con"><i></i></span>Show captions on video</label><button class="btn outline" id="e-cgen"><i data-ico="captions"></i>Get captions from YouTube</button></div>
       <div class="row">
-        <label class="fld">Language<select id="e-clang"><option value="auto">Auto</option><option value="hi">Hindi</option><option value="en">English</option></select></label>
-        <label class="fld">Position<select id="e-cpos"><option>bottom</option><option>center</option><option>top</option></select></label>
-        <label class="fld">Size<select id="e-csize"><option>S</option><option selected>M</option><option>L</option></select></label>
-        <label class="fld">Colour<input id="e-ccol" type="color" value="#ffffff" style="width:56px;padding:2px;height:38px"></label>
-        <button class="btn sec" id="e-cgen" style="align-self:end">Get captions from YouTube</button>
+        <label class="f">Language<select id="e-clang"><option value="auto">Auto</option><option value="hi">Hindi</option><option value="en">English</option></select></label>
+        <label class="f">Position<select id="e-cpos"><option>bottom</option><option>center</option><option>top</option></select></label>
+        <label class="f">Size<select id="e-csize"><option>S</option><option selected>M</option><option>L</option></select></label>
+        <label class="f">Colour<input id="e-ccol" type="color" value="#ffffff" style="width:56px;padding:3px"></label>
       </div>
-      <div class="mut sm" style="margin-top:8px">Uses the video's own captions (free). You can edit or delete any line below.</div>
-      <div id="e-cues" style="margin-top:12px;display:flex;flex-direction:column;gap:6px"></div>
+      <div class="mut sm">Uses the video's own captions (free). Edit or delete any line below.</div>
+      <div id="e-cues" style="display:flex;flex-direction:column;gap:6px"></div>
     </div>
-    <div class="card"><h2>Title, description & tags</h2>
-      <div class="row" style="margin-bottom:10px"><input id="e-kq" class="grow" placeholder="Keyword research (e.g. topic)"><button class="btn sec" id="e-kw">Find keywords</button><button class="btn sec" id="e-meta">Auto-fill everything</button></div>
+
+    <div class="panel" data-t="meta">
+      <div class="row"><input id="e-kq" class="grow" placeholder="Keyword research (e.g. topic)"><button class="btn outline" id="e-kw">Find keywords</button><button class="btn sec" id="e-meta"><i data-ico="sparkles"></i>Auto-fill everything</button></div>
       <div class="chips" id="e-chips"></div>
-      <input id="e-mt" placeholder="Title" style="margin:10px 0">
-      <textarea id="e-md" style="min-height:150px" placeholder="Description (credit to the original channel is added automatically)"></textarea>
-      <input id="e-mg" placeholder="tags, comma separated" style="margin-top:10px">
+      <label class="f">Title<input id="e-mt" placeholder="Title"></label>
+      <label class="f">Description<textarea id="e-md" style="min-height:160px" placeholder="Description (credit to the original channel is added automatically)"></textarea></label>
+      <label class="f">Tags<input id="e-mg" placeholder="comma separated"></label>
     </div>
   </div>
-  <div class="df">
-    <button class="btn" id="e-render">Save &amp; re-render</button>
-    <button class="btn ok" id="e-approve">Approve &amp; queue</button>
+  <div class="sf">
+    <button class="btn" id="e-render"><i data-ico="refresh"></i>Save &amp; re-render</button>
+    <button class="btn ok" id="e-approve"><i data-ico="check"></i>Approve &amp; queue</button>
     <input id="e-when" type="datetime-local" style="width:auto" title="Publish time (optional)">
-    <button class="btn sec" id="e-now">Upload now</button>
+    <button class="btn outline" id="e-now"><i data-ico="upload"></i>Upload now</button>
     <span style="flex:1"></span>
-    <button class="btn bad" id="e-del">Discard</button>
+    <button class="btn bad" id="e-del"><i data-ico="trash"></i>Discard</button>
   </div>
 </div>
 
-<!-- NEW CLIP MODAL -->
+<div class="modal" id="m-add"><div class="card">
+  <div class="ch"><div><h3>Add sources</h3><p>One per line: channel link, @handle or name.</p></div><button class="btn ghost icon" id="m-add-close"><i data-ico="x"></i></button></div>
+  <div class="cb">
+    <textarea id="s-q" placeholder="https://youtube.com/@channel&#10;@handle&#10;Channel name"></textarea>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
+      <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
+      <label class="f">Upload to<select id="s-dest"></select></label>
+      <label class="f">Format<select id="s-a"><option value="9:16">9:16 Shorts</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select></label>
+      <label class="f">Videos per run<input id="s-v" type="number" value="3" min="1" max="20"></label>
+      <label class="f">Clips per video<input id="s-c" type="number" value="2" min="1" max="10"></label>
+      <label class="f">Clip length (s)<input id="s-l" type="number" value="30" min="10" max="120"></label>
+      <label class="f">Gap (hours)<input id="s-g" type="number" value="12" min="1"></label>
+      <label class="f">Post daily at<input id="s-times" placeholder="10:00, 18:30"></label>
+    </div>
+    <div class="row" style="margin-top:14px;gap:22px">
+      <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="s-caps" checked><i></i></span>Auto captions</label>
+      <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="s-review"><i></i></span>Review first</label>
+    </div>
+    <input id="s-note" style="margin-top:14px" placeholder="Permission proof / note (for 'I have permission')">
+    <div class="row" style="margin-top:16px;justify-content:flex-end"><button class="btn outline" id="m-add-cancel">Cancel</button><button class="btn brand" id="s-add">Add sources</button></div>
+  </div>
+</div></div>
+
 <div class="modal" id="m-new"><div class="card">
-  <div class="row" style="justify-content:space-between"><h2>New clip from a video</h2><button class="btn sec sm" id="m-close">Close</button></div>
-  <div class="row"><input id="n-url" class="grow" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
-  <input id="n-note" style="margin-top:10px" placeholder="Permission note (permission mode)">
-  <div id="n-out" style="margin-top:14px"></div>
+  <div class="ch"><div><h3>New clip from a video</h3><p>Paste a video link; we find the hot moments.</p></div><button class="btn ghost icon" id="m-close"><i data-ico="x"></i></button></div>
+  <div class="cb">
+    <div class="row"><input id="n-url" class="grow" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
+    <input id="n-note" style="margin-top:10px" placeholder="Permission note (permission mode)">
+    <div id="n-out" style="margin-top:14px"></div>
+  </div>
 </div></div>
 
 <div class="toasts" id="toasts"></div>
@@ -298,119 +360,151 @@ const T=s=>{if(s==null||isNaN(s))return'-';s=Math.round(s);return Math.floor(s/6
 const when=iso=>iso?new Date(iso).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'as soon as possible';
 const thumb=id=>id?`https://i.ytimg.com/vi/${id}/mqdefault.jpg`:'';
 const LABEL={draft:'Draft',rendering:'Rendering…',rendered:'Ready to review',queued:'Queued',uploading:'Uploading…',uploaded:'Uploaded',failed:'Failed'};
+const P={
+ dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+ film:'<rect x="2" y="2" width="20" height="20" rx="2.2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/>',
+ rss:'<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
+ youtube:'<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/>',
+ logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+ plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',check:'<path d="M20 6 9 17l-5-5"/>',x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+ clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+ alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+ upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+ play:'<polygon points="6 3 20 12 6 21 6 3"/>',trash:'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+ pencil:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+ scissors:'<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+ menu:'<line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>',
+ mic:'<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>',
+ captions:'<rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>',
+ sparkles:'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+ refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+ pause:'<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+ inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+ arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>'
+};
+const ico=(n,c='')=>`<svg class="ico ${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||''}</svg>`;
+function paintIcons(root=document){$$('[data-ico]',root).forEach(e=>{e.outerHTML=ico(e.dataset.ico)})}
 let DESTS=[],OV=null,TAB='rendered',CUR=null,POLL=null,LOCK=false,VIEW='out',VOICES={};
 
 async function api(path,method='GET',body){
   const o={method,headers:{}};
   if(body instanceof FormData)o.body=body;else if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
   const r=await fetch(path,o);
+  if(r.status===401){location.href='/login?next='+encodeURIComponent(location.pathname);throw new Error('Session expired — please sign in again')}
   if(!r.ok){let m=r.statusText;try{const j=await r.json();m=j.detail||m;if(Array.isArray(m))m=m.map(x=>(x.loc||[]).join('.')+': '+x.msg).join('; ')}catch(e){}throw new Error(m)}
   return r.json();
 }
-function toast(msg,bad){const d=document.createElement('div');d.className='toast'+(bad?' bad':'');d.textContent=msg;$('#toasts').appendChild(d);setTimeout(()=>d.remove(),bad?6000:3200)}
+function toast(msg,bad){const d=document.createElement('div');d.className='toast'+(bad?' bad':'');d.innerHTML=ico(bad?'alert':'check')+'<span>'+esc(msg)+'</span>';$('#toasts').appendChild(d);setTimeout(()=>d.remove(),bad?6500:3500)}
 const fail=e=>toast(e.message||String(e),true);
 async function once(fn,btn){if(LOCK)return;LOCK=true;if(btn)btn.disabled=true;try{await fn()}catch(e){fail(e)}finally{LOCK=false;if(btn)btn.disabled=false}}
+const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
+const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-/* ---------- navigation ---------- */
+const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',settings:'My channels'};
 function go(p){
-  $$('main section').forEach(s=>s.hidden=s.id!=='p-'+p);
-  $$('.nav').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
+  $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
+  $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
+  $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
   if(p==='dashboard')loadDash();if(p==='clips')loadClips();if(p==='sources')loadSources();if(p==='settings')loadDests();
 }
-$$('.nav').forEach(n=>n.onclick=()=>go(n.dataset.p));
+$$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
+$('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
+$('#burger').onclick=()=>{$('#sb').classList.add('on');$('#sb-scrim').classList.add('on')};
+$('#sb-scrim').onclick=()=>{$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on')};
+$('#top-add').onclick=()=>openAdd();$('#top-new').onclick=()=>openNewModal();
 
-/* ---------- shared ---------- */
 async function loadOverview(){
   OV=await api('/api/overview');DESTS=OV.destinations;
   const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}</option>`).join(''):'<option value="">Connect a channel first</option>';
   $('#h-dest').innerHTML=opts;$('#s-dest').innerHTML=opts;
   const rv=OV.counts.rendered;const b=$('#b-review');b.style.display=rv?'':'none';b.textContent=rv;
-  $('#side-foot').innerHTML=DESTS.length?'<b>Uploading to</b><br>'+DESTS.map(d=>'● '+esc(d.name)).join('<br>'):'<b>No channel connected</b><br><a href="/auth/login">Connect now</a>';
   return OV;
 }
 function clipMini(c,actions){
-  return `<div class="it"><div class="th" style="background-image:url('${thumb(c.video_id)}')" data-open="${c.id}"></div>
+  return `<div class="item"><div class="th" style="background-image:url('${thumb(c.video_id)}')" data-open="${c.id}"></div>
   <div class="tx"><b>${esc(c.title||c.source_title||'Clip #'+c.id)}</b><span class="mut sm">${esc(c.source_channel||'')} · ${T(c.start)}–${T(c.end)}${c.status==='queued'?' · '+when(c.publish_at):''}</span>${c.error?`<span class="sm" style="color:var(--bad);display:block">${esc(c.error).slice(0,110)}</span>`:''}</div>${actions||''}</div>`;
 }
 function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
 
-/* ---------- dashboard ---------- */
 async function loadDash(){
+  if(!OV){$('#kpis').innerHTML=Array.from({length:4},()=>'<div class="card stat"><div class="sk" style="height:70px"></div></div>').join('');['#d-review','#d-up','#d-rec','#d-fail','#d-pipe'].forEach(s=>$(s).innerHTML=skel(2))}
   try{await loadOverview()}catch(e){return fail(e)}
   const c=OV.counts;
-  $('#kpis').innerHTML=[['Sources',OV.sources],['Ready to review',c.rendered],['Queued',c.queued],['Uploaded',c.uploaded],['Failed',c.failed],['Videos analysed',OV.videos_analyzed]].map(([k,v])=>`<div class="card kpi"><b>${v}</b><span>${k}</span></div>`).join('');
+  const st=[['Sources',OV.sources,'rss',OV.videos_analyzed+' videos analysed'],['Ready to review',c.rendered,'inbox',c.rendered?'Waiting for you':'All clear'],['Scheduled',c.queued+c.uploading,'clock',c.uploading?c.uploading+' uploading now':'Going out on schedule'],['Uploaded',c.uploaded,'upload',c.failed?c.failed+' failed':'No failures']];
+  $('#kpis').innerHTML=st.map(([k,v,i,d])=>`<div class="card stat"><div class="l">${k}<span class="ic">${ico(i)}</span></div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`).join('');
   let al='';
-  if(!OV.youtube_configured)al+='<div class="alert bad">Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>';
-  else if(!DESTS.length)al+='<div class="alert">No YouTube channel connected yet. <a href="/auth/login"><button class="btn sm">Connect your channel</button></a></div>';
+  if(!OV.youtube_configured)al+=`<div class="alert bad">${ico('alert')}Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>`;
+  else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
   $('#alerts').innerHTML=al;
-  $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">Approve</button>`)).join(''):'<div class="empty">Nothing waiting. Sources set to “Review first” will appear here.</div>';
-  $('#d-up').innerHTML=OV.upcoming.length?OV.upcoming.map(x=>clipMini(x,`<span class="chip ${x.status}">${LABEL[x.status]}</span>`)).join(''):'<div class="empty">No uploads scheduled.</div>';
-  $('#d-rec').innerHTML=OV.recent.length?OV.recent.map(x=>clipMini(x,x.youtube_id?`<a class="btn sec sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">Open</a>`:'')).join(''):'<div class="empty">Nothing uploaded yet.</div>';
-  $('#d-fail').innerHTML=OV.failed.length?OV.failed.map(x=>clipMini(x,`<button class="btn sec sm" data-retry="${x.id}">Fix</button>`)).join(''):'<div class="empty">All good ✅</div>';
+  $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
+  $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
+  $('#d-up').innerHTML=OV.upcoming.length?OV.upcoming.map(x=>clipMini(x,`<span class="badge ${x.status}">${LABEL[x.status]}</span>`)).join(''):empty('clock','No uploads scheduled','Approved clips show up here with their publish time.');
+  $('#d-rec').innerHTML=OV.recent.length?OV.recent.map(x=>clipMini(x,x.youtube_id?`<a class="btn outline sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">Open</a>`:'')).join(''):empty('upload','Nothing uploaded yet','Your first upload will appear here.');
+  $('#d-fail').innerHTML=OV.failed.length?OV.failed.map(x=>clipMini(x,`<button class="btn outline sm" data-retry="${x.id}">Fix</button>`)).join(''):empty('check','All good','No failed clips.');
   ['#d-review','#d-up','#d-rec','#d-fail'].forEach(s=>wireOpen($(s)));
 }
-$('#h-mode').onchange=()=>{$('#h-note').style.display=$('#h-mode').value==='permission'?'':'none'};
+$('#h-mode').onchange=()=>{$('#h-note').classList.toggle('hide',$('#h-mode').value!=='permission')};
 const isVideo=u=>/(watch\?v=|youtu\.be\/|\/shorts\/|\/live\/)/i.test(u);
 $('#h-go').onclick=()=>once(async()=>{
   const q=$('#h-q').value.trim();if(!q)throw new Error('Paste a channel or video link first');
   if(isVideo(q)){await openNew(q,$('#h-mode').value,$('#h-note').value);return}
   if($('#h-mode').value==='commentary')throw new Error('Commentary needs manual editing — paste a single video link instead.');
   await api('/api/channels','POST',{query:q,mode:$('#h-mode').value,permission_note:$('#h-note').value,destination_id:+$('#h-dest').value||null,review_first:$('#h-review').checked,captions:true,tz_offset:new Date().getTimezoneOffset()});
-  $('#h-q').value='';toast('Source added — click “Run now” in Sources to start immediately');go('sources');
+  $('#h-q').value='';toast('Source added — press Run in Sources to start now');go('sources');
 },$('#h-go'));
 
-/* ---------- sources ---------- */
+function openAdd(){$('#m-add').classList.add('on')}
+$('#open-add').onclick=openAdd;$('#m-add-close').onclick=$('#m-add-cancel').onclick=()=>$('#m-add').classList.remove('on');
 $('#s-add').onclick=()=>once(async()=>{
   const lines=$('#s-q').value.split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean);
   if(!lines.length)throw new Error('Add at least one channel');
   const errs=[];
   for(const q of lines){try{await api('/api/channels','POST',{query:q,mode:$('#s-mode').value,permission_note:$('#s-note').value,destination_id:+$('#s-dest').value||null,
     videos_per_run:+$('#s-v').value,clips_per_video:+$('#s-c').value,clip_len:+$('#s-l').value,gap_hours:+$('#s-g').value,aspect:$('#s-a').value,review_first:$('#s-review').checked,captions:$('#s-caps').checked,post_times:$('#s-times').value,tz_offset:new Date().getTimezoneOffset()})}catch(e){errs.push(q+': '+e.message)}}
-  if(errs.length)toast(errs.join(' | '),true);else{$('#s-q').value='';toast('Sources added')}
-  loadSources();
+  if(errs.length)toast(errs.join(' | '),true);else{$('#s-q').value='';toast('Sources added');$('#m-add').classList.remove('on')}
+  go('sources');
 },$('#s-add'));
 async function loadSources(){
+  $('#src-list').innerHTML='<div class="cb">'+skel(3)+'</div>';
   await loadOverview();const L=await api('/api/channels');
-  $('#src-list').innerHTML=L.length?L.map(c=>`<div class="src">
-    <div class="grow"><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.last_run?('Last run '+when(c.last_run)):'Never run')} · ${esc((c.last_status||'').slice(0,140))}</div></div>
-    <span class="chip mode">${c.mode==='cc'?'CC only':'Permission'}</span>${c.captions?'<span class="chip">Captions</span>':''}${c.post_times?'<span class="chip">⏰ '+esc(c.post_times)+'</span>':''}
-    <span class="chip">→ ${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</span>
-    <label class="row sm" style="gap:6px" title="Off = clips wait for your approval"><span class="switch"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></span>Auto upload</label>
-    <button class="btn sm" data-run="${c.id}">Run now</button>
-    <button class="btn sec sm" data-tog="${c.id}">${c.auto?'Pause':'Resume'}</button>
-    <button class="btn bad sm" data-del="${c.id}">✕</button></div>`).join(''):'<div class="empty">No sources yet. Add a channel above.</div>';
-  $$('[data-run]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.run}/run`,'POST');toast('Started — clips will appear in Clips as they finish')}));
+  $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
+    <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
+    <td><div class="row" style="gap:6px"><span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
+    <td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
+    <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
+    <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
+    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-run="${c.id}" title="Run now">${ico('play')}Run</button><button class="btn outline sm icon" data-tog="${c.id}" title="${c.auto?'Pause':'Resume'}">${ico(c.auto?'pause':'refresh')}</button><button class="btn bad sm icon" data-del="${c.id}" title="Remove">${ico('trash')}</button></div></td></tr>`).join('')+'</tbody></table>':'<div class="cb">'+empty('rss','No sources yet','Add a channel and the system takes over.','<button class="btn" onclick="openAdd()">'+ico('plus')+'Add sources</button>')+'</div>';
+  $$('[data-run]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.run}/run`,'POST');toast('Started — clips appear in Clips as they finish')}));
   $$('[data-tog]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.tog}/toggle`,'POST');loadSources()}));
   $$('[data-del]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this source?')){await api(`/api/channels/${b.dataset.del}`,'DELETE');loadSources()}}));
   $$('[data-autoup]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.autoup}/review`,'POST',{review_first:!b.checked});toast(b.checked?'New clips will upload automatically':'New clips will wait for your approval')}));
 }
 
-/* ---------- my channels ---------- */
 async function loadDests(){
   await loadOverview();
-  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="src"><div class="grow"><b>${esc(d.name)}</b><div class="mut sm">Connected ${when(d.created_at)}</div></div><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):'<div class="empty">No channel connected yet.</div>';
+  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div><span class="badge uploaded">Connected</span><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
 }
+$('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
 
-/* ---------- clips ---------- */
 const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering','Drafts']];
 async function loadClips(){
+  $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
   await loadOverview();const c=OV.counts;
   const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering':c.draft+c.rendering};
-  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} · ${cnt[k]??0}</button>`).join('');
-  $$('.tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
+  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} <span class="mut">${cnt[k]??0}</span></button>`).join('');
+  $$('#tabs .tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
   const st=TAB==='queued'?'queued,uploading':TAB;
   const L=await api('/api/clips?status='+encodeURIComponent(st));
-  $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${thumb(x.video_id)}')" data-open="${x.id}"><span class="chip ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
-    <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="m">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
-    ${x.status==='queued'?`<div class="m">⏰ ${when(x.publish_at)}</div>`:''}${x.error?`<div class="m" style="color:var(--bad)">${esc(x.error).slice(0,120)}</div>`:''}
-    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">Approve</button>`:''}<button class="btn sec sm" data-open="${x.id}">${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn sec sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}</div></div></div>`).join(''):'<div class="empty" style="grid-column:1/-1">Nothing here yet.</div>';
+  $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
+    <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
+    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc(x.error).slice(0,120)}</div>`:''}
+    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}</div></div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
   wireOpen($('#clip-grid'));
 }
 async function approve(id){await api(`/api/clips/${id}/approve`,'POST',{});toast('Approved — queued for upload');refreshAfter()}
-function refreshAfter(){const p=$$('main section').find(s=>!s.hidden);if(p)go(p.id.slice(2))}
+function refreshAfter(){const p=$$('main section').find(s=>!s.classList.contains('hide'));if(p)go(p.id.slice(2))}
 
-/* ---------- new clip from a video link ---------- */
 function openNewModal(){$('#m-new').classList.add('on')}
 $('#new-clip').onclick=openNewModal;$('#m-close').onclick=()=>$('#m-new').classList.remove('on');
 async function openNew(url,mode,note){$('#n-url').value=url||'';$('#n-mode').value=mode||'cc';$('#n-note').value=note||'';$('#n-out').innerHTML='';openNewModal();if(url)await loadHot()}
@@ -418,22 +512,23 @@ $('#n-load').onclick=()=>once(loadHot,$('#n-load'));
 let NP=null;
 async function loadHot(){
   NP=await api('/api/projects','POST',{url:$('#n-url').value,mode:$('#n-mode').value,permission_note:$('#n-note').value});
-  $('#n-out').innerHTML=`<div class="row"><img src="${thumb(NP.video_id)}" style="width:120px;border-radius:8px"><div><b>${esc(NP.title)}</b><div class="mut sm">${esc(NP.channel)} · ${T(NP.duration)} · ${esc(NP.license||'Standard YouTube License')}</div></div></div><div class="mut" style="margin:12px 0">Finding most-replayed & most-commented moments…</div>`;
+  const head=`<div class="row" style="flex-wrap:nowrap"><img src="${thumb(NP.video_id)}" style="width:120px;border-radius:8px"><div><b>${esc(NP.title)}</b><div class="mut sm">${esc(NP.channel)} · ${T(NP.duration)} · ${esc(NP.license||'Standard YouTube License')}</div></div></div>`;
+  $('#n-out').innerHTML=head+'<div class="mut" style="margin:12px 0">Finding most-replayed &amp; most-commented moments…</div><div class="sk" style="height:46px"></div>';
   const r=await api(`/api/projects/${NP.id}/analyze`,'POST');
-  const head=`<div class="row"><img src="${thumb(NP.video_id)}" style="width:120px;border-radius:8px"><div><b>${esc(NP.title)}</b><div class="mut sm">${esc(NP.channel)} · ${T(NP.duration)} · ${esc(NP.license||'Standard YouTube License')}</div></div></div>`;
-  const moms=r.moments.length?r.moments.map(m=>`<div class="mom"><b>${T(m.start)}–${T(m.end)}</b><div class="bar"><i style="width:${Math.round(m.score*100)}%"></i></div><span class="mut sm grow">${m.comments} comment mentions</span><button class="btn sm" data-mk="${m.start}-${m.end}">Make clip</button></div>`).join(''):'<div class="empty">No replay/comment signal found — pick a time range manually.</div>';
-  $('#n-out').innerHTML=head+'<h2 style="margin-top:14px">Hot moments</h2>'+moms+`<div class="row" style="margin-top:12px"><input id="n-s" type="number" placeholder="start s" style="width:100px"><input id="n-e" type="number" placeholder="end s" style="width:100px"><button class="btn sec sm" data-mk="manual">Make clip from range</button></div>`;
+  const moms=r.moments.length?r.moments.map(m=>`<div class="mom"><b>${T(m.start)}–${T(m.end)}</b><div class="bar"><i style="width:${Math.round(m.score*100)}%"></i></div><span class="mut sm grow">${m.comments} comment mentions</span><button class="btn sm" data-mk="${m.start}-${m.end}">Make clip</button></div>`).join(''):empty('film','No replay/comment signal','Pick a time range manually below.');
+  $('#n-out').innerHTML=head+'<h3 style="margin-top:16px">Hot moments</h3>'+moms+`<div class="row" style="margin-top:14px"><input id="n-s" type="number" placeholder="start s" style="width:110px"><input id="n-e" type="number" placeholder="end s" style="width:110px"><button class="btn outline sm" data-mk="manual">Make clip from range</button></div>`;
   $$('[data-mk]',$('#n-out')).forEach(b=>b.onclick=()=>once(async()=>{
     let s,e;if(b.dataset.mk==='manual'){s=+$('#n-s').value;e=+$('#n-e').value}else[s,e]=b.dataset.mk.split('-').map(Number);
     const c=await api(`/api/projects/${NP.id}/clips`,'POST',{start:s,end:e});$('#m-new').classList.remove('on');openEditor(c.id)}));
 }
 
-/* ---------- editor ---------- */
 $('#scrim').onclick=closeEditor;$('#e-close').onclick=closeEditor;
 function closeEditor(){$('#drawer').classList.remove('on');$('#scrim').classList.remove('on');clearInterval(POLL);$('#e-video').pause();$('#e-frame').src='about:blank';CUR=null}
+function etab(t){$$('#e-tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('.panel').forEach(p=>p.classList.toggle('on',p.dataset.t===t))}
+$$('#e-tabs .tab').forEach(b=>b.onclick=()=>etab(b.dataset.t));
 async function openEditor(id){
   const [c,v]=await Promise.all([api('/api/clips/'+id),api('/api/voices')]).catch(e=>{fail(e);return[]});
-  if(!c)return;VOICES=v;CUR=c;
+  if(!c)return;VOICES=v;CUR=c;etab('trim');
   $('#e-voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join('');
   fill(c);$('#drawer').classList.add('on');$('#scrim').classList.add('on');
   if(c.status==='rendering')startPoll(c.id);
@@ -451,36 +546,36 @@ function fill(c){
   setStatus(c);
 }
 function setStatus(c){
-  const s=$('#e-status');s.className='chip '+c.status+(c.status==='rendering'?' pulse':'');s.textContent=LABEL[c.status]||c.status;
-  const er=$('#e-err');er.style.display=c.error?'':'none';er.textContent=c.error||'';
+  const s=$('#e-status');s.className='badge '+c.status+(c.status==='rendering'?' pulse':'');s.textContent=LABEL[c.status]||c.status;
+  const er=$('#e-err');er.style.display=c.error?'':'none';er.innerHTML=c.error?ico('alert')+esc(c.error):'';
   const has=['rendered','queued','uploading','uploaded'].includes(c.status);
   VIEW=has?VIEW:'src';
-  $$('#e-seg button').forEach(b=>b.classList.toggle('on',b.dataset.v===VIEW));
+  $$('#e-seg .tab').forEach(b=>b.classList.toggle('on',b.dataset.v===VIEW));
   const vid=$('#e-video'),fr=$('#e-frame');
   if(VIEW==='out'&&has){fr.style.display='none';fr.src='about:blank';vid.style.display='';vid.src=`/api/clips/${c.id}/video?t=${Date.now()}`}
   else{vid.pause();vid.style.display='none';fr.style.display='';if(c.video_id)fr.src=`https://www.youtube.com/embed/${c.video_id}?start=${Math.floor(c.start)}`}
-  const done=c.status==='uploaded',busy=['rendering','uploading'].includes(c.status);
-  $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!['rendered','queued','failed'].includes(c.status);$('#e-now').disabled=done||busy||!['rendered','queued','failed'].includes(c.status);
-  $('#e-approve').textContent=c.status==='queued'?'Re-queue':'Approve & queue';
+  const done=c.status==='uploaded',busy=['rendering','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
+  $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!ok;
+  $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
 }
-$$('#e-seg button').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;if(CUR)setStatus(CUR)});
+$$('#e-seg .tab').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;if(CUR)setStatus(CUR)});
 function addOv(o){
   o=(o&&o.text!==undefined)?o:{text:'',start:0,end:3,pos:'bottom',size:56,color:'#ffffff',anim:'fade'};
   const d=document.createElement('div');d.className='ov';
-  d.innerHTML=`<div class="row"><input class="o-text grow" placeholder="Text on screen" value="${esc(o.text)}"><button class="btn bad sm o-del">Remove</button></div>
-  <div class="row"><label class="fld">From (s)<input class="o-s" type="number" step="0.1" value="${esc(o.start)}" style="width:90px"></label><label class="fld">To (s)<input class="o-e" type="number" step="0.1" value="${esc(o.end)}" style="width:90px"></label>
-  <label class="fld">Position<select class="o-pos"><option>top</option><option>center</option><option>bottom</option></select></label>
-  <label class="fld">Animation<select class="o-anim"><option value="fade">Fade</option><option value="slide_up">Slide up</option><option value="none">None</option></select></label>
-  <label class="fld">Size<input class="o-size" type="number" value="${esc(o.size)}" style="width:80px"></label><label class="fld">Colour<input class="o-color" type="color" value="${esc(o.color||'#ffffff')}" style="width:56px;padding:2px;height:38px"></label></div>`;
+  d.innerHTML=`<div class="row"><input class="o-text grow" placeholder="Text on screen" value="${esc(o.text)}"><button class="btn bad sm icon o-del" title="Remove">${ico('trash')}</button></div>
+  <div class="row"><label class="f">From (s)<input class="o-s" type="number" step="0.1" value="${esc(o.start)}" style="width:90px"></label><label class="f">To (s)<input class="o-e" type="number" step="0.1" value="${esc(o.end)}" style="width:90px"></label>
+  <label class="f">Position<select class="o-pos"><option>top</option><option>center</option><option>bottom</option></select></label>
+  <label class="f">Animation<select class="o-anim"><option value="fade">Fade</option><option value="slide_up">Slide up</option><option value="none">None</option></select></label>
+  <label class="f">Size<input class="o-size" type="number" value="${esc(o.size)}" style="width:80px"></label><label class="f">Colour<input class="o-color" type="color" value="${esc(o.color||'#ffffff')}" style="width:56px;padding:3px"></label></div>`;
   $('.o-pos',d).value=o.pos;$('.o-anim',d).value=o.anim;$('.o-del',d).onclick=()=>d.remove();$('#e-ovs').appendChild(d);
 }
 $('#e-addov').onclick=()=>addOv();
 function addCue(c){
   const d=document.createElement('div');d.className='row cue';d.style.flexWrap='nowrap';
-  d.innerHTML=`<input class="c-s" type="number" step="0.1" value="${esc(c.s)}" style="width:80px"><input class="c-e" type="number" step="0.1" value="${esc(c.e)}" style="width:80px"><input class="c-t grow" value="${esc(c.t)}"><button class="btn bad sm c-del">✕</button>`;
+  d.innerHTML=`<input class="c-s" type="number" step="0.1" value="${esc(c.s)}" style="width:80px"><input class="c-e" type="number" step="0.1" value="${esc(c.e)}" style="width:80px"><input class="c-t grow" value="${esc(c.t)}"><button class="btn bad sm icon c-del">${ico('x')}</button>`;
   $('.c-del',d).onclick=()=>d.remove();$('#e-cues').appendChild(d);
 }
-$('#e-cgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/captions`,'POST',{lang:$('#e-clang').value});fill(await api('/api/clips/'+c.id));toast('Captions added — check the text, then Save & re-render')},$('#e-cgen'));
+$('#e-cgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/captions`,'POST',{lang:$('#e-clang').value});fill(await api('/api/clips/'+c.id));etab('caps');toast('Captions added — check the text, then Save & re-render')},$('#e-cgen'));
 function collect(){
   return{start:+$('#e-s').value,end:+$('#e-e').value,aspect:$('#e-asp').value,orig_volume:+$('#e-vol').value,voice_offset:+$('#e-voff').value,
     effects:$$('#e-fx input:checked').map(x=>x.value),
@@ -491,19 +586,23 @@ function collect(){
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
 function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const x=await api('/api/clips/'+id);if(CUR&&CUR.id===id){fill(x);if(x.status!=='rendering'){clearInterval(POLL);toast(x.status==='failed'?'Render failed':'Render finished',x.status==='failed')}}else clearInterval(POLL)}catch(e){clearInterval(POLL)}},2500)}
-$('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… it re-joins the upload queue by itself')},$('#e-render'));
+$('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… it rejoins the upload queue by itself')},$('#e-render'));
 $('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
 $('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
 $('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
-$('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);fill(await api('/api/clips/'+CUR.id));toast('Voice generated — press Save & re-render')},$('#e-tts'));
-$('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));toast('Voice uploaded — press Save & re-render')});
+$('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice generated — press Save & re-render')},$('#e-tts'));
+$('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice uploaded — press Save & re-render')});
 $('#e-kw').onclick=()=>once(async()=>{const q=$('#e-kq').value||(CUR&&CUR.source_title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
   $('#e-chips').innerHTML=r.keywords.map(k=>`<span data-k="${esc(k)}">${esc(k)}</span>`).join('')||'<span>no suggestions</span>';},$('#e-kw'));
 $('#e-chips').onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k)return;const t=$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean);if(!t.includes(k))t.push(k);$('#e-mg').value=t.join(', ')};
 $('#e-meta').onclick=()=>once(async()=>{await save();const extra=$$('#e-chips span').map(s=>s.dataset.k).filter(Boolean).slice(0,10);const m=await api(`/api/clips/${CUR.id}/metadata`,'POST',{extra_keywords:extra});$('#e-mt').value=m.title;$('#e-md').value=m.description;$('#e-mg').value=m.tags.join(', ');toast('Metadata filled (credit + original tags + keywords)')},$('#e-meta'));
 
+['m-add','m-new'].forEach(id=>$('#'+id).addEventListener('mousedown',e=>{if(e.target.id===id)$('#'+id).classList.remove('on')}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){['m-add','m-new'].forEach(id=>$('#'+id).classList.remove('on'));if(CUR)closeEditor()}});
+
+paintIcons();
 go('dashboard');
-setInterval(()=>{if(!$('#p-dashboard').hidden&&!CUR)loadDash().catch(()=>{})},30000);
+setInterval(()=>{if(!$('#p-dashboard').classList.contains('hide')&&!CUR)loadDash().catch(()=>{})},30000);
 </script>
 </body>
 </html>

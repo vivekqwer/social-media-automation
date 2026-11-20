@@ -1,7 +1,7 @@
 import base64
 import secrets
 import shutil
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
 from datetime import timezone
 from datetime import datetime
@@ -15,11 +15,11 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import scheduler, youtube
+from . import auth, scheduler, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
 from .crypto import encrypt_existing
-from .config import APP_PASSWORD, APP_USER, DATA_DIR, IS_LOCAL
+from .config import APP_PASSWORD, APP_USER, BASE_URL, DATA_DIR, IS_LOCAL
 from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, parse_timestamps, rank_moments
 from .ingest import fetch_info, is_cc
@@ -33,7 +33,11 @@ from .tts import VOICES, synth
 
 MODES = {"cc", "permission", "commentary"}
 # public pages Google (OAuth consent / API audit) must be able to open without the dashboard password
-PUBLIC_PATHS = {"/healthz", "/privacy", "/terms", "/about"}
+PUBLIC_PATHS = {
+    "/healthz", "/privacy", "/terms", "/about",
+    "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password",
+    "/auth/reset/start", "/auth/callback",
+}
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 VOICE_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
@@ -66,31 +70,125 @@ async def validation_error(request: Request, exc: RequestValidationError):
     return JSONResponse({"detail": errs}, status_code=422)
 
 
+class LoginIn(BaseModel):
+    username: str = Field(max_length=100)
+    password: str = Field(max_length=200)
+
+
+class ResetIn(BaseModel):
+    password: str = Field(max_length=200)
+
+
+class ChangePwIn(BaseModel):
+    old_password: str = Field(max_length=200)
+    new_password: str = Field(max_length=200)
+
+
 @app.middleware("http")
-async def basic_auth(request: Request, call_next):
-    if request.url.path in PUBLIC_PATHS:
-        return await call_next(request)
-    if request.method in ("POST", "PUT", "DELETE", "PATCH"):  # CSRF: browsers re-send cached Basic auth cross-site
+async def auth_gate(request: Request, call_next):
+    path = request.url.path
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):  # CSRF: only same-origin pages may send changes
         origin = request.headers.get("origin")
         if origin and urlparse(origin).netloc != request.headers.get("host", ""):
             return PlainTextResponse("Cross-origin request blocked", status_code=403)
-    if not APP_PASSWORD:
+    if path in PUBLIC_PATHS:
+        return await call_next(request)
+    if not auth.auth_configured():
         if not IS_LOCAL:
             return PlainTextResponse("Set the APP_PASSWORD env var before using this app.", status_code=503)
         return await call_next(request)
-    ok = False
-    hdr = request.headers.get("authorization", "")
-    if hdr.lower().startswith("basic "):
-        try:
-            user, _, pw = base64.b64decode(hdr[6:]).decode().partition(":")
-            ok = secrets.compare_digest(user.encode(), APP_USER.encode()) and secrets.compare_digest(
-                pw.encode(), APP_PASSWORD.encode()
-            )
-        except Exception:  # noqa: BLE001
-            ok = False
-    if not ok:
-        return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="clipstudio"'})
-    return await call_next(request)
+    if auth.request_authenticated(request):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"detail": "Not logged in"}, status_code=401)
+    return RedirectResponse("/login?next=" + quote(path), status_code=302)
+
+
+def _client_ip(request: Request) -> str:
+    fwd = request.headers.get("x-forwarded-for")
+    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?")
+
+
+def _set_cookie(resp, name: str, value: str, max_age: int):
+    resp.set_cookie(name, value, max_age=max_age, httponly=True, samesite="lax", path="/",
+                    secure=BASE_URL.startswith("https://"))
+
+
+@app.get("/login")
+def page_login(request: Request):
+    if (not auth.auth_configured() and IS_LOCAL) or auth.request_authenticated(request):
+        return RedirectResponse("/", status_code=302)
+    return FileResponse(_STATIC / "login.html")
+
+
+@app.get("/forgot")
+def page_forgot():
+    return FileResponse(_STATIC / "forgot.html")
+
+
+@app.get("/reset")
+def page_reset(request: Request):
+    if not auth.verify_reset_token(request.cookies.get(auth.RESET_COOKIE)):
+        return RedirectResponse("/forgot?err=" + quote("Please verify with Google first."), status_code=302)
+    return FileResponse(_STATIC / "reset.html")
+
+
+@app.post("/api/login")
+def api_login(body: LoginIn, request: Request):
+    ip = _client_ip(request)
+    if auth.rate_limited(ip):
+        raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
+    if not auth.auth_configured():
+        raise HTTPException(503, "No password is set on the server yet.")
+    if not auth.check_login(body.username, body.password):
+        auth.note_fail(ip)
+        raise HTTPException(401, "Wrong username or password.")
+    resp = JSONResponse({"ok": True})
+    _set_cookie(resp, auth.SESSION_COOKIE, auth.make_session(APP_USER), auth.SESSION_TTL)
+    return resp
+
+
+@app.post("/api/logout")
+def api_logout():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    return resp
+
+
+@app.get("/auth/reset/start")
+def reset_start():
+    if not youtube.configured():
+        return RedirectResponse("/forgot?err=" + quote("Google sign-in is not set up on this server."), status_code=302)
+    if not auth.allowed_reset_emails():
+        return RedirectResponse("/forgot?err=" + quote("No recovery account is registered yet. The hosting owner must set ADMIN_EMAIL."), status_code=302)
+    return RedirectResponse(youtube.reset_url())
+
+
+@app.post("/api/reset-password")
+def api_reset_password(body: ResetIn, request: Request):
+    if not auth.verify_reset_token(request.cookies.get(auth.RESET_COOKIE)):
+        raise HTTPException(401, "Verification expired. Verify with Google again.")
+    err = auth.validate_new_password(body.password)
+    if err:
+        raise HTTPException(400, err)
+    auth.set_password(body.password)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.RESET_COOKIE, path="/")
+    _set_cookie(resp, auth.SESSION_COOKIE, auth.make_session(APP_USER), auth.SESSION_TTL)
+    return resp
+
+
+@app.post("/api/change-password")
+def api_change_password(body: ChangePwIn):
+    if not auth.check_login(APP_USER, body.old_password):
+        raise HTTPException(400, "Current password is wrong.")
+    err = auth.validate_new_password(body.new_password)
+    if err:
+        raise HTTPException(400, err)
+    auth.set_password(body.new_password)
+    resp = JSONResponse({"ok": True})
+    _set_cookie(resp, auth.SESSION_COOKIE, auth.make_session(APP_USER), auth.SESSION_TTL)
+    return resp
 
 
 @app.get("/privacy")
@@ -636,7 +734,24 @@ def auth_login():
 
 
 @app.get("/auth/callback")
-def auth_callback(code: str, state: str):
+def auth_callback(request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+    if state and state.startswith("reset:"):  # password recovery, verified through Google
+        if error or not code:
+            return RedirectResponse("/forgot?err=" + quote("Google sign-in was cancelled."), status_code=302)
+        try:
+            email = youtube.handle_reset_callback(code, state)
+        except Exception as e:  # noqa: BLE001
+            return RedirectResponse("/forgot?err=" + quote(str(e)[:150]), status_code=302)
+        if email.lower() not in auth.allowed_reset_emails():
+            return RedirectResponse("/forgot?err=" + quote("That Google account is not allowed to reset this password."), status_code=302)
+        resp = RedirectResponse("/reset", status_code=302)
+        _set_cookie(resp, auth.RESET_COOKIE, auth.make_reset_token(email), auth.RESET_TTL)
+        return resp
+    # connecting a YouTube channel: only for a logged-in dashboard user
+    if auth.auth_configured() and not auth.request_authenticated(request):
+        return RedirectResponse("/login?next=/", status_code=302)
+    if error or not code or not state:
+        return RedirectResponse("/", status_code=302)
     try:
         youtube.handle_callback(code, state)
     except Exception as e:  # noqa: BLE001

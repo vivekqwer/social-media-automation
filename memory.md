@@ -48,6 +48,10 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 - Captions = YouTube's own subtitle tracks (free, no AI). No captions on a video -> none (Whisper fallback not built). Bundled fonts in fonts/ (Noto Sans, Noto Sans Devanagari) are needed in the Docker image.
 - Scheduling: per-clip date/time picker in editor; per-source daily "Post at" times; uploads happen up to 48h early as private with publishAt. WARNING: unaudited API projects stay private-locked until YouTube API compliance audit -> scheduled public release won't happen until audit passes.
 
+## Login (2026-11-20)
+- Dashboard login = /login page (cookie session). Initial password = APP_PASSWORD env (set by user in Railway). Forgot password = Google verification; set ADMIN_EMAIL=funnygunction@gmail.com in Railway so it works before any channel is connected. Escape hatch: FORCE_ENV_PASSWORD=1 + new APP_PASSWORD.
+- UI follows shadcn/21st.dev style (user asked for polished, modern UI). Keep that look for new pages.
+
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
 
