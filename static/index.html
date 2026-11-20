@@ -214,7 +214,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="cb">
             <div class="hero-in">
               <select id="h-kind" style="width:auto"><option value="channel">Channel / video</option><option value="topic">Topic (CC videos only)</option></select>
-              <div class="inp"><i data-ico="link"></i><input id="h-q" placeholder="https://youtube.com/@channel  ·  @handle  ·  video link"></div>
+              <div class="inp"><i data-ico="link"></i><input id="h-q" autocomplete="off" name="source-link" placeholder="https://youtube.com/@channel  ·  @handle  ·  video link"></div>
               <select id="h-mode" style="width:auto"><option value="cc">CC videos only</option><option value="permission">I have permission</option><option value="commentary">Commentary (manual)</option></select>
               <select id="h-dest" style="width:auto"></select>
               <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="h-review"><i></i></span>Review first</label>
@@ -397,7 +397,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 <div class="modal" id="m-new"><div class="card">
   <div class="ch"><div><h3>New clip from a video</h3><p>Paste a video link; we find the hot moments.</p></div><button class="btn ghost icon" id="m-close"><i data-ico="x"></i></button></div>
   <div class="cb">
-    <div class="row"><input id="n-url" class="grow" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
+    <div class="row"><input id="n-url" class="grow" autocomplete="off" name="video-link-2" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
     <input id="n-note" style="margin-top:10px" placeholder="Permission note (permission mode)">
     <div id="n-out" style="margin-top:14px"></div>
   </div>
@@ -406,7 +406,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 <div class="modal" id="m-quick"><div class="card" style="width:min(640px,100%)">
   <div class="ch"><div><h3>Quick upload</h3><p>Paste a video link. Everything else is automatic — you only choose the format and when it goes live.</p></div><button class="btn ghost icon" id="q-close"><i data-ico="x"></i></button></div>
   <div class="cb" id="q-form">
-    <label class="f">Video link<input id="q-url" placeholder="https://www.youtube.com/watch?v=..."></label>
+    <label class="f">Video link<input id="q-url" autocomplete="off" name="video-link" placeholder="https://www.youtube.com/watch?v=..."></label>
     <label class="f" style="margin-top:14px">Upload to which YouTube channel?<select id="q-dest"></select></label>
     <div class="f" style="margin-top:14px">Upload as<div class="opts" id="q-fmt"><button class="opt on" data-v="shorts"><b>Shorts</b><span>Vertical 9:16 · best ~35 seconds</span></button><button class="opt" data-v="video"><b>Video</b><span>Landscape 16:9 · best minute or whole video</span></button></div></div>
     <div class="f" style="margin-top:14px">Length<div class="opts" id="q-len"><button class="opt on" data-v="auto"><b>Best moment</b><span>Most replayed / most talked-about part</span></button><button class="opt" data-v="whole" disabled><b>Whole video</b><span>Only for Video</span></button></div></div>
