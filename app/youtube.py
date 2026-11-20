@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import time
 
@@ -143,3 +144,78 @@ def handle_reset_callback(code: str, state: str) -> str:
     if not email:
         raise ValueError("Could not verify your Google e-mail address.")
     return email
+
+
+# ---------- read-only helpers via the official API (work from a datacenter IP, no cookies needed) ----------
+CC_LICENSE = "Creative Commons Attribution license (reuse allowed)"
+
+
+def _iso_seconds(d: str) -> int:
+    m = re.fullmatch(r"P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?", d or "")
+    if not m:
+        return 0
+    days, h, mi, sec = (int(x or 0) for x in m.groups())
+    return days * 86400 + h * 3600 + mi * 60 + sec
+
+
+def api_video_info(video_id: str) -> dict | None:
+    r = client().videos().list(part="snippet,contentDetails,status", id=video_id).execute()
+    items = r.get("items") or []
+    if not items:
+        return None
+    it = items[0]
+    sn = it["snippet"]
+    return {
+        "video_id": video_id,
+        "title": sn.get("title", ""),
+        "channel": sn.get("channelTitle", ""),
+        "channel_url": "https://www.youtube.com/channel/" + sn.get("channelId", ""),
+        "license": CC_LICENSE if (it.get("status") or {}).get("license") == "creativeCommon" else None,
+        "description": sn.get("description", ""),
+        "tags": sn.get("tags") or [],
+        "duration": _iso_seconds((it.get("contentDetails") or {}).get("duration", "")),
+        "heatmap": [],  # "most replayed" is not in the official API
+    }
+
+
+def api_comments(video_id: str, limit: int = 300) -> list[str]:
+    yt = client()
+    texts, token = [], None
+    while len(texts) < limit:
+        r = yt.commentThreads().list(part="snippet", videoId=video_id, maxResults=100, order="relevance",
+                                     textFormat="plainText", pageToken=token).execute()
+        texts += [i["snippet"]["topLevelComment"]["snippet"]["textDisplay"] for i in r.get("items", [])]
+        token = r.get("nextPageToken")
+        if not token:
+            break
+    return texts
+
+
+def api_resolve_channel(query: str) -> tuple[str, str]:
+    yt = client()
+    q = query.strip()
+    cid = None
+    m = re.search(r"/channel/(UC[\w-]{20,})", q)
+    if m:
+        cid = m.group(1)
+    else:
+        h = re.search(r"youtube\.com/(@[\w.\-]+)", q) or (re.match(r"^(@[\w.\-]+)$", q))
+        if h:
+            items = yt.channels().list(part="id", forHandle=h.group(1)).execute().get("items") or []
+            cid = items[0]["id"] if items else None
+        if not cid:  # plain name, or an old /c/ /user/ url: search once
+            term = q.rstrip("/").rsplit("/", 1)[-1] if q.startswith("http") else q
+            items = yt.search().list(part="snippet", q=term, type="channel", maxResults=1).execute().get("items") or []
+            cid = items[0]["snippet"]["channelId"] if items else None
+    if not cid:
+        raise ValueError(f"No channel found for '{q}'")
+    ch = yt.channels().list(part="snippet", id=cid).execute().get("items") or []
+    return f"https://www.youtube.com/channel/{cid}", (ch[0]["snippet"]["title"] if ch else q)
+
+
+def api_list_video_ids(channel_url: str, n: int) -> list[str]:
+    m = re.search(r"/channel/(UC[\w-]{20,})", channel_url)
+    if not m:
+        raise ValueError("not a channel-id url")
+    r = client().playlistItems().list(part="contentDetails", playlistId="UU" + m.group(1)[2:], maxResults=min(n, 50)).execute()
+    return [i["contentDetails"]["videoId"] for i in r.get("items", [])]

@@ -65,9 +65,26 @@ def _comments_ytdlp(video_id: str, limit: int) -> list[str]:
 
 
 def fetch_comments(video_id: str, limit: int = 300) -> list[str]:
+    attempts = []
+    if YT_API_KEY:
+        attempts.append(lambda: _comments_api(video_id, limit))
+    attempts.append(lambda: __import__("app.youtube", fromlist=["x"]).api_comments(video_id, limit))  # connected channel's login
+    attempts.append(lambda: _comments_ytdlp(video_id, limit))
+    for fn in attempts:
+        try:
+            return fn()
+        except Exception:  # noqa: BLE001  (comments disabled, not connected, blocked...) -> try the next source
+            continue
+    return []
+
+
+def fetch_heatmap(video_id: str) -> list:
+    """'Most replayed' graph. Only available through yt-dlp, so it may be empty on a blocked server."""
     try:
-        return _comments_api(video_id, limit) if YT_API_KEY else _comments_ytdlp(video_id, limit)
-    except Exception:
+        with yt_dlp.YoutubeDL(_opts({"skip_download": True})) as y:
+            info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+        return info.get("heatmap") or []
+    except Exception:  # noqa: BLE001
         return []
 
 

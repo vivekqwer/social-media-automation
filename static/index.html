@@ -246,6 +246,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Change password</h3><p>Minimum 12 characters.</p></div></div><div class="cb">
               <div class="grid" style="gap:10px"><input id="cp-old" type="password" placeholder="Current password" autocomplete="current-password"><input id="cp-new" type="password" placeholder="New password" autocomplete="new-password"><button class="btn" id="cp-go">Update password</button></div>
               <div class="sm mut" style="margin-top:10px">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
+            <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
+              <ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.7"><li>Use a <b>spare Google account</b>, not your main one.</li><li>Open YouTube in a private window, sign in, then export <i>cookies.txt</i> for youtube.com (extension “Get cookies.txt LOCALLY”).</li><li>Close the private window, then paste the file here.</li></ol>
+              <textarea id="ck-text" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;..." style="min-height:90px;font-size:12px"></textarea>
+              <div class="row" style="margin-top:10px"><button class="btn" id="ck-save">Save cookies</button><button class="btn outline hide" id="ck-del">Remove</button></div></div></div>
             <div class="card"><div class="ch"><h3>Security</h3></div><div class="cb sm mut" style="line-height:1.8">Login tokens are encrypted at rest.<br>Google's consent in <i>Testing</i> mode expires every 7 days — just press Connect again.</div></div>
           </div>
         </div>
@@ -481,10 +485,15 @@ async function loadSources(){
 }
 
 async function loadDests(){
-  await loadOverview();
+  await loadOverview();loadCookies();
   $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div><span class="badge uploaded">Connected</span><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
 }
+async function loadCookies(){
+  try{const c=await api('/api/settings/cookies');const b=$('#ck-badge');b.className='badge '+(c.saved?'uploaded':'outline');b.textContent=c.saved?c.cookies+' cookies saved':'Not set';$('#ck-del').classList.toggle('hide',!c.saved)}catch(e){}
+}
+$('#ck-save').onclick=()=>once(async()=>{await api('/api/settings/cookies','POST',{text:$('#ck-text').value});$('#ck-text').value='';toast('Cookies saved — try your video again');loadCookies()},$('#ck-save'));
+$('#ck-del').onclick=()=>once(async()=>{await api('/api/settings/cookies','DELETE');toast('Cookies removed');loadCookies()},$('#ck-del'));
 $('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
 
 const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering','Drafts']];

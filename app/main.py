@@ -19,10 +19,10 @@ from . import auth, scheduler, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
 from .crypto import encrypt_existing
-from .config import APP_PASSWORD, APP_USER, BASE_URL, DATA_DIR, IS_LOCAL
+from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
-from .hot import fetch_comments, parse_timestamps, rank_moments
-from .ingest import fetch_info, is_cc
+from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
+from .ingest import fetch_info, friendly_error, is_cc
 from .jobs import executor
 from .keywords import suggest
 from .metadata import auto_metadata
@@ -298,6 +298,10 @@ class ChannelIn(BaseModel):
     tz_offset: int = Field(0, ge=-900, le=900)
 
 
+class CookiesIn(BaseModel):
+    text: str = Field(max_length=400_000)
+
+
 class ApproveIn(BaseModel):
     publish_at: str | None = None
 
@@ -320,7 +324,7 @@ def create_project(body: ProjectIn):
     try:
         info = fetch_info(body.url)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, f"Could not read video: {str(e)[:300]}")
+        raise HTTPException(400, f"Could not read video: {friendly_error(e)}")
     if body.mode == "cc" and not is_cc(info["license"]):
         raise HTTPException(400, f"Not a Creative Commons video (license: {info['license'] or 'Standard YouTube'}). "
                                  "Use permission or commentary mode.")
@@ -349,6 +353,8 @@ def get_project(pid: int):
 def analyze(pid: int, clip_len: int = Query(30, ge=5, le=600)):
     with SessionLocal() as s:
         p = _get(s, Project, pid)
+        if not p.heatmap:
+            p.heatmap = fetch_heatmap(p.video_id)
         secs = parse_timestamps(fetch_comments(p.video_id), p.duration)
         p.moments = rank_moments(p.duration, p.heatmap, secs, clip_len)
         s.commit()
@@ -757,6 +763,47 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"OAuth failed: {str(e)[:200]}")
     return RedirectResponse("/")
+
+
+def _cookie_status() -> dict:
+    if not COOKIES_PATH.exists():
+        return {"saved": False}
+    txt = COOKIES_PATH.read_text(encoding="utf-8", errors="ignore")
+    n = sum(1 for ln in txt.splitlines() if ln.strip() and not ln.startswith("#"))
+    return {"saved": True, "cookies": n, "updated_at": COOKIES_PATH.stat().st_mtime}
+
+
+@app.get("/api/settings/cookies")
+def cookies_status():
+    return _cookie_status()
+
+
+@app.post("/api/settings/cookies")
+def cookies_save(body: CookiesIn):
+    """Netscape-format cookies.txt so the server can read YouTube without the 'confirm you're not a bot' block."""
+    lines = []
+    for ln in body.text.replace("\r\n", "\n").split("\n"):
+        ln = ln.rstrip()
+        if not ln or (ln.startswith("#") and not ln.startswith("#HttpOnly_")):
+            continue
+        parts = ln.split("\t")
+        if len(parts) != 7:
+            raise HTTPException(400, "Not a cookies.txt export: each line needs 7 tab-separated fields. Export again with a 'cookies.txt' browser extension.")
+        lines.append(ln)
+    if not any(("youtube.com" in ln or "google.com" in ln) for ln in lines):
+        raise HTTPException(400, "No youtube.com / google.com cookies found in that file.")
+    COOKIES_PATH.write_text("# Netscape HTTP Cookie File\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    try:
+        COOKIES_PATH.chmod(0o600)
+    except OSError:
+        pass
+    return _cookie_status()
+
+
+@app.delete("/api/settings/cookies")
+def cookies_delete():
+    COOKIES_PATH.unlink(missing_ok=True)
+    return {"saved": False}
 
 
 @app.get("/api/youtube/status")

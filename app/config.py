@@ -29,6 +29,7 @@ GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
 YT_API_KEY = os.getenv("YT_API_KEY", "")  # optional: faster/cleaner comment fetch
 
+COOKIES_PATH = DATA_DIR / "cookies.txt"  # saved from the dashboard (Settings -> YouTube access)
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "")  # needed if YouTube bot-blocks the server IP
 YT_PROXY = os.getenv("YT_PROXY", "")
 

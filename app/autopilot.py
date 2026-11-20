@@ -7,8 +7,9 @@ import yt_dlp
 from sqlalchemy import func
 
 from .db import Channel, Clip, Project, SessionLocal, utcnow
+from . import youtube
 from .captions import fetch_cues
-from .hot import fetch_comments, parse_timestamps, rank_moments
+from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
 from .render import run_render
@@ -16,7 +17,7 @@ from .render import run_render
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog
 
 
-def resolve_channel(query: str) -> tuple[str, str]:
+def _resolve_ytdlp(query: str) -> tuple[str, str]:
     """Return (channel_base_url, display_name) from a name, @handle or URL."""
     q = query.strip()
     if q.startswith("http"):
@@ -37,7 +38,7 @@ def resolve_channel(query: str) -> tuple[str, str]:
     return e.get("url") or e.get("channel_url"), e.get("title") or e.get("channel") or q
 
 
-def list_video_ids(channel_url: str, n: int) -> list[str]:
+def _list_ytdlp(channel_url: str, n: int) -> list[str]:
     with yt_dlp.YoutubeDL(_opts({"extract_flat": True, "playlistend": n})) as y:
         info = y.extract_info(channel_url.rstrip("/") + "/videos", download=False)
     return [e["id"] for e in (info.get("entries") or []) if e and e.get("id")]
@@ -57,6 +58,20 @@ def _slot_from_times(after, post_times: str, tz_offset: int):
             if cand > local_after:
                 return cand + timedelta(minutes=tz_offset or 0)
     return None
+
+
+def resolve_channel(query: str) -> tuple[str, str]:
+    try:
+        return youtube.api_resolve_channel(query)  # official API: not blocked on servers
+    except Exception:  # noqa: BLE001
+        return _resolve_ytdlp(query)
+
+
+def list_video_ids(channel_url: str, n: int) -> list[str]:
+    try:
+        return youtube.api_list_video_ids(channel_url, n)
+    except Exception:  # noqa: BLE001
+        return _list_ytdlp(channel_url, n)
 
 
 def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_offset: int = 0):
@@ -85,6 +100,8 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
         return False
     p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=ch.mode,
                 permission_note=ch.permission_note, channel_ref=ch.id, **info)
+    if not p.heatmap:
+        p.heatmap = fetch_heatmap(vid)
     secs = parse_timestamps(fetch_comments(vid), p.duration)
     p.moments = rank_moments(p.duration, p.heatmap, secs, ch.clip_len, ch.clips_per_video)
     s.add(p)

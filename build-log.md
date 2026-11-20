@@ -56,3 +56,9 @@
 - Auth: browser Basic-auth popup replaced by /login page + signed HttpOnly session cookie (scrypt-hashed password stored in DB, APP_PASSWORD env is the initial password; FORCE_ENV_PASSWORD=1 ignores the saved one). Logout, change-password (Settings), per-IP brute-force limiter, sessions invalidated on password change. Basic header still accepted for scripts.
 - Forgot password: "Verify with Google" (openid+email scope only, no YouTube access) -> allowed if the verified e-mail is in ADMIN_EMAIL or is a Google account that connected a channel -> short-lived reset cookie -> /reset page. 32-case test run passed.
 - UI redesign in the shadcn / 21st.dev style: neutral zinc tokens, Inter, Lucide-style icons, sidebar + topbar, stat cards, pipeline, tables, tabs, sheet editor with tabs (Trim/Text/Voice/Captions/Details), dialogs, toasts, skeleton loaders, empty states, dark mode, responsive off-canvas sidebar. Split-screen login; matching forgot/reset pages.
+
+## 2026-11-20 — Task 11: Railway bot-check fix (all modes)
+- Root cause: YouTube "Sign in to confirm you're not a bot" for the Railway datacenter IP; every mode failed at the first yt-dlp call.
+- Fix: video details/licence (videos.list), comments (commentThreads.list), channel lookup (channels/search) and channel uploads (playlistItems) now use the official API via the connected channel's OAuth token; yt-dlp is only a fallback. "Most replayed" heatmap still needs yt-dlp (tried quietly).
+- Video download still needs yt-dlp: added dashboard Settings card "YouTube access for the server" to paste a cookies.txt (validated, saved 0600 on the volume); friendly error text tells the user what to do.
+- Tested with a fake API client + real yt-dlp fallback; auth/approve/schedule regressions pass.
