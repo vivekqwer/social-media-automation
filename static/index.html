@@ -280,6 +280,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <label class="f">Format<select id="e-asp"><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
         <label class="f">Original volume<input id="e-vol" type="number" step="0.1" min="0" max="3" style="width:120px"></label>
       </div>
+      <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
 
@@ -611,6 +612,7 @@ function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const 
 $('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
 $('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
 $('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
+$('#e-refetch').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/refetch`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Fetching the video again…')},$('#e-refetch'));
 $('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
 $('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);const c2=await api('/api/clips/'+CUR.id);fill(c2);etab('voice');if(c2.tts_pending){startPoll(c2.id);toast('Your helper PC is making the voice…')}else toast('Voice generated — press Save & re-render')},$('#e-tts'));
 $('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice uploaded — press Save & re-render')});

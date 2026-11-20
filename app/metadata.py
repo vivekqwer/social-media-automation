@@ -1,3 +1,5 @@
+import re
+
 from .db import Clip, Project, SessionLocal
 from .keywords import suggest
 
@@ -21,7 +23,9 @@ def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
     title = f"{base} | Best Moment"
     if len(title) > 100:
         title = base[:100]
-    hashtags = " ".join("#" + k.replace(" ", "") for k in keywords[:3])
+    shorts = clip.aspect == "9:16"
+    tag_src = [t for t in (list(project.tags or [])[:3] + keywords) if t][:3]
+    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", t) for t in tag_src])
     src = f"https://youtu.be/{project.video_id}?t={int(clip.start)}"
     parts = [
         hashtags,
@@ -37,7 +41,8 @@ def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
     description = _cut("\n".join(parts).strip(), 4900)
 
     tags, total = [], 0
-    for t in list(project.tags or []) + keywords:
+    extra = [project.channel] + (["shorts"] if shorts else [])
+    for t in list(project.tags or []) + keywords + extra:
         t = _clean(t).strip()
         if not t or t.lower() in (x.lower() for x in tags):
             continue
@@ -52,8 +57,17 @@ def auto_metadata(clip_id: int, extra_keywords: list[str] | None = None) -> dict
     with SessionLocal() as s:
         clip = s.get(Clip, clip_id)
         project = s.get(Project, clip.project_id)
-        seed = " ".join(project.title.split()[:6])
-        kws = list(extra_keywords or []) + suggest(seed, 20)
+        # what people actually type: title words, the original's top tags and the channel name
+        seeds = [" ".join(project.title.split()[:5])] + list(project.tags or [])[:2] + [project.channel]
+        found = [suggest(seeds[0], 15)] + [suggest(sd, 6, expand=2) for sd in seeds[1:] if sd]
+        kws, seen = [], set()
+        for k in list(extra_keywords or []) + [k for group in zip(*[g + [None] * (15 - len(g)) for g in found]) for k in group if k]:
+            if k.lower() not in seen:
+                seen.add(k.lower())
+                kws.append(k)
+        # keep only suggestions about this video's topic (drops e.g. other games from the channel-name search)
+        vocab = {w for w in re.findall(r"\w+", (project.title + " " + " ".join(project.tags or [])).lower()) if len(w) > 2}
+        kws = [k for k in kws if k in (extra_keywords or []) or set(re.findall(r"\w+", k.lower())) & vocab]
         meta = build(project, clip, kws)
         clip.title, clip.description, clip.tags = meta["title"], meta["description"], meta["tags"]
         s.commit()

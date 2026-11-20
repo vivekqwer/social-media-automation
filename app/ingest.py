@@ -5,6 +5,8 @@ from yt_dlp.utils import download_range_func
 
 import os
 import re
+import subprocess
+import sys
 
 from .config import COOKIES_PATH, YT_COOKIES_FILE, YT_PROXY, ffmpeg_bin
 
@@ -13,6 +15,8 @@ try:
     os.environ["PATH"] = str(Path(ffmpeg_bin()).parent) + os.pathsep + os.environ["PATH"]
 except RuntimeError:
     pass
+# the JS runtime yt-dlp needs for full-quality YouTube formats may live next to this Python (pip install deno)
+os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"]
 
 
 def _opts(extra: dict | None = None) -> dict:
@@ -69,7 +73,39 @@ def download_section(video_id: str, start: float, end: float, out_dir: Path) -> 
     path = Path(info["requested_downloads"][0]["filepath"])
     if path != cached:
         path.replace(cached)
+    want = e - s
+    if stream_seconds(cached, "v:0") < want * 0.9:  # incomplete download: don't render a cut-short clip
+        cached.unlink(missing_ok=True)
+        raise RuntimeError("The video section downloaded incompletely. Please try again.")
+    if 0 < stream_seconds(cached, "a:0") < want * 0.9:  # ranged audio downloads sometimes stop early
+        _repair_audio(video_id, cached, s, want, out_dir)
     return cached
+
+
+def stream_seconds(path: Path, sel: str) -> float:
+    """How many seconds of one stream (e.g. 'a:0', 'v:0') are actually in the file. 0 if absent."""
+    r = subprocess.run([ffmpeg_bin(), "-hide_banner", "-i", str(path), "-map", "0:" + sel, "-c", "copy", "-f", "null", "-"],
+                       capture_output=True, text=True)
+    t = re.findall(r"time=(\d+):(\d+):([\d.]+)", r.stderr)
+    if not t:
+        return 0.0
+    h, m, sec = t[-1]
+    return int(h) * 3600 + int(m) * 60 + float(sec)
+
+
+def _repair_audio(video_id: str, clip_file: Path, start: int, length: int, out_dir: Path):
+    """Fetch the whole audio track (small) and put the right [start, start+length] part back under the video."""
+    opts = _opts({"format": "ba[ext=m4a]/ba", "outtmpl": str(out_dir / "audio_full.%(ext)s")})
+    with yt_dlp.YoutubeDL(opts) as y:
+        info = y.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=True)
+    audio = Path(info["requested_downloads"][0]["filepath"])
+    fixed = out_dir / "fixed.mp4"
+    r = subprocess.run([ffmpeg_bin(), "-y", "-i", str(clip_file), "-ss", str(start), "-t", str(length), "-i", str(audio),
+                        "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", str(fixed)],
+                       capture_output=True, text=True)
+    audio.unlink(missing_ok=True)
+    if r.returncode == 0:
+        fixed.replace(clip_file)
 
 
 def video_id_from_url(url: str) -> str | None:

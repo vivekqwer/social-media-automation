@@ -368,10 +368,16 @@ def create_clip(pid: int, body: ClipIn):
         p = _get(s, Project, pid)
         if body.end <= body.start or body.end > (p.duration or 10**9) + 1:
             raise HTTPException(400, "Invalid start/end")
-        c = Clip(project_id=pid, start=body.start, end=body.end, effects=["fade"], overlays=[])
+        c = Clip(project_id=pid, start=body.start, end=body.end, aspect="9:16", effects=["fade"], overlays=[])
         s.add(c)
         s.commit()
-        return to_dict(c)
+        cid = c.id
+    try:  # credit, original tags/description and fresh keywords, filled in straight away
+        auto_metadata(cid)
+    except Exception:  # noqa: BLE001  (keyword lookup offline) -> user can press Auto-fill later
+        pass
+    with SessionLocal() as s:
+        return to_dict(s.get(Clip, cid))
 
 
 # ---------- clips ----------
@@ -482,6 +488,20 @@ def render(cid: int):
         errs = check_edit(p, c)
         if errs:
             raise HTTPException(400, " ".join(errs))
+        c.status, c.error = "rendering", None
+        s.commit()
+    executor.submit(run_render, cid)
+    return {"status": "rendering"}
+
+
+@app.post("/api/clips/{cid}/refetch")
+def refetch_source(cid: int):
+    """Throw away the downloaded source section and fetch it again (e.g. a bad or low-quality download)."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
+            raise HTTPException(409, f"Clip is {c.status}.")
+        shutil.rmtree(DATA_DIR / "clips" / str(cid) / "src", ignore_errors=True)
         c.status, c.error = "rendering", None
         s.commit()
     executor.submit(run_render, cid)

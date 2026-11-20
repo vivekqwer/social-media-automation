@@ -137,7 +137,7 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
     fc = f"[0:v]{','.join(chain)}[v];"
     if has_audio:
-        fc += f"[0:a]volume={vol}[a0];"
+        fc += f"[0:a]volume={vol},apad[a0];"  # pad: a short source audio track must not cut the clip short
     else:
         fc += f"anullsrc=r=44100:cl=stereo,atrim=duration={dur:.2f}[a0];"
     if has_voice:

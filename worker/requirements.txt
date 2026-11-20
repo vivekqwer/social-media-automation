@@ -1,0 +1,4 @@
+# Extra packages for running the helper PC (worker) on Windows/macOS/Linux
+-r ../requirements.txt
+imageio-ffmpeg   # ffmpeg binary, no separate install needed
+deno             # JS runtime yt-dlp needs for full-quality YouTube formats

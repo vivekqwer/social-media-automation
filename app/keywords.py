@@ -4,11 +4,11 @@ import httpx
 URL = "https://suggestqueries.google.com/complete/search"
 
 
-def suggest(seed: str, limit: int = 25) -> list[str]:
+def suggest(seed: str, limit: int = 25, expand: int = 8) -> list[str]:
     seed = (seed or "").strip()
     if not seed:
         return []
-    queries = [seed] + [f"{seed} {c}" for c in "abcdefgh"]
+    queries = [seed] + [f"{seed} {c}" for c in "abcdefgh"[:expand]]
     counts: dict[str, int] = {}
     order: list[str] = []
     for q in queries:
