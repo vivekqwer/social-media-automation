@@ -144,3 +144,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Fix (from Task 22 refactor): run_render passed a clip without output_path to make_thumbnail, so new clips got no thumbnail ("NoneType" error). Added an end-to-end run_render test (render + thumbnail + cover). Topic search now uses relevance order + 4-20 min videos (no re-posting whole Shorts, fewer off-topic results).
 - Live: topic "street food india" (source #1, review first, 10:00/18:00 IST) produced clips #7 (AfroTalesTV24, 0-35s) and #8 (Mande Manre, 4:25-5:00) via helper analysis; both rendered with face thumbnails; waiting for owner approval.
 - Clip #7 approved on request -> uploaded vKDKFvNMnSY (private, publishes 22 Nov 10:00 IST), thumbnail set automatically. Daily upload cap (5) reached for this Pacific day.
+- Clip #8 approved on request -> queued for 22 Nov 18:00 IST (uploads after the quota reset at 13:30 IST).
