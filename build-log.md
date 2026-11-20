@@ -42,3 +42,8 @@
 - Per-source "Post at" daily times (e.g. 10:00, 18:30 in user's local time, tz_offset from browser) -> next free slot; falls back to gap hours.
 - Verified: json3 parser (noise removal, chunking, overlap), real YouTube captions fetch (8 cues), ASS render with Hindi (frame inspected), slot math for IST, UI card, regression tests.
 - Note: videos with no YouTube captions get none (a local Whisper fallback is possible later, CPU-heavy).
+
+## 2026-11-20 — Task 8: YouTube API audit prep
+- Added public pages /privacy, /terms, /about (exempt from dashboard auth; needed for OAuth Branding/publish and the audit). Placeholders to fill: owner name + contact email.
+- Wrote docs/youtube-api-audit-draft.md (local only, gitignored): form answers, scopes/quota text, screencast outline, caveats (yt-dlp downloading disclosure, reused-content risk, tokens stored unencrypted).
+- Verified: public pages 200 without auth, dashboard/API still 401.

@@ -31,6 +31,9 @@ from .render import run_render
 from .tts import VOICES, synth
 
 MODES = {"cc", "permission", "commentary"}
+# public pages Google (OAuth consent / API audit) must be able to open without the dashboard password
+PUBLIC_PATHS = {"/healthz", "/privacy", "/terms", "/about"}
+_STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 VOICE_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
 MAX_VOICE_BYTES = 25 * 1024 * 1024
@@ -63,7 +66,7 @@ async def validation_error(request: Request, exc: RequestValidationError):
 
 @app.middleware("http")
 async def basic_auth(request: Request, call_next):
-    if request.url.path == "/healthz":
+    if request.url.path in PUBLIC_PATHS:
         return await call_next(request)
     if request.method in ("POST", "PUT", "DELETE", "PATCH"):  # CSRF: browsers re-send cached Basic auth cross-site
         origin = request.headers.get("origin")
@@ -86,6 +89,21 @@ async def basic_auth(request: Request, call_next):
     if not ok:
         return Response(status_code=401, headers={"WWW-Authenticate": 'Basic realm="clipstudio"'})
     return await call_next(request)
+
+
+@app.get("/privacy")
+def page_privacy():
+    return FileResponse(_STATIC / "privacy.html")
+
+
+@app.get("/terms")
+def page_terms():
+    return FileResponse(_STATIC / "terms.html")
+
+
+@app.get("/about")
+def page_about():
+    return FileResponse(_STATIC / "about.html")
 
 
 @app.get("/healthz")
