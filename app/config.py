@@ -1,6 +1,7 @@
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import urlparse
 
 try:
     from dotenv import load_dotenv
@@ -9,19 +10,19 @@ try:
 except ImportError:
     pass
 
-DATA_DIR = Path(os.getenv("DATA_DIR", "data")).resolve()
+DATA_DIR = Path(os.getenv("DATA_DIR") or "data").resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}")
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
-BASE_URL = os.getenv("BASE_URL", "http://localhost:8000").rstrip("/")
-IS_LOCAL = BASE_URL.startswith("http://localhost") or BASE_URL.startswith("http://127.0.0.1")
+BASE_URL = (os.getenv("BASE_URL") or "http://localhost:8000").rstrip("/")
+IS_LOCAL = urlparse(BASE_URL).hostname in {"localhost", "127.0.0.1"}
 
-APP_USER = os.getenv("APP_USER", "admin")
+APP_USER = os.getenv("APP_USER") or "admin"
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
@@ -31,8 +32,8 @@ YT_API_KEY = os.getenv("YT_API_KEY", "")  # optional: faster/cleaner comment fet
 YT_COOKIES_FILE = os.getenv("YT_COOKIES_FILE", "")  # needed if YouTube bot-blocks the server IP
 YT_PROXY = os.getenv("YT_PROXY", "")
 
-UPLOAD_LEAD_HOURS = int(os.getenv("UPLOAD_LEAD_HOURS", "48"))
-MAX_UPLOADS_PER_DAY = int(os.getenv("MAX_UPLOADS_PER_DAY", "5"))  # API quota: ~6/day by default
+UPLOAD_LEAD_HOURS = int(os.getenv("UPLOAD_LEAD_HOURS") or "48")
+MAX_UPLOADS_PER_DAY = int(os.getenv("MAX_UPLOADS_PER_DAY") or "5")  # API quota: ~6/day by default
 
 
 def _default_font() -> str:

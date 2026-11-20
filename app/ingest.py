@@ -15,7 +15,7 @@ except RuntimeError:
 
 
 def _opts(extra: dict | None = None) -> dict:
-    o = {"quiet": True, "no_warnings": True, "ffmpeg_location": ffmpeg_bin()}
+    o = {"quiet": True, "no_warnings": True, "ffmpeg_location": ffmpeg_bin(), "allowed_extractors": ["(?i)youtube.*"]}
     if YT_COOKIES_FILE:
         o["cookiefile"] = YT_COOKIES_FILE
     if YT_PROXY:

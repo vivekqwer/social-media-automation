@@ -1,6 +1,6 @@
 import base64
 import secrets
-import shutil
+from urllib.parse import urlparse
 from contextlib import asynccontextmanager
 from datetime import timezone
 from datetime import datetime
@@ -25,6 +25,15 @@ from .render import run_render
 from .tts import VOICES, synth
 
 MODES = {"cc", "permission", "commentary"}
+YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
+VOICE_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
+MAX_VOICE_BYTES = 25 * 1024 * 1024
+
+
+def _check_yt_url(url: str):
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or (u.hostname or "").lower() not in YT_HOSTS:
+        raise HTTPException(400, "Only youtube.com / youtu.be URLs are allowed.")
 
 
 @asynccontextmanager
@@ -42,6 +51,10 @@ app = FastAPI(title="Clip Studio", lifespan=lifespan)
 async def basic_auth(request: Request, call_next):
     if request.url.path == "/healthz":
         return await call_next(request)
+    if request.method in ("POST", "PUT", "DELETE", "PATCH"):  # CSRF: browsers re-send cached Basic auth cross-site
+        origin = request.headers.get("origin")
+        if origin and urlparse(origin).netloc != request.headers.get("host", ""):
+            return PlainTextResponse("Cross-origin request blocked", status_code=403)
     if not APP_PASSWORD:
         if not IS_LOCAL:
             return PlainTextResponse("Set the APP_PASSWORD env var before using this app.", status_code=503)
@@ -133,6 +146,7 @@ def create_project(body: ProjectIn):
         raise HTTPException(400, "mode must be cc, permission or commentary")
     if body.mode == "permission" and not body.permission_note.strip():
         raise HTTPException(400, "Permission mode needs a note/proof of the creator's permission.")
+    _check_yt_url(body.url)
     try:
         info = fetch_info(body.url)
     except Exception as e:  # noqa: BLE001
@@ -194,8 +208,8 @@ def get_clip(cid: int):
 def update_clip(cid: int, body: ClipUpdate):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("uploading", "uploaded"):
-            raise HTTPException(409, "Clip already uploaded")
+        if c.status in ("rendering", "uploading", "uploaded"):
+            raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(c, k, v)
         if any(k in body.model_fields_set for k in ("start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume")):
@@ -229,9 +243,19 @@ def voice_upload(cid: int, file: UploadFile = File(...)):
         c = _get(s, Clip, cid)
         folder = DATA_DIR / "clips" / str(cid)
         folder.mkdir(parents=True, exist_ok=True)
-        path = folder / ("voice" + (Path(file.filename or "v.mp3").suffix or ".mp3"))
+        ext = Path(file.filename or "v.mp3").suffix.lower() or ".mp3"
+        if ext not in VOICE_EXT:
+            raise HTTPException(400, f"Voice file must be one of {sorted(VOICE_EXT)}")
+        path = folder / ("voice" + ext)
+        size = 0
         with open(path, "wb") as f:
-            shutil.copyfileobj(file.file, f)
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_VOICE_BYTES:
+                    f.close()
+                    path.unlink(missing_ok=True)
+                    raise HTTPException(413, "Voice file too large (max 25MB)")
+                f.write(chunk)
         c.voice_path = str(path)
         c.status = "draft" if c.status in ("rendered", "queued", "failed") else c.status
         s.commit()
@@ -242,6 +266,8 @@ def voice_upload(cid: int, file: UploadFile = File(...)):
 def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
+        if c.status in ("rendering", "uploading", "uploaded"):
+            raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
         errs = check_edit(p, c)
         if errs:
@@ -263,6 +289,8 @@ def clip_video(cid: int):
 
 @app.post("/api/clips/{cid}/metadata")
 def clip_metadata(cid: int, body: MetaIn):
+    with SessionLocal() as s:
+        _get(s, Clip, cid)
     return auto_metadata(cid, body.extra_keywords)
 
 
@@ -281,6 +309,8 @@ def schedule(cid: int, body: ScheduleIn):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
+        if c.status not in ("rendered", "queued"):
+            raise HTTPException(409, f"Clip is '{c.status}': render it first (edits invalidate the render).")
         if not c.output_path or not Path(c.output_path).exists():
             raise HTTPException(400, "Render the clip first")
         if not c.title or not c.description:
@@ -297,7 +327,10 @@ def schedule(cid: int, body: ScheduleIn):
                 raise HTTPException(400, "Connect your YouTube channel first (dashboard).")
             c.destination_id = first.id
         if body.publish_at:
-            dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
+            try:
+                dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
+            except ValueError:
+                raise HTTPException(400, "publish_at must be an ISO datetime")
             c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
         else:
             c.publish_at = None
@@ -330,6 +363,8 @@ def add_channel(body: ChannelIn):
         raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
     if body.mode == "permission" and not body.permission_note.strip():
         raise HTTPException(400, "Permission mode needs a note/proof of the creator's permission.")
+    if body.query.strip().startswith("http"):
+        _check_yt_url(body.query.strip())
     with SessionLocal() as s:
         if body.destination_id:
             _get(s, Destination, body.destination_id)

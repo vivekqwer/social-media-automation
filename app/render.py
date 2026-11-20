@@ -10,7 +10,7 @@ from .policy import check_edit
 
 DIMS = {"16:9": (1280, 720), "9:16": (1080, 1920), "1:1": (1080, 1080)}
 COLOR_RE = re.compile(r"^#?([0-9a-fA-F]{6})$")
-NAME_RE = re.compile(r"^[a-zA-Z]{3,20}$")
+COLOR_NAMES = {"white", "black", "red", "yellow", "green", "blue", "orange", "pink", "cyan", "magenta", "gray"}
 
 
 def _esc(p) -> str:
@@ -22,7 +22,7 @@ def _color(c: str) -> str:
     m = COLOR_RE.match(c)
     if m:
         return "0x" + m.group(1)
-    return c if NAME_RE.match(c) else "white"
+    return c.lower() if c.lower() in COLOR_NAMES else "white"
 
 
 def _drawtext(i: int, o: dict, W: int, workdir: Path) -> str:
@@ -45,7 +45,12 @@ def _drawtext(i: int, o: dict, W: int, workdir: Path) -> str:
     )
 
 
-def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool) -> str:
+def _has_audio(path) -> bool:
+    r = subprocess.run([ffmpeg_bin(), "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    return "Audio:" in r.stderr
+
+
+def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True) -> str:
     if clip.aspect == "16:9":
         chain = [f"scale={W}:{H}:force_original_aspect_ratio=decrease", f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"]
     else:
@@ -67,12 +72,16 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
             chain.append(_drawtext(i, o, W, workdir))
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
     fc = f"[0:v]{','.join(chain)}[v];"
+    if has_audio:
+        fc += f"[0:a]volume={vol}[a0];"
+    else:
+        fc += f"anullsrc=r=44100:cl=stereo,atrim=duration={dur:.2f}[a0];"
     if has_voice:
         ms = int(max(0.0, float(clip.voice_offset or 0)) * 1000)
-        fc += f"[0:a]volume={vol}[a0];[1:a]adelay={ms}|{ms}[a1];"
+        fc += f"[1:a]adelay={ms}|{ms}[a1];"
         fc += "[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
     else:
-        fc += f"[0:a]volume={vol}[a]"
+        fc += "[a0]anull[a]"
     return fc
 
 
@@ -83,11 +92,13 @@ def render_clip(project: Project, clip: Clip) -> Path:
     W, H = DIMS.get(clip.aspect, DIMS["16:9"])
     dur = clip.end - clip.start
     has_voice = bool(clip.voice_path) and Path(clip.voice_path).exists()
-    cmd = [ffmpeg_bin(), "-y", "-i", str(src)]
+    has_audio = _has_audio(src)
+    lead = max(0.0, clip.start - int(clip.start))  # section is downloaded from floor(start)
+    cmd = [ffmpeg_bin(), "-y", "-ss", f"{lead:.2f}", "-i", str(src)]
     if has_voice:
         cmd += ["-i", str(clip.voice_path)]
     cmd += [
-        "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice),
+        "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "out.mp4",

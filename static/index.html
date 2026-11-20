@@ -258,7 +258,8 @@ async function uploadVoice(){const f=$('v-file').files[0];if(!f)return;const fd=
   try{C=await api(`/api/clips/${C.id}/voice-upload`,'POST',fd);$('v-state').textContent='Voice uploaded ✔';setStatus(C)}catch(e){fail(e)}}
 async function kw(){
   const q=$('k-q').value||(P&&P.title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
-  $('k-chips').innerHTML=r.keywords.map(k=>`<span onclick="addTag('${esc(k).replace(/'/g,"\\'")}')">${esc(k)}</span>`).join('')||'<span class="mut">no suggestions</span>';
+  $('k-chips').innerHTML=r.keywords.map(k=>`<span data-k="${esc(k)}">${esc(k)}</span>`).join('')||'<span class="mut">no suggestions</span>';
+  $('k-chips').onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(k)addTag(k)};
 }
 function addTag(k){const t=$('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean);if(!t.includes(k))t.push(k);$('m-tags').value=t.join(', ')}
 async function genMeta(){

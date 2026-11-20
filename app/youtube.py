@@ -46,7 +46,9 @@ def login_url() -> str:
 
 def handle_callback(code: str, state: str) -> int:
     """Exchange the code, look up which channel it is, and store it as a destination. Returns destination id."""
-    if state != get_setting("oauth_state"):
+    expected = get_setting("oauth_state")
+    set_setting("oauth_state", "")  # single use
+    if not expected or state != expected:
         raise ValueError("OAuth state mismatch")
     f = _flow()
     f.fetch_token(code=code)
@@ -98,5 +100,5 @@ def upload(dest_id: int | None, path: str, title: str, description: str, tags: l
     req = client(dest_id).videos().insert(part="snippet,status", body=body, media_body=media)
     resp = None
     while resp is None:
-        _, resp = req.next_chunk()
+        _, resp = req.next_chunk(num_retries=5)
     return resp["id"]

@@ -8,6 +8,10 @@ LICENSE_LINE = {
 }
 
 
+def _cut(s: str, n: int) -> str:
+    return s.encode()[:n].decode(errors="ignore")  # YouTube limits description by bytes
+
+
 def _clean(s: str) -> str:
     return (s or "").replace("<", "").replace(">", "")
 
@@ -30,7 +34,7 @@ def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
         "--- Original description ---",
         _clean(project.description)[:1500],
     ]
-    description = "\n".join(parts).strip()[:4900]
+    description = _cut("\n".join(parts).strip(), 4900)
 
     tags, total = [], 0
     for t in list(project.tags or []) + keywords:

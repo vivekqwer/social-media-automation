@@ -13,9 +13,16 @@ TS_RE = re.compile(r"(?<![\d:])(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?![\d:])")
 def parse_timestamps(texts: list[str], duration: int) -> list[int]:
     out = []
     for t in texts:
-        for h, m, s in TS_RE.findall(t or ""):
-            sec = int(h or 0) * 3600 + int(m) * 60 + int(s)
-            if 0 <= sec < duration:
+        found = TS_RE.findall(t or "")
+        if len(found) > 4:  # chapter lists, not a "best moment" mention
+            continue
+        seen = set()
+        for h, m, sec_s in found:
+            if int(sec_s) >= 60 or (h and int(m) >= 60):
+                continue
+            sec = int(h or 0) * 3600 + int(m) * 60 + int(sec_s)
+            if 0 < sec < duration and sec not in seen:  # 0:00 is just "start", skip
+                seen.add(sec)
                 out.append(sec)
     return out
 
@@ -96,7 +103,8 @@ def rank_moments(duration: int, heatmap: list[dict], comment_secs: list[int], cl
         return []
     max_h = max(w[2] for w in wins) or 1.0
     max_c = max(w[3] for w in wins) or 1.0
-    wh, wc = (0.6, 0.4) if heatmap and comment_secs else ((1.0, 0.0) if heatmap else (0.0, 1.0))
+    has_heat = any(float(seg.get('value', 0)) > 0 for seg in heatmap or [])
+    wh, wc = (0.6, 0.4) if has_heat and comment_secs else ((1.0, 0.0) if has_heat else (0.0, 1.0))
     scored = [
         {"start": s, "end": e, "score": round(wh * h / max_h + wc * c / max_c, 3), "heat": round(h, 3), "comments": int(c)}
         for s, e, h, c in wins

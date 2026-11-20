@@ -54,6 +54,7 @@ class Clip(Base):
     tags = Column(JSON, default=list)
     publish_at = Column(DateTime)  # UTC, naive
     destination_id = Column(Integer)
+    attempted_at = Column(DateTime)  # last upload attempt (quota accounting)
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
