@@ -10,7 +10,11 @@ try:
 except ImportError:
     pass
 
-DATA_DIR = Path(os.getenv("DATA_DIR") or "data").resolve()
+_dd = os.getenv("DATA_DIR") or "data"
+if not Path(_dd).is_absolute() and os.name != "nt" and Path("/data").is_dir():
+    # a relative DATA_DIR inside the container lands on the throw-away filesystem: use the mounted volume
+    _dd = "/data"
+DATA_DIR = Path(_dd).resolve()
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"

@@ -52,6 +52,11 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 - Dashboard login = /login page (cookie session). Initial password = APP_PASSWORD env (set by user in Railway). Forgot password = Google verification; set ADMIN_EMAIL=funnygunction@gmail.com in Railway so it works before any channel is connected. Escape hatch: FORCE_ENV_PASSWORD=1 + new APP_PASSWORD.
 - UI follows shadcn/21st.dev style (user asked for polished, modern UI). Keep that look for new pages.
 
+## Railway gotchas (2026-11-20)
+- Railway imports uncommented .env.example values as variables (APP_PASSWORD=change-me went live; DATA_DIR=data made /app/data ephemeral). .env.example is now fully commented; config maps relative DATA_DIR to /data when the volume exists.
+- YouTube bot-checks Railway's IP: metadata/comments/channel lists use the official API via the connected channel's OAuth token; video download still needs cookies (dashboard: My channels -> YouTube access for the server) or a proxy.
+- Railway UI: typing when no input has focus triggers shortcuts (created stray 'function-bun' services twice; discarded). Always confirm focus before typing there.
+
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
 

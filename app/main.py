@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from . import auth, scheduler, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
-from .crypto import encrypt_existing
+from .crypto import TokenError, decrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
@@ -560,6 +560,16 @@ def queue():
         return [to_dict(c) for c in rows]
 
 
+def _dest_dict(d: Destination) -> dict:
+    out = to_dict(d)
+    try:
+        decrypt(d.token)
+        out["needs_reconnect"] = False
+    except TokenError:
+        out["needs_reconnect"] = True  # stored login unreadable (e.g. key changed): press Connect again
+    return out
+
+
 def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     p = projects.get(c.project_id)
     d = to_dict(c)
@@ -603,7 +613,7 @@ def overview():
             "counts": counts,
             "sources": s.query(Channel).count(),
             "videos_analyzed": s.query(Project).count(),
-            "destinations": [to_dict(d) for d in s.query(Destination).order_by(Destination.id)],
+            "destinations": [_dest_dict(d) for d in s.query(Destination).order_by(Destination.id)],
             "upcoming": _cards(s, upcoming),
             "recent": _cards(s, recent),
             "failed": _cards(s, failed),
@@ -814,7 +824,7 @@ def yt_status():
 @app.get("/api/destinations")
 def list_destinations():
     with SessionLocal() as s:
-        return [to_dict(d) for d in s.query(Destination).order_by(Destination.id)]
+        return [_dest_dict(d) for d in s.query(Destination).order_by(Destination.id)]
 
 
 @app.delete("/api/destinations/{did}")

@@ -439,6 +439,7 @@ async function loadDash(){
   let al='';
   if(!OV.youtube_configured)al+=`<div class="alert bad">${ico('alert')}Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>`;
   else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
+  if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
   $('#alerts').innerHTML=al;
   $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
   $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
@@ -486,7 +487,7 @@ async function loadSources(){
 
 async function loadDests(){
   await loadOverview();loadCookies();
-  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div><span class="badge uploaded">Connected</span><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
+  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':'<span class="badge uploaded">Connected</span>'}<button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
 }
 async function loadCookies(){
