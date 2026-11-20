@@ -137,3 +137,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - New: Shorts cover — the thumbnail is shown in the first 0.7 s of a Short (fades into the video, same length and sound), so YouTube's auto-picked cover is the thumbnail. Toggle in the editor; rebuilt when the thumbnail changes.
 - Tests: review 24/24, automation 11/12 (known mock artifact), re-upload 6/6, save 2/2, thumbnail retry 2/2; UI checked locally (no console errors).
 - 2026-11-21: Foody phone verified; thumbnails for 1G3SLayg4t8 and OgGQXVL-xAE set on YouTube (confirmed via i.ytimg.com).
+- 2026-11-21: Thumbnail moved to its own editor tab (opens first for uploaded clips); clip cards show my thumbnail. Bug fixed: editor tabs were squeezed to a 6px line (flex-shrink) so the owner never saw Text/Voice/Captions/Details tabs.
