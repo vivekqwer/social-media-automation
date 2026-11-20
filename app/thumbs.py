@@ -14,7 +14,7 @@ from PIL import Image, ImageFilter, ImageFont
 from .config import FONTS_DIR, ffmpeg_bin
 from .faces import face_for
 from .ingest import stream_seconds
-from .render import DEVA, _esc
+from .render import DEVA, _esc, ass_text
 
 LATIN_FONT = ("Anton", FONTS_DIR / "Anton-Regular.ttf")
 HINDI_FONT = ("Noto Sans Devanagari", FONTS_DIR / "NotoSansDevanagari-Bold.ttf")
@@ -115,8 +115,8 @@ def _paste_face(base: Image.Image, face: Image.Image, x: int, y: int, stroke: in
 
 
 def make_thumbnail(clip, project) -> Path:
-    src = Path(clip.output_path)
-    workdir = src.parent
+    workdir = Path(clip.output_path).parent
+    src = workdir / "body.mp4" if (workdir / "body.mp4").exists() else Path(clip.output_path)  # without the Shorts cover
     portrait = clip.aspect == "9:16"
     W, H = (1080, 1920) if portrait else (1280, 720)
     _frame(src, W, H, workdir / "thumb_frame.png")
@@ -150,7 +150,7 @@ def make_thumbnail(clip, project) -> Path:
         anchor = 4
     base.convert("RGB").save(workdir / "thumb_base.png")
 
-    text = (clip.thumb_text or default_text(clip.title or project.title)).replace("{", "(").replace("}", ")").strip()
+    text = ass_text(clip.thumb_text or default_text(clip.title or project.title)).replace("\\N", " ")
     fname, ffile = HINDI_FONT if DEVA.search(text) else LATIN_FONT
     bw, bh = box[2] - box[0], box[3] - box[1]
     size, lines, lh = _fit(text, ffile, bw, bh, 3, int(H * (0.105 if portrait else 0.22)), int(H * (0.04 if portrait else 0.09)))
@@ -174,6 +174,11 @@ def make_thumbnail(clip, project) -> Path:
                         "-frames:v", "1", "-q:v", "2", "thumb.jpg"], cwd=workdir, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("thumbnail failed: " + r.stderr[-300:])
+    for q in ("5", "8", "12"):  # YouTube refuses thumbnails over 2 MB (busy frames can exceed it)
+        if (workdir / "thumb.jpg").stat().st_size <= 1_900_000:
+            break
+        subprocess.run([ffmpeg_bin(), "-y", "-i", "thumb.jpg", "-q:v", q, "thumb_small.jpg"], cwd=workdir, capture_output=True)
+        (workdir / "thumb_small.jpg").replace(workdir / "thumb.jpg")
     for f in ("thumb_frame.png", "thumb_base.png"):
         (workdir / f).unlink(missing_ok=True)
     return workdir / "thumb.jpg"

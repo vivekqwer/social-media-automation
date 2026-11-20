@@ -1,10 +1,13 @@
 import re
+import shutil
 import subprocess
 import textwrap
 from pathlib import Path
 
 from .config import DATA_DIR, FONT_PATH, FONTS_DIR, ffmpeg_bin
-from .db import Clip, Project, SessionLocal
+from sqlalchemy import update
+
+from .db import Clip, Project, SessionLocal, utcnow
 from . import workers
 from .ingest import download_section, friendly_error, is_bot_block
 from .policy import check_edit
@@ -15,6 +18,12 @@ COLOR_NAMES = {"white", "black", "red", "yellow", "green", "blue", "orange", "pi
 
 
 DEVA = re.compile(r"[\u0900-\u097F]")
+
+
+def ass_text(t) -> str:
+    """User text made safe for an ASS event: no override blocks, no escapes, real line breaks only."""
+    t = str(t or "").replace("\r\n", "\n").replace("\r", "\n").replace("\\", "\\\u2060")
+    return t.replace("{", "(").replace("}", ")").replace("\n", "\\N").strip()
 
 
 def _ass_time(t: float) -> str:
@@ -40,15 +49,15 @@ def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: lis
         "", "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
     ]
     for c in cues:
-        text = str(c.get("t", "")).replace("{", "(").replace("}", ")").replace(chr(10), "\\N").strip()
+        text = ass_text(c.get("t", ""))
         if text:
             lines.append(f"Dialogue: 0,{_ass_time(float(c['s']))},{_ass_time(float(c['e']))},Default,,0,0,0,,{text}")
     if credit:  # small, always-visible credit to the original creator (top-left)
         csz = max(18, int(H * 0.022))
-        ctext = credit.replace("{", "(").replace("}", ")")
+        ctext = ass_text(credit).replace("\\N", " ")
         lines.append(f"Dialogue: 2,0:00:00.00,9:59:59.00,Default,,0,0,0,,{{\\an7\\pos({int(W * 0.03)},{int(H * 0.025)})\\fs{csz}\\bord2\\shad0\\c&HFFFFFF&\\1a&H30&}}{ctext}")
     for o in overlays or []:  # text overlays that need font fallback (Hindi + English in one line)
-        text = str(o.get("text", "")).replace("{", "(").replace("}", ")").replace(chr(10), "\\N").strip()
+        text = ass_text(o.get("text", ""))
         if not text:
             continue
         t0 = max(0.0, float(o.get("start", 0)))
@@ -163,7 +172,7 @@ def render_clip(project: Project, clip: Clip) -> Path:
     has_voice = bool(clip.voice_path) and Path(clip.voice_path).exists()
     has_audio = _has_audio(src)
     lead = max(0.0, clip.start - int(clip.start))  # section is downloaded from floor(start)
-    cmd = [ffmpeg_bin(), "-y", "-ss", f"{lead:.2f}", "-i", str(src)]
+    cmd = [ffmpeg_bin(), "-y", "-ss", f"{lead:.2f}", "-f", "mov", "-i", str(src)]  # mp4 only (no playlists)
     if has_voice:
         cmd += ["-i", str(clip.voice_path)]
     cmd += [
@@ -171,39 +180,86 @@ def render_clip(project: Project, clip: Clip) -> Path:
                                          f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else ""),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
-        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "out.mp4",
+        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "body.tmp.mp4",
     ]
     r = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
     if r.returncode != 0:
+        (workdir / "body.tmp.mp4").unlink(missing_ok=True)
         raise RuntimeError("ffmpeg failed: " + r.stderr[-600:])
+    (workdir / "body.tmp.mp4").replace(workdir / "body.mp4")  # a half-written file never becomes the video
+    shutil.copyfile(workdir / "body.mp4", workdir / "out.tmp.mp4")
+    (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
     return workdir / "out.mp4"
+
+
+COVER_SECONDS = 0.7
+
+
+def apply_short_cover(clip: Clip) -> bool:
+    """Shorts: YouTube picks the Short's cover from the video itself, so show the thumbnail for the first
+    0.7 s (fading into the video; sound and length unchanged). Rebuilt from body.mp4 each time."""
+    workdir = DATA_DIR / "clips" / str(clip.id)
+    body, thumb = workdir / "body.mp4", Path(clip.thumb_path or "")
+    if not body.exists():
+        return False
+    if clip.aspect != "9:16" or clip.short_cover is False or not clip.thumb_path or not thumb.exists():
+        shutil.copyfile(body, workdir / "out.tmp.mp4")
+        (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
+        return False
+    W, H = DIMS["9:16"]
+    f = COVER_SECONDS
+    fc = (f"[1:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},format=yuva420p,"
+          f"fade=t=out:st={f - 0.25:.2f}:d=0.25:alpha=1[c];[0:v][c]overlay=0:0:enable='lte(t,{f})'[v]")
+    r = subprocess.run([ffmpeg_bin(), "-y", "-i", "body.mp4", "-loop", "1", "-t", f"{f}", "-i", str(thumb),
+                        "-filter_complex", fc, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
+                        "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", "out.tmp.mp4"],
+                       cwd=workdir, capture_output=True, text=True)
+    if r.returncode != 0:
+        (workdir / "out.tmp.mp4").unlink(missing_ok=True)
+        return False
+    (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
+    return True
 
 
 def run_render(clip_id: int):
     """Background job: policy check -> render -> update status."""
     with SessionLocal() as s:
         clip = s.get(Clip, clip_id)
+        if not clip:
+            return  # discarded meanwhile
         project = s.get(Project, clip.project_id)
         errs = check_edit(project, clip)
         if errs:
             clip.status, clip.error = "failed", "; ".join(errs)
             s.commit()
             return
-        clip.status, clip.error = "rendering", None
+        # claim the clip: never re-render one that is being uploaded or is already on YouTube
+        res = s.execute(update(Clip).where(Clip.id == clip_id, Clip.status.notin_(["uploading", "uploaded"]))
+                        .values(status="rendering", error=None))
         s.commit()
+        if res.rowcount != 1:
+            return
+        s.refresh(clip)
+        error, extra = None, {}
         try:
-            clip.output_path = str(render_clip(project, clip))
-            clip.status = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
+            extra["output_path"] = str(render_clip(project, clip))
+            final = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
             if not clip.thumb_custom:
                 try:
                     from .thumbs import make_thumbnail
 
-                    clip.thumb_path, clip.thumb_note = str(make_thumbnail(clip, project)), None
+                    clip.thumb_path = str(make_thumbnail(clip, project))
+                    extra.update(thumb_path=clip.thumb_path, thumb_note=None)
                 except Exception as te:  # noqa: BLE001  (a thumbnail problem must not block the upload)
-                    clip.thumb_note = f"Thumbnail could not be made: {str(te)[:150]}"
+                    extra["thumb_note"] = f"Thumbnail could not be made: {str(te)[:150]}"
+            apply_short_cover(clip)
         except Exception as e:  # noqa: BLE001
-            if is_bot_block(e) and workers.any_approved():
-                clip.status, clip.error = "fetching", None  # the helper PC downloads the section, then we render
+            if is_bot_block(e) and workers.any_recent():
+                final = "fetching"  # the helper PC downloads the section, then we render
+                extra["fetch_since"] = clip.fetch_since or utcnow()
             else:
-                clip.status, clip.error = "failed", friendly_error(e)
+                final, error = "failed", friendly_error(e)
+                extra["output_path"] = None  # an old video must never be uploaded for a failed render
+        s.execute(update(Clip).where(Clip.id == clip_id, Clip.status == "rendering")
+                  .values(status=final, error=error, **extra))
         s.commit()

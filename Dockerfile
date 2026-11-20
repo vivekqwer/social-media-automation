@@ -1,5 +1,5 @@
 FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core ca-certificates curl unzip \
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg fonts-dejavu-core fontconfig ca-certificates curl unzip \
     && curl -fsSL https://deno.land/install.sh | DENO_INSTALL=/usr/local sh \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
@@ -10,5 +10,7 @@ RUN mkdir -p models && curl -fsSL -o models/u2net_human_seg.onnx https://github.
 COPY app app
 COPY static static
 COPY fonts fonts
+# make the bundled fonts (Noto Devanagari, Anton) available to libass font fallback too
+RUN mkdir -p /usr/share/fonts/truetype/clipstudio && cp fonts/*.ttf /usr/share/fonts/truetype/clipstudio/ && fc-cache -f
 ENV DATA_DIR=/data PYTHONUNBUFFERED=1
 CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

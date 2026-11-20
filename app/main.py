@@ -1,11 +1,12 @@
 import base64
 import json
 import os
+import re
 import secrets
 import shutil
 from urllib.parse import quote, urlparse
 from contextlib import asynccontextmanager
-from datetime import timezone
+from datetime import timedelta, timezone
 from datetime import datetime
 from pathlib import Path
 
@@ -16,12 +17,12 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, update
 
 from . import auth, quota, scheduler, workers, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
-from .crypto import TokenError, decrypt, encrypt_existing
+from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .monitor import check_uploads
 from .db import Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
@@ -33,7 +34,7 @@ from .metadata import auto_metadata
 from .metadata import build as build_meta
 from .policy import check_edit
 from .quick import quick_run
-from .render import run_render
+from .render import apply_short_cover, run_render
 from .thumbs import make_thumbnail
 from . import faces
 from .tts import VOICES, synth
@@ -99,22 +100,60 @@ async def auth_gate(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin and urlparse(origin).netloc != request.headers.get("host", ""):
             return PlainTextResponse("Cross-origin request blocked", status_code=403)
-    if path in PUBLIC_PATHS or path.startswith("/api/worker/"):
-        return await call_next(request)
+    if ".." in path:
+        return PlainTextResponse("Not found", status_code=404)
+    try:
+        size = int(request.headers.get("content-length") or 0)
+    except ValueError:
+        size = 0
+    if path.startswith("/api/worker/"):
+        cap = 900 * 1024 * 1024 if path.startswith("/api/worker/source/") else 30 * 1024 * 1024 \
+            if path.startswith(("/api/worker/voice/", "/api/worker/analysis/")) else 64 * 1024
+        if size > cap:
+            return JSONResponse({"detail": "Too large"}, status_code=413)
+        if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
+            found = workers.authenticate(request.headers.get("x-worker-token", ""))
+            if not found:
+                return JSONResponse({"detail": "Unknown helper"}, status_code=401)
+            if not found[1]:
+                return JSONResponse({"detail": "Waiting for approval in the dashboard"}, status_code=403)
+        return _secure(await call_next(request))
+    if size > 50 * 1024 * 1024:  # the largest dashboard upload is a 25 MB voice file
+        return JSONResponse({"detail": "File too large"}, status_code=413)
+    if path in PUBLIC_PATHS:
+        return _secure(await call_next(request))
     if not auth.auth_configured():
         if not IS_LOCAL:
             return PlainTextResponse("Set the APP_PASSWORD env var before using this app.", status_code=503)
         return await call_next(request)
     if auth.request_authenticated(request):
-        return await call_next(request)
+        return _secure(await call_next(request))
     if path.startswith("/api/"):
         return JSONResponse({"detail": "Not logged in"}, status_code=401)
     return RedirectResponse("/login?next=" + quote(path), status_code=302)
 
 
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://i.ytimg.com; "
+       "media-src 'self' blob:; frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
+       "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com")
+
+
+def _secure(resp):
+    h = resp.headers
+    h.setdefault("Content-Security-Policy", CSP)
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "same-origin")
+    h.setdefault("X-Frame-Options", "DENY")
+    if BASE_URL.startswith("https://"):
+        h.setdefault("Strict-Transport-Security", "max-age=31536000")
+    return resp
+
+
 def _client_ip(request: Request) -> str:
+    """The address Railway's proxy saw (the last X-Forwarded-For hop); earlier hops are set by the client."""
     fwd = request.headers.get("x-forwarded-for")
-    return fwd.split(",")[0].strip() if fwd else (request.client.host if request.client else "?")
+    return fwd.split(",")[-1].strip() if fwd else (request.client.host if request.client else "?")
 
 
 def _set_cookie(resp, name: str, value: str, max_age: int):
@@ -158,6 +197,7 @@ def api_login(body: LoginIn, request: Request):
 
 @app.post("/api/logout")
 def api_logout():
+    auth.end_all_sessions()  # a copied cookie stops working too
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
     return resp
@@ -274,6 +314,7 @@ class ClipUpdate(BaseModel):
     captions: list[Cue] | None = Field(None, max_length=400)
     caption_style: CaptionStyle | None = None
     credit_on: bool | None = None
+    short_cover: bool | None = None
 
 
 class TtsIn(BaseModel):
@@ -408,7 +449,7 @@ def _render_sig(c: Clip) -> tuple:
     caps = (tuple((r2(x.get("s")), r2(x.get("e")), str(x.get("t", "")).strip()) for x in (c.captions or [])),
             st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
-            r2(c.orig_volume, 1.0), caps, c.credit_on is not False)
+            r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False)
 
 
 @app.put("/api/clips/{cid}")
@@ -442,7 +483,7 @@ def make_tts(cid: int, body: TtsIn):
         try:
             synth(body.text, body.voice, str(path))
         except Exception as e:  # noqa: BLE001
-            if workers.any_approved():  # voice service refuses the server's IP: let the helper PC make it
+            if workers.any_recent():  # voice service refuses the server's IP: let the helper PC make it
                 c.voice_text, c.tts_pending = body.text, json.dumps({"text": body.text, "voice": body.voice})
                 s.commit()
                 return to_dict(c)
@@ -504,16 +545,24 @@ def voice_upload(cid: int, file: UploadFile = File(...)):
 def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
+        if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
         errs = check_edit(p, c)
         if errs:
             raise HTTPException(400, " ".join(errs))
-        c.status, c.error = "rendering", None
-        s.commit()
+        _claim_for_render(s, cid)
     executor.submit(run_render, cid)
     return {"status": "rendering"}
+
+
+def _claim_for_render(s, cid: int):
+    """Atomically mark a clip as rendering (a fresh start also resets the helper's download attempts)."""
+    res = s.execute(update(Clip).where(Clip.id == cid, Clip.status.notin_(["rendering", "uploading", "uploaded"]))
+                    .values(status="rendering", error=None, fetch_tries=0, job_lease=None, fetch_since=None))
+    s.commit()
+    if res.rowcount != 1:
+        raise HTTPException(409, "The clip changed meanwhile (it may be uploading). Reload and try again.")
 
 
 @app.post("/api/clips/{cid}/refetch")
@@ -521,11 +570,10 @@ def refetch_source(cid: int):
     """Throw away the downloaded source section and fetch it again (e.g. a bad or low-quality download)."""
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
+        if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         shutil.rmtree(DATA_DIR / "clips" / str(cid) / "src", ignore_errors=True)
-        c.status, c.error = "rendering", None
-        s.commit()
+        _claim_for_render(s, cid)
     executor.submit(run_render, cid)
     return {"status": "rendering"}
 
@@ -565,25 +613,22 @@ def schedule(cid: int, body: ScheduleIn):
             raise HTTPException(409, f"Clip is '{c.status}': render it first (edits invalidate the render).")
         if not c.output_path or not Path(c.output_path).exists():
             raise HTTPException(400, "Render the clip first")
-        if not c.title or not c.description:
-            raise HTTPException(400, "Generate/fill title and description first")
         errs = check_edit(p, c)
         if errs:
             raise HTTPException(400, " ".join(errs))
+        if not c.title or not c.description:  # same automatic credit/tags/keywords as Approve
+            meta = build_meta(p, c, [])
+            c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]
         if body.destination_id:
             _get(s, Destination, body.destination_id)
             c.destination_id = body.destination_id
-        if not c.destination_id:
+        if not c.destination_id or not s.get(Destination, c.destination_id):
             first = s.query(Destination).order_by(Destination.id).first()
             if not first:
                 raise HTTPException(400, "Connect your YouTube channel first (dashboard).")
             c.destination_id = first.id
         if body.publish_at:
-            try:
-                dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
-                c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
-            except (ValueError, OverflowError):
-                raise HTTPException(400, "publish_at must be a valid ISO datetime")
+            c.publish_at = _future_time(body.publish_at)
         else:
             c.publish_at = None
         c.status, c.error, c.autoqueue = "queued", None, True
@@ -734,6 +779,19 @@ def alerts_check():
     return check_uploads()
 
 
+def _future_time(iso: str) -> datetime:
+    """A publish time from the dashboard: must be at least 15 minutes ahead (else YouTube publishes at once)."""
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+    except (ValueError, OverflowError):
+        raise HTTPException(400, "Pick a valid date and time")
+    if dt < utcnow() + timedelta(minutes=15):
+        raise HTTPException(400, "That time is in the past or less than 15 minutes away — the video would go public "
+                                 "immediately. Pick a later time, or clear the field to use the next free slot.")
+    return dt
+
+
 class ReuploadIn(BaseModel):
     confirm: bool = False
 
@@ -792,17 +850,15 @@ def approve_clip(cid: int, body: ApproveIn):
         if body.destination_id:
             _get(s, Destination, body.destination_id)
             c.destination_id = body.destination_id
-        if not c.destination_id:
+        if not c.destination_id or not s.get(Destination, c.destination_id):
             first = s.query(Destination).order_by(Destination.id).first()
             if not first:
                 raise HTTPException(400, "Connect your YouTube channel first.")
             c.destination_id = first.id
         if body.publish_at:
-            try:
-                dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
-                c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
-            except (ValueError, OverflowError):
-                raise HTTPException(400, "publish_at must be a valid ISO datetime")
+            c.publish_at = _future_time(body.publish_at)
+        elif c.status == "queued" and c.publish_at and c.publish_at > utcnow():
+            pass  # Re-queue without a new time keeps the clip's existing time
         else:
             ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
             c.publish_at = _next_slot(s, ch.gap_hours if ch else 12, c.destination_id,
@@ -936,7 +992,9 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
 def _cookie_status() -> dict:
     if not COOKIES_PATH.exists():
         return {"saved": False}
-    txt = COOKIES_PATH.read_text(encoding="utf-8", errors="ignore")
+    from .ingest import read_cookies
+
+    txt = read_cookies()
     n = sum(1 for ln in txt.splitlines() if ln.strip() and not ln.startswith("#"))
     return {"saved": True, "cookies": n, "updated_at": COOKIES_PATH.stat().st_mtime}
 
@@ -960,7 +1018,7 @@ def cookies_save(body: CookiesIn):
         lines.append(ln)
     if not any(("youtube.com" in ln or "google.com" in ln) for ln in lines):
         raise HTTPException(400, "No youtube.com / google.com cookies found in that file.")
-    COOKIES_PATH.write_text("# Netscape HTTP Cookie File\n" + "\n".join(lines) + "\n", encoding="utf-8")
+    COOKIES_PATH.write_text(encrypt("# Netscape HTTP Cookie File\n" + "\n".join(lines) + "\n"), encoding="utf-8")  # encrypted at rest
     try:
         COOKIES_PATH.chmod(0o600)
     except OSError:
@@ -993,6 +1051,10 @@ def _worker_or_401(request: Request) -> int:
     return wid
 
 
+class PairIn(BaseModel):
+    code: str = Field("", max_length=20)
+
+
 @app.post("/api/worker/register")
 def worker_register(body: WorkerRegIn, request: Request):
     ip = _client_ip(request)
@@ -1000,10 +1062,13 @@ def worker_register(body: WorkerRegIn, request: Request):
         raise HTTPException(429, "Too many attempts")
     auth.note_fail(ip)  # registrations count towards the same limiter
     with SessionLocal() as s:
+        s.query(Worker).filter(Worker.approved.is_(False), Worker.created_at < utcnow() - timedelta(minutes=30)).delete()
+        s.commit()
         if s.query(Worker).filter(Worker.approved.is_(False)).count() >= 5:
             raise HTTPException(429, "Too many helpers waiting for approval")
         tok = secrets.token_urlsafe(32)
-        w = Worker(name=body.name.strip() or "helper", token_hash=workers.token_hash(tok), approved=False, last_seen=utcnow())
+        w = Worker(name=(body.name.strip() or "helper")[:60], token_hash=workers.token_hash(tok), approved=False,
+                   last_seen=utcnow(), ip=ip[:60], pair_hash=workers.token_hash(workers.pair_code(tok)))
         s.add(w)
         s.commit()
         return {"worker_id": w.id, "token": tok}
@@ -1012,18 +1077,45 @@ def worker_register(body: WorkerRegIn, request: Request):
 @app.get("/api/worker/jobs")
 def worker_jobs(request: Request):
     _worker_or_401(request)
-    jobs = []
+    jobs, now = [], utcnow()
+    free = lambda lease: not lease or lease < now - JOB_LEASE  # noqa: E731
     with SessionLocal() as s:
-        for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(3):
+        for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(20):
+            if len(jobs) >= 2 or not free(c.job_lease):
+                continue
+            if (c.fetch_tries or 0) >= MAX_JOB_TRIES:
+                c.status, c.job_lease = "failed", None
+                c.error = ("The helper PC could not get this video after 3 tries. Check the helper window/log, "
+                           "then press Re-download video.")
+                continue
+            c.job_lease, c.fetch_tries = now, (c.fetch_tries or 0) + 1
             p = s.get(Project, c.project_id)
             jobs.append({"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end})
         for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
+            if c.status == "fetching" or not free(c.job_lease):
+                continue
+            c.job_lease = now
             t = json.loads(c.tts_pending)
             jobs.append({"type": "tts", "clip_id": c.id, "text": t.get("text", ""), "voice": t.get("voice", "")})
-        for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(2):
+        for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(5):
+            if not free(p.analysis_lease):
+                continue
+            if (p.analysis_tries or 0) >= MAX_JOB_TRIES:
+                p.analysis_pending = False  # carry on without the helper's data
+                q = dict(p.quick or {})
+                q["helper_analysed"] = True
+                p.quick = q
+                executor.submit(quick_run, p.id)
+                continue
+            p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
             jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
                          "captions": bool((p.quick or {}).get("captions", True))})
+        s.commit()
     return {"jobs": jobs, "version": SERVER_VERSION}
+
+
+JOB_LEASE = timedelta(minutes=40)  # a helper that took a job gets this long before another may take it
+MAX_JOB_TRIES = 3
 
 
 def _save_upload(file: UploadFile, dest: Path, limit: int):
@@ -1047,9 +1139,15 @@ def worker_source(cid: int, request: Request, file: UploadFile = File(...)):
         if c.status != "fetching":
             raise HTTPException(409, f"Clip is '{c.status}', not waiting for a video")
         dest = DATA_DIR / "clips" / str(cid) / "src" / f"src_{int(c.start)}_{int(c.end) + 1}.mp4"
-        _save_upload(file, dest, 800 * 1024 * 1024)
-        c.status = "rendering"
+        tmp = dest.with_name(f"{dest.stem}.{secrets.token_hex(4)}.part")
+        _save_upload(file, tmp, 900 * 1024 * 1024)
+        res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == "fetching")
+                        .values(status="rendering", job_lease=None, fetch_since=None))
         s.commit()
+        if res.rowcount != 1:  # another helper delivered first
+            tmp.unlink(missing_ok=True)
+            raise HTTPException(409, "Already delivered")
+        tmp.replace(dest)
     executor.submit(run_render, cid)
     return {"ok": True}
 
@@ -1059,9 +1157,11 @@ def worker_voice(cid: int, request: Request, file: UploadFile = File(...)):
     _worker_or_401(request)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
+        if not c.tts_pending:
+            raise HTTPException(409, "No voice-over is waiting for this clip")
         dest = DATA_DIR / "clips" / str(cid) / "voice.mp3"
         _save_upload(file, dest, MAX_VOICE_BYTES)
-        c.voice_path, c.tts_pending = str(dest), None
+        c.voice_path, c.tts_pending, c.job_lease = str(dest), None, None
         if c.status in ("rendered", "queued", "failed"):
             c.status = "draft"
         s.commit()
@@ -1087,7 +1187,11 @@ def worker_fail(cid: int, body: WorkerFailIn, request: Request):
             c.tts_pending = None
             c.error = "Voice-over failed on the helper PC: " + body.error[:300]
         elif c.status == "fetching":
-            c.status, c.error = "failed", body.error[:600] or "The helper PC could not download this video."
+            c.job_lease = None  # let it be tried again (up to 3 times in all)
+            if (c.fetch_tries or 0) >= MAX_JOB_TRIES or "private" in body.error.lower() or "removed" in body.error.lower():
+                c.status = "failed"
+                c.error = (f"The helper PC could not get this video ({c.fetch_tries or 1} tries): "
+                           + (body.error[:500] or "download failed") + " — press Re-download video to try again.")
         s.commit()
     return {"ok": True}
 
@@ -1099,9 +1203,12 @@ def list_workers():
 
 
 @app.post("/api/workers/{wid}/approve")
-def approve_worker(wid: int):
+def approve_worker(wid: int, body: PairIn):
     with SessionLocal() as s:
         w = _get(s, Worker, wid)
+        code = re.sub(r"\D", "", body.code or "")
+        if w.pair_hash and not secrets.compare_digest(workers.token_hash(code), w.pair_hash):
+            raise HTTPException(400, "Wrong code. Type the 6-digit pairing code shown in the helper's window or log.")
         w.approved = True
         s.commit()
         return workers.as_dict(w)
@@ -1126,6 +1233,8 @@ def worker_analysis(pid: int, body: AnalysisIn, request: Request):
     _worker_or_401(request)
     with SessionLocal() as s:
         p = _get(s, Project, pid)
+        if not p.analysis_pending:
+            raise HTTPException(409, "No analysis is waiting for this video")
         fmt = (p.quick or {}).get("format", "shorts")
         want = min({"shorts": 35, "video": 60}[fmt], p.duration or 35)
         if body.heatmap:
@@ -1181,8 +1290,8 @@ def quick_start(body: QuickIn):
                                   "title": info["title"], "channel": info["channel"]})
     if body.mode == "permission" and not body.permission_note.strip():
         raise HTTPException(400, "Write how you got the creator's permission.")
-    if body.length == "whole" and info["duration"] > 4 * 3600:
-        raise HTTPException(400, "That video is longer than 4 hours.")
+    if body.length == "whole" and info["duration"] > 90 * 60:
+        raise HTTPException(400, "Whole-video upload works for videos up to 90 minutes. Choose Best moment instead.")
     with SessionLocal() as s:
         p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note,
                     quick={"format": body.format, "length": body.length, "publish_at": body.publish_at,
@@ -1291,6 +1400,8 @@ def thumb_generate(cid: int, body: ThumbIn):
             c.thumb_face = body.face
         try:
             c.thumb_path, c.thumb_custom, c.thumb_note = str(make_thumbnail(c, p)), False, None
+            if c.status in ("rendered", "queued", "failed", "draft"):
+                apply_short_cover(c)  # the Short's opening frame shows the new thumbnail
         except Exception as e:  # noqa: BLE001
             raise HTTPException(500, str(e)[:200])
         s.commit()
@@ -1307,6 +1418,8 @@ def thumb_upload(cid: int, file: UploadFile = File(...)):
         dest = DATA_DIR / "clips" / str(cid) / ("thumb_custom" + (".png" if ext == ".png" else ".jpg"))
         _save_upload(file, dest, 2 * 1024 * 1024)
         c.thumb_path, c.thumb_custom, c.thumb_note = str(dest), True, None
+        if c.status in ("rendered", "queued", "failed", "draft"):
+            apply_short_cover(c)
         s.commit()
         return to_dict(c)
 
@@ -1347,8 +1460,12 @@ def delete_destination(did: int):
     with SessionLocal() as s:
         if s.query(Channel).filter(Channel.destination_id == did).count():
             raise HTTPException(409, "Some source channels still upload to this channel; remove/reassign them first.")
-        if s.query(Clip).filter(Clip.destination_id == did, Clip.status.in_(["queued", "uploading"])).count():
-            raise HTTPException(409, "Clips are still queued for this channel; wait or cancel them first.")
+        busy = s.query(Clip).filter(Clip.destination_id == did, (Clip.status.in_(["queued", "uploading"]) |
+                                    (Clip.status.in_(["fetching", "rendering", "draft"]) & Clip.autoqueue.is_(True)))).count()
+        if busy:
+            raise HTTPException(409, f"{busy} clip(s) are queued or on their way to this channel. Open them and press "
+                                     "'Back to review' (or Discard), then disconnect.")
+        s.query(Clip).filter(Clip.destination_id == did, Clip.status != "uploaded").update({"destination_id": None})
         s.delete(_get(s, Destination, did))
         s.commit()
         return {"deleted": True}

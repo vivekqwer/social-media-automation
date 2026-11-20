@@ -36,6 +36,9 @@ class Project(Base):
     quick = Column(JSON)  # Quick upload settings + progress {format, length, publish_at, captions, state, step, clip_id}
     caption_track = Column(JSON)  # whole json3 caption track (from the helper PC), sliced per clip
     analysis_pending = Column(Boolean, default=False)  # waiting for the helper PC to read replays/comments
+    analysis_since = Column(DateTime)
+    analysis_lease = Column(DateTime)
+    analysis_tries = Column(Integer, default=0)
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -67,6 +70,10 @@ class Clip(Base):
     thumb_custom = Column(Boolean, default=False)  # user uploaded their own image
     thumb_note = Column(Text)  # result of setting the thumbnail on YouTube
     thumb_pending = Column(Boolean, default=False)  # YouTube refused it; retried automatically until it works
+    short_cover = Column(Boolean, default=True)  # Shorts: show the thumbnail in the first moment of the video
+    fetch_since = Column(DateTime)  # waiting for the helper PC since
+    fetch_tries = Column(Integer, default=0)  # times a helper took the download job
+    job_lease = Column(DateTime)  # a helper took this clip's job at; others wait until it expires
     credit_on = Column(Boolean, default=True)  # small 'Credit: channel' text on the video
     thumb_face = Column(Boolean, default=True)  # put my face (channel's or default) on the thumbnail
     yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...
@@ -129,6 +136,8 @@ class Worker(Base):
     name = Column(String(120))
     token_hash = Column(String(64), unique=True)
     approved = Column(Boolean, default=False)
+    pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
+    ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
 

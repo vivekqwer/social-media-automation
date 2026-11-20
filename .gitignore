@@ -10,3 +10,4 @@ docs/
 worker/.worker_token
 models/
 worker/helper.log
+worker/helper.old.log

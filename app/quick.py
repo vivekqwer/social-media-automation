@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from . import workers
 from .captions import fetch_cues, parse_json3
-from .db import Clip, Destination, Project, SessionLocal
+from .db import Clip, Destination, Project, SessionLocal, utcnow
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .metadata import auto_metadata
 from .render import run_render
@@ -49,8 +49,9 @@ def quick_run(pid: int):
                     secs = parse_timestamps(fetch_comments(p.video_id), p.duration)
                     p.moments = rank_moments(p.duration, p.heatmap, secs, want, 3)
                     s.commit()
-                    if not p.moments and workers.any_approved() and not q.get("helper_analysed"):
+                    if not p.moments and workers.any_recent() and not q.get("helper_analysed"):
                         p.analysis_pending = True  # the helper PC reads replays/comments/captions from home internet
+                        p.analysis_since, p.analysis_tries, p.analysis_lease = utcnow(), 0, None
                         _set(s, p, state="analyzing", step="Your helper PC is reading the video")
                         return
                 if p.moments:

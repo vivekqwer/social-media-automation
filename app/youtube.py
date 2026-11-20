@@ -106,8 +106,9 @@ def upload(dest_id: int | None, path: str, title: str, description: str, tags: l
         body["status"]["privacyStatus"] = "private"
         body["status"]["publishAt"] = publish_at.strftime("%Y-%m-%dT%H:%M:%S.000Z")
     media = MediaFileUpload(path, chunksize=8 * 1024 * 1024, resumable=True, mimetype="video/mp4")
+    yt = client(dest_id)  # an expired login fails here, before any quota is used
     quota.spend("upload")
-    req = client(dest_id).videos().insert(part="snippet,status", body=body, media_body=media)
+    req = yt.videos().insert(part="snippet,status", body=body, media_body=media)
     resp = None
     while resp is None:
         _, resp = req.next_chunk(num_retries=5)
@@ -251,6 +252,7 @@ def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
         r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="viewCount",
                              safeSearch="moderate", maxResults=50, pageToken=token).execute()
         quota.spend("search")
+        quota.note_search()
         for it in r.get("items", []):
             vid = it["id"].get("videoId")
             if vid and vid not in skip and vid not in out and not RISKY.search(it["snippet"].get("title", "")):
@@ -263,8 +265,9 @@ def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
 
 def set_thumbnail(dest_id: int | None, video_id: str, path: str):
     mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    yt = client(dest_id)
     quota.spend("thumbnail")
-    client(dest_id).thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype=mime)).execute()
+    yt.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype=mime)).execute()
 
 
 def thumb_error_text(e) -> str:

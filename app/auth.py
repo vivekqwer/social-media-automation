@@ -100,8 +100,14 @@ def set_password(new: str):
 
 
 def _pwv() -> str:
-    """Changes whenever the password changes, so old sessions stop working."""
-    return hashlib.sha256((_stored_hash() or ("env:" + APP_PASSWORD)).encode()).hexdigest()[:10]
+    """Changes whenever the password changes or the owner logs out, so old sessions stop working.
+    Keyed with the server secret, so a stolen cookie reveals nothing about the password."""
+    basis = (_stored_hash() or ("env:" + APP_PASSWORD)) + "|" + (get_setting("session_gen") or "0")
+    return hmac.new(_secret(), basis.encode(), hashlib.sha256).hexdigest()[:16]
+
+
+def end_all_sessions():
+    set_setting("session_gen", secrets.token_hex(8))
 
 
 # ---------- sessions ----------
@@ -123,16 +129,7 @@ def verify_session(token: str | None) -> str | None:
 
 
 def request_authenticated(request) -> bool:
-    if verify_session(request.cookies.get(SESSION_COOKIE)):
-        return True
-    hdr = request.headers.get("authorization", "")  # Basic auth still works for scripts/curl
-    if hdr.lower().startswith("basic "):
-        try:
-            user, _, pw = base64.b64decode(hdr[6:]).decode().partition(":")
-            return check_login(user, pw)
-        except Exception:  # noqa: BLE001
-            return False
-    return False
+    return bool(verify_session(request.cookies.get(SESSION_COOKIE)))
 
 
 # ---------- reset (verified through Google) ----------
@@ -152,9 +149,15 @@ def verify_reset_token(token: str | None) -> str | None:
 
 
 def allowed_reset_emails() -> set[str]:
-    out = {e.strip().lower() for e in (os.getenv("ADMIN_EMAIL") or "").split(",") if e.strip()}
-    out |= {e.strip().lower() for e in (get_setting("admin_emails") or "").split(",") if e.strip()}
-    return out
+    """Who may reset the dashboard password: ADMIN_EMAIL when it is set (recommended), otherwise the Google
+    accounts of channels that are still connected."""
+    admin = {e.strip().lower() for e in (os.getenv("ADMIN_EMAIL") or "").split(",") if e.strip()}
+    return admin or {e.strip().lower() for e in (get_setting("admin_emails") or "").split(",") if e.strip()}
+
+
+def forget_email(email: str):
+    emails = {e for e in (get_setting("admin_emails") or "").split(",") if e and e != (email or "").lower()}
+    set_setting("admin_emails", ",".join(sorted(emails)))
 
 
 def remember_email(email: str):
@@ -167,9 +170,13 @@ def remember_email(email: str):
 # ---------- brute-force limiter ----------
 def rate_limited(ip: str) -> bool:
     now = time.time()
+    if len(_fails) > 5000:  # forget old entries so the table can't grow without end
+        for k in [k for k, v in _fails.items() if not v or now - v[-1] > 600]:
+            _fails.pop(k, None)
     recent = [t for t in _fails.get(ip, []) if now - t < 600]
     _fails[ip] = recent
-    return len(recent) >= 8
+    everyone = sum(1 for v in _fails.values() for t in v if now - t < 3600)
+    return len(recent) >= 8 or everyone >= 60  # also a global cap: many addresses guessing at once
 
 
 def note_fail(ip: str):

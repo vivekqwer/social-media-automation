@@ -24,7 +24,9 @@ REASONS = {
 }
 
 
-PAUSE_ON = {"removed", "rejected", "blocked"}  # these may come with a strike: stop uploading until I resume
+# reasons that can come with a strike: stop uploading until the owner resumes (duplicates, length, claims don't)
+STRIKE_STATES = ("removed", "rejected:copyright", "rejected:inappropriate", "rejected:termsOfUse",
+                 "rejected:trademark", "rejected:legal")
 
 
 def _state(item: dict | None) -> tuple[str, str, str]:
@@ -84,7 +86,7 @@ def check_uploads() -> dict:
                         "clip_range": [c.start, c.end],
                     }))
                     new += 1
-                    if kind in PAUSE_ON and dest and not dest.paused:  # protect the channel: hold its uploads
+                    if state in STRIKE_STATES and dest and not dest.paused:  # protect the channel: hold its uploads
                         dest.paused, dest.paused_at = True, utcnow()
                         dest.paused_reason = f"“{c.title or yid}”: {msg}"
                 c.yt_state, c.yt_checked_at = state, utcnow()

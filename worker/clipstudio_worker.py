@@ -7,8 +7,11 @@ still happen on the server.
 Start it with run_worker.bat (Windows) or:  python worker/clipstudio_worker.py [SERVER_URL]
 The first start registers this PC; approve it in the dashboard under My channels -> Helper PC.
 """
+import errno
+import hashlib
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -28,10 +31,14 @@ from app.hot import _comments_ytdlp, fetch_heatmap  # noqa: E402
 
 DEFAULT_SERVER = "https://social-media-automation-production-f5543fa3.up.railway.app"
 SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFAULT_SERVER)).rstrip("/")
+if not (SERVER.startswith("https://") or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", SERVER)):
+    sys.exit("The server address must start with https:// (the helper sends videos and its key there).")
 TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
 POLL_SECONDS = 8
 UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
-EXIT_REMOVED, EXIT_UPDATED = 3, 4  # the launchers stop on 3 and restart on 4
+EXPECTED_ORIGIN = "github.com/vivekqwer/social-media-automation"  # only ever update from this repository
+EXIT_UPDATED, EXIT_ALREADY_RUNNING = 4, 5  # the launchers restart on 4 and stop on 5
+GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}  # never wait for a hidden prompt
 
 
 def log(msg: str):
@@ -43,48 +50,80 @@ def single_instance():
     lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         lock.bind(("127.0.0.1", 47613))
-    except OSError:
-        log("Another Clip Studio helper is already running on this PC. Closing this one.")
-        sys.exit(0)
+    except OSError as e:
+        if e.errno == errno.EADDRINUSE or getattr(e, "winerror", 0) == 10048:
+            log("Another Clip Studio helper is already running on this PC. Closing this one.")
+            sys.exit(EXIT_ALREADY_RUNNING)
+        log(f"Could not take the single-helper lock ({e}); continuing.")  # e.g. Windows reserved that port today
     return lock
 
 
-def _git(*args) -> str:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=120).stdout.strip()
+def _git(*args) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=120, env=GIT_ENV)
 
 
 def maybe_update(server_version: str):
-    """Pull the new helper code when the server runs a newer version, then restart (exit code 4)."""
-    if not server_version or not (ROOT / ".git").exists():
+    """Move the helper's code to exactly the commit the server runs (fast-forward only), then restart (exit 4).
+    The code always comes from GitHub over HTTPS; the server only says which commit."""
+    if not re.fullmatch(r"[0-9a-f]{40}", server_version or "") or not (ROOT / ".git").exists():
         return
     try:
-        head = _git("rev-parse", "HEAD")
-        if not head or head == server_version or _git("status", "--porcelain", "--untracked-files=no"):
-            return  # up to date, or local edits we must not touch
-        _git("fetch", "--quiet", "origin")
-        if subprocess.run(["git", "merge-base", "--is-ancestor", "HEAD", server_version], cwd=ROOT,
-                          capture_output=True).returncode != 0:
-            return  # the server is not ahead of us (or that version is unknown here)
-        before = (ROOT / "requirements.txt").read_bytes()
-        if subprocess.run(["git", "pull", "--ff-only", "--quiet"], cwd=ROOT).returncode != 0:
+        if EXPECTED_ORIGIN not in _git("remote", "get-url", "origin").stdout:
             return
-        if (ROOT / "requirements.txt").read_bytes() != before:
-            subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", str(ROOT / "worker" / "requirements.txt")], cwd=ROOT / "worker")
+        head = _git("rev-parse", "HEAD").stdout.strip()
+        if head == server_version or _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+            return  # up to date, or local edits we must not touch
+        if _git("fetch", "--quiet", "origin", "main").returncode:
+            return
+        ahead = _git("merge-base", "--is-ancestor", "HEAD", server_version).returncode == 0
+        published = _git("merge-base", "--is-ancestor", server_version, "origin/main").returncode == 0
+        if not (ahead and published):
+            return  # only move forward, and only to commits that are on GitHub's main branch
+        if _git("merge", "--ff-only", "--quiet", server_version).returncode or \
+                _git("rev-parse", "HEAD").stdout.strip() != server_version:
+            log("Update skipped (could not move to the server's version).")
+            return
         log("Updated the helper to the server's version. Restarting...")
-        sys.exit(EXIT_UPDATED)
-    except subprocess.TimeoutExpired:
+        sys.exit(EXIT_UPDATED)  # the launcher installs any new requirements, then starts it again
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return
 
 
-def get_token() -> str:
-    if TOKEN_FILE.exists():
-        return TOKEN_FILE.read_text().strip()
+def pair_code(token: str) -> str:
+    return str(int(hashlib.sha256(("pair:" + token).encode()).hexdigest(), 16) % 1_000_000).zfill(6)
+
+
+def get_token(force_new: bool = False) -> str:
+    if TOKEN_FILE.exists() and not force_new:
+        tok = TOKEN_FILE.read_text(encoding="utf-8-sig").strip()
+        if len(tok) >= 40:
+            return tok
     r = httpx.post(f"{SERVER}/api/worker/register", json={"name": socket.gethostname()}, timeout=30)
     r.raise_for_status()
     tok = r.json()["token"]
-    TOKEN_FILE.write_text(tok)
-    log("Registered this PC. Approve it in the dashboard: My channels -> Helper PC.")
+    tmp = TOKEN_FILE.with_suffix(".tmp")
+    tmp.write_text(tok, encoding="utf-8")
+    os.replace(tmp, TOKEN_FILE)
+    log("Registered this PC. Approve it in the dashboard: My channels -> Helper PC -> Approve, "
+        f"and type this pairing code: {pair_code(tok)}")
     return tok
+
+
+def _post(url: str, headers: dict, tries: int = 3, **kw):
+    """POST with a few retries; any refusal raises, so the server hears about the failure."""
+    for i in range(tries):
+        try:
+            for f in (kw.get("files") or {}).values():
+                f[1].seek(0)
+            r = httpx.post(url, headers=headers, **kw)
+            if r.status_code == 409:  # the server no longer needs it (done elsewhere / cancelled)
+                return r
+            r.raise_for_status()
+            return r
+        except (httpx.TransportError, httpx.HTTPStatusError) as e:
+            if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500 or i == tries - 1:
+                raise
+            time.sleep(10 * (i + 1))
 
 
 def analyze(job: dict, headers: dict):
@@ -102,56 +141,66 @@ def analyze(job: dict, headers: dict):
                 track = fetch_track(vid)
             except Exception:  # noqa: BLE001  (video has no captions)
                 track = None
-        r = httpx.post(f"{SERVER}/api/worker/analysis/{pid}", headers=headers, timeout=120,
-                       json={"heatmap": heat, "comments": comments[:3000], "caption_track": track})
+        r = _post(f"{SERVER}/api/worker/analysis/{pid}", headers, timeout=120,
+                  json={"heatmap": heat, "comments": comments[:3000], "caption_track": track})
         log(f"video {vid}: {len(heat)} replay points, {len(comments)} comments, captions {'yes' if track else 'no'} -> {r.status_code}")
     except Exception as e:  # noqa: BLE001
         log(f"video {vid}: analysis failed: {str(e)[:150]}")
-        httpx.post(f"{SERVER}/api/worker/fail/{pid}", headers=headers, json={"kind": "analyze", "error": str(e)[:300]}, timeout=30)
+        _tell_failed(pid, "analyze", str(e)[:300], headers)
 
 
 def handle(job: dict, headers: dict):
     if job["type"] == "analyze":
         return analyze(job, headers)
     cid = job["clip_id"]
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         try:
             if job["type"] == "source":
                 log(f"clip {cid}: downloading {job['video_id']} {job['start']:.0f}-{job['end']:.0f}s")
                 path = download_section(job["video_id"], job["start"], job["end"], pathlib.Path(d))
                 with open(path, "rb") as f:
-                    r = httpx.post(f"{SERVER}/api/worker/source/{cid}", headers=headers,
-                                   files={"file": ("source.mp4", f, "video/mp4")}, timeout=900)
+                    r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
+                              files={"file": ("source.mp4", f, "video/mp4")}, timeout=900)
                 log(f"clip {cid}: video sent ({path.stat().st_size // 1024} KB) -> {r.status_code}; server is rendering")
             elif job["type"] == "tts":
                 p = pathlib.Path(d) / "voice.mp3"
                 synth(job["text"], job["voice"], str(p))
                 with open(p, "rb") as f:
-                    r = httpx.post(f"{SERVER}/api/worker/voice/{cid}", headers=headers,
-                                   files={"file": ("voice.mp3", f, "audio/mpeg")}, timeout=120)
+                    r = _post(f"{SERVER}/api/worker/voice/{cid}", headers,
+                              files={"file": ("voice.mp3", f, "audio/mpeg")}, timeout=120)
                 log(f"clip {cid}: voice-over sent -> {r.status_code}")
         except Exception as e:  # noqa: BLE001
             log(f"clip {cid}: failed: {str(e)[:200]}")
-            httpx.post(f"{SERVER}/api/worker/fail/{cid}", headers=headers,
-                       json={"kind": job["type"], "error": friendly_error(e)}, timeout=30)
+            _tell_failed(cid, job["type"], friendly_error(e), headers)
+
+
+def _tell_failed(id_: int, kind: str, error: str, headers: dict):
+    try:
+        httpx.post(f"{SERVER}/api/worker/fail/{id_}", headers=headers, json={"kind": kind, "error": error}, timeout=30)
+    except httpx.HTTPError:
+        pass  # the server re-offers the job after its lease runs out
 
 
 def main():
     _lock = single_instance()  # noqa: F841  (held for the life of the process)
-    headers = {"x-worker-token": get_token()}
-    last_update_check = 0.0
+    tok = get_token()
+    headers = {"x-worker-token": tok}
+    last_update_check = time.time()  # first check after a while: a fresh start never loops straight into an update
     log(f"Clip Studio helper running for {SERVER}. Keep this window open.")
-    waiting = False
+    waiting, delay = False, POLL_SECONDS
     while True:
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers=headers, timeout=30)
+            delay = POLL_SECONDS
             if r.status_code == 403:
                 if not waiting:
-                    log("Waiting for approval in the dashboard (My channels -> Helper PC)...")
+                    log(f"Waiting for approval in the dashboard (My channels -> Helper PC). Pairing code: {pair_code(tok)}")
                     waiting = True
             elif r.status_code == 401:
-                log("This helper was removed in the dashboard. Delete worker/.worker_token and start again.")
-                sys.exit(EXIT_REMOVED)
+                log("The server does not know this helper (removed in the dashboard?). Registering again...")
+                tok = get_token(force_new=True)
+                headers = {"x-worker-token": tok}
+                waiting = False
             else:
                 r.raise_for_status()
                 if waiting:
@@ -164,8 +213,9 @@ def main():
                     last_update_check = time.time()
                     maybe_update(data.get("version", ""))
         except Exception as e:  # noqa: BLE001
-            log(f"connection problem: {str(e)[:150]}")
-        time.sleep(POLL_SECONDS)
+            delay = min(delay * 2, 300)  # server down: wait longer each time, up to 5 minutes
+            log(f"connection problem: {str(e)[:150]} (next try in {delay} s)")
+        time.sleep(delay)
 
 
 if __name__ == "__main__":

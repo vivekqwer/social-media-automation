@@ -4,6 +4,7 @@ Default 10,000 units/day, reset at midnight Pacific time. An upload costs 1,600 
 fit in a day across every channel together. Usage is counted here so uploads and schedules can be planned.
 """
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -31,20 +32,29 @@ def next_reset() -> datetime:
     return nxt.astimezone(timezone.utc).replace(tzinfo=None)
 
 
-def spend(kind: str, n: int = 1):
-    key = "quota:" + _pt_day()
-    with SessionLocal() as s:
+_lock = threading.Lock()
+
+
+def spend(kind: str, n: int = 1, units: int | None = None):
+    key, add = "quota:" + _pt_day(), units if units is not None else COST[kind] * n
+    with _lock, SessionLocal() as s:  # one process: a lock makes read-modify-write safe across threads
         row = s.get(Setting, key)
         if row:
-            row.value = str(int(row.value or 0) + COST[kind] * n)
+            row.value = str(int(row.value or 0) + add)
         else:
-            s.add(Setting(key=key, value=str(COST[kind] * n)))
+            s.add(Setting(key=key, value=str(add)))
         s.commit()
+
+
+def spent_on_search() -> int:
+    with SessionLocal() as s:
+        row = s.get(Setting, "quota-search:" + _pt_day())
+        return int(row.value) if row and row.value else 0
 
 
 def exhaust():
     """YouTube said the quota is used up (e.g. other apps share the project): show it as full until reset."""
-    spend("read", max(0, DAILY_UNITS - used()))
+    spend("read", units=max(0, DAILY_UNITS - used()))
 
 
 def used() -> int:
@@ -62,8 +72,22 @@ def can_upload() -> bool:
     return DAILY_UNITS - used() - UPLOAD_COST >= RESERVE // 2
 
 
+SEARCH_BUDGET = 400  # topic searches may use at most this much a day, so uploads keep their budget
+
+
 def can_search() -> bool:
-    return DAILY_UNITS - used() - COST["search"] >= UPLOAD_COST  # never eat the budget of the next upload
+    return spent_on_search() + COST["search"] <= SEARCH_BUDGET and DAILY_UNITS - used() - COST["search"] >= UPLOAD_COST
+
+
+def note_search():
+    key = "quota-search:" + _pt_day()
+    with _lock, SessionLocal() as s:
+        row = s.get(Setting, key)
+        if row:
+            row.value = str(int(row.value or 0) + COST["search"])
+        else:
+            s.add(Setting(key=key, value=str(COST["search"])))
+        s.commit()
 
 
 def summary() -> dict:

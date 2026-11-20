@@ -27,14 +27,94 @@ def _pacific_midnight(now: datetime, offset_days: int = 0) -> datetime:
 
 
 def recover():
-    """After a crash/redeploy: don't leave clips stuck in transient states."""
+    """After a crash/redeploy (Railway restarts on every deploy): pick up interrupted work by itself."""
+    rerender, requick = [], []
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status.in_(["uploading", "rendering"])).all():
             if c.status == "uploading":
                 c.status = "uploaded" if c.youtube_id else "queued"
             else:
-                c.status, c.error = "failed", "Interrupted by restart; render again."
+                c.status, c.error = "draft", None
+                rerender.append(c.id)  # render it again automatically
+        for c in s.query(Clip).filter(Clip.status == "draft", Clip.autoqueue.is_(True)).all():
+            if c.id not in rerender:
+                rerender.append(c.id)  # Quick/autopilot clip that never got rendered
+        for p in s.query(Project).filter(Project.quick.isnot(None)).all():
+            q = p.quick or {}
+            if q.get("state") in ("starting", "analyzing", "rendering") and not q.get("clip_id") and not p.analysis_pending:
+                requick.append(p.id)
         s.commit()
+    from .quick import quick_run
+    from .render import run_render
+    for cid in rerender:
+        executor.submit(run_render, cid)
+    for pid in requick:
+        executor.submit(quick_run, pid)
+
+
+def sweep_stale():
+    """Jobs waiting for a helper PC that never comes: stop waiting, with a clear message."""
+    now = utcnow()
+    resume = []
+    with SessionLocal() as s:
+        for c in s.query(Clip).filter(Clip.status == "fetching", Clip.fetch_since.isnot(None),
+                                      Clip.fetch_since < now - timedelta(hours=24)).all():
+            c.status, c.job_lease = "failed", None
+            c.error = ("No helper PC fetched this video for 24 hours. Start the helper on your PC "
+                       "(or run worker\\install_autostart.bat once), then press Re-download video.")
+        for c in s.query(Clip).filter(Clip.status == "fetching", Clip.fetch_since.is_(None)).all():
+            c.fetch_since = now  # clips from before this field existed
+        for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "",
+                                      Clip.created_at < now - timedelta(hours=6), Clip.job_lease.is_(None)).all():
+            c.tts_pending = None
+            c.error = "The helper PC did not make the voice-over in time. Start the helper and press Make voice again."
+        for p in s.query(Project).filter(Project.analysis_pending.is_(True)).all():
+            if (p.analysis_since or p.created_at) < now - timedelta(hours=6):
+                p.analysis_pending = False  # continue without the helper's analysis
+                q = dict(p.quick or {})
+                q["helper_analysed"] = True
+                p.quick = q
+                resume.append(p.id)
+        s.commit()
+    if resume:
+        from .quick import quick_run
+        for pid in resume:
+            executor.submit(quick_run, pid)
+
+
+def cleanup_disk():
+    """Keep the /data volume from filling up: downloaded sources of old uploads, leftovers, orphaned folders."""
+    import shutil
+
+    from .config import DATA_DIR
+
+    root, now = DATA_DIR / "clips", utcnow()
+    if not root.exists():
+        return
+    with SessionLocal() as s:
+        clips = {c.id: c for c in s.query(Clip).all()}
+    for d in root.iterdir():
+        if not d.is_dir() or not d.name.isdigit():
+            continue
+        c = clips.get(int(d.name))
+        age_h = (now.timestamp() - d.stat().st_mtime) / 3600
+        if c is None:
+            if age_h > 2:  # clip discarded: remove its folder
+                shutil.rmtree(d, ignore_errors=True)
+            continue
+        src = d / "src"
+        if c.status == "uploaded" and c.attempted_at and c.attempted_at < now - timedelta(days=3):
+            shutil.rmtree(src, ignore_errors=True)  # the video is on YouTube; keep out.mp4 + thumbnail only
+            (d / "body.mp4").unlink(missing_ok=True)
+            continue
+        keep = f"src_{int(c.start or 0)}_{int(c.end or 0) + 1}.mp4"
+        if src.exists():
+            for f in src.iterdir():
+                stale = (now.timestamp() - f.stat().st_mtime) / 3600 > 24
+                if f.name != keep and (stale or not f.name.endswith(".part")):
+                    if f.name.endswith(".part") and not stale:
+                        continue
+                    f.unlink(missing_ok=True)  # an old trim, a partial download or a whole-video leftover
 
 
 def process_queue():
@@ -62,6 +142,7 @@ def process_queue():
     for cid in ids:
         if used >= MAX_UPLOADS_PER_DAY or not quota.can_upload():
             break
+        now = utcnow()  # uploads take minutes: judge every clip's time against the real clock
         with SessionLocal() as s:
             c = s.get(Clip, cid)
             if not c or c.status != "queued" or c.destination_id in paused:
@@ -83,11 +164,16 @@ def process_queue():
             try:
                 publish_at = c.publish_at if c.publish_at and c.publish_at > now + timedelta(minutes=15) else None
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
-                c.status, c.error = "uploaded", None
+                c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
+                s.commit()  # saved at once: a crash now must never upload the video twice
                 if c.thumb_path and Path(c.thumb_path).exists():
                     youtube.push_thumbnail(c)  # a refusal is retried by retry_thumbnails()
             except (RefreshError, TokenError):
                 c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
+                d = s.get(Destination, c.destination_id)
+                if d and not d.paused:  # stop retrying (and spending quota) until the owner reconnects
+                    d.paused, d.paused_at = True, utcnow()
+                    d.paused_reason = "The channel's Google login expired. Press Connect a YouTube channel to log in again, then Resume."
                 s.commit()
                 paused.add(c.destination_id)  # other channels keep uploading
                 continue
@@ -131,7 +217,15 @@ def start():
     sch = BackgroundScheduler(timezone="UTC")
     sch.add_job(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     hours = int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6")
-    sch.add_job(lambda: executor.submit(autopilot_tick), "interval", hours=hours, max_instances=1, coalesce=True)
+    with SessionLocal() as s:  # deploys restart the timer: run soon if the last run is already overdue
+        from .db import Channel
+        last = s.query(func.min(Channel.last_run)).filter(Channel.auto.is_(True)).scalar()
+        overdue = s.query(Channel).filter(Channel.auto.is_(True)).count() and (not last or last < utcnow() - timedelta(hours=hours))
+    sch.add_job(lambda: executor.submit(autopilot_tick), "interval", hours=hours, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5) if overdue else None)
+    sch.add_job(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
+    sch.add_job(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))
     sch.add_job(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)

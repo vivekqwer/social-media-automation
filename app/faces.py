@@ -4,6 +4,8 @@ The photo's background is removed once at upload with the free U2-Net human-segm
 (runs on the CPU, no AI service). A PNG that already has a transparent background is used as is.
 """
 import io
+import os
+import threading
 from pathlib import Path
 
 import httpx
@@ -14,6 +16,8 @@ from .config import DATA_DIR
 
 MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx"
 _session = None
+_lock = threading.Lock()  # one model in memory, one cut-out at a time
+Image.MAX_IMAGE_PIXELS = 60_000_000  # refuse absurdly large images instead of using GBs of RAM
 
 
 def face_path(dest_id) -> Path:
@@ -37,7 +41,7 @@ def _model() -> Path:
     p = DATA_DIR / "models" / "u2net_human_seg.onnx"
     if not p.exists():  # one-time download (~170 MB) onto the data volume
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".part")
+        tmp = p.with_suffix(f".{os.getpid()}.part")
         with httpx.stream("GET", MODEL_URL, follow_redirects=True, timeout=600) as r:
             r.raise_for_status()
             with open(tmp, "wb") as f:
@@ -48,6 +52,11 @@ def _model() -> Path:
 
 
 def _mask(img: Image.Image) -> Image.Image:
+    with _lock:
+        return _mask_locked(img)
+
+
+def _mask_locked(img: Image.Image) -> Image.Image:
     global _session
     if _session is None:
         import onnxruntime as ort
@@ -64,8 +73,13 @@ def _mask(img: Image.Image) -> Image.Image:
 
 def save_face(dest_id, data: bytes) -> Path:
     """dest_id=None saves the default face (all channels without their own)."""
-    img = ImageOps.exif_transpose(Image.open(io.BytesIO(data)))
+    img = Image.open(io.BytesIO(data))
+    img.draft("RGB", (1400, 1400))  # JPEG: decode at reduced size straight away
+    if img.mode in ("I", "I;16", "I;16B", "I;16L", "F"):  # 16-bit / float photos: scale to 8-bit first
+        a = np.asarray(img, np.float32)
+        img = Image.fromarray((a / max(1.0, float(a.max())) * 255).astype(np.uint8))
     img.thumbnail((1400, 1400))
+    img = ImageOps.exif_transpose(img)
     if img.mode in ("RGBA", "LA", "P") and img.convert("RGBA").getextrema()[3][0] < 250:
         cut = img.convert("RGBA")  # already transparent
     else:

@@ -72,7 +72,7 @@ input:focus{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ring)}
 <script>
 const $=id=>document.getElementById(id);
 const q=new URLSearchParams(location.search);
-let next=q.get('next')||'/';if(!next.startsWith('/')||next.startsWith('//'))next='/';
+let next='/';try{const u=new URL(q.get('next')||'/',location.origin);if(u.origin===location.origin)next=u.pathname+u.search}catch(e){}
 function show(m){const e=$('e');e.textContent=m;e.style.display=m?'block':'none'}
 if(q.get('err'))show(q.get('err'));
 $('t').onclick=()=>{const p=$('p');const h=p.type==='password';p.type=h?'text':'password';$('t').textContent=h?'Hide':'Show'};

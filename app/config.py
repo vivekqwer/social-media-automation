@@ -24,7 +24,7 @@ elif DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://", 1)
 
 BASE_URL = (os.getenv("BASE_URL") or "http://localhost:8000").rstrip("/")
-IS_LOCAL = urlparse(BASE_URL).hostname in {"localhost", "127.0.0.1"}
+IS_LOCAL = urlparse(BASE_URL).hostname in {"localhost", "127.0.0.1"} and not os.getenv("RAILWAY_ENVIRONMENT")
 
 APP_USER = os.getenv("APP_USER") or "admin"
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")

@@ -15,6 +15,8 @@ from .metadata import auto_metadata
 from .render import run_render
 
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog
+# clips that already own a publish time (incl. ones still waiting for the helper PC or rendering)
+HOLDS_SLOT = ["fetching", "rendering", "draft", "rendered", "queued", "uploading", "uploaded"]
 
 
 def _resolve_ytdlp(query: str) -> tuple[str, str]:
@@ -81,7 +83,7 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
         s.query(func.max(Clip.publish_at))
         .filter(
             Clip.destination_id == dest_id,
-            Clip.status.in_(["queued", "uploading", "uploaded"]),
+            Clip.status.in_(HOLDS_SLOT),
             Clip.publish_at.isnot(None),
             Clip.publish_at > now,
         )
@@ -96,7 +98,7 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
         day = quota.pt_day_of(slot)
         lo, hi = slot - timedelta(hours=36), slot + timedelta(hours=36)
         load = sum(1 for (t,) in s.query(Clip.publish_at).filter(
-            Clip.status.in_(["queued", "uploading", "uploaded"]), Clip.publish_at.between(lo, hi)) if quota.pt_day_of(t) == day)
+            Clip.status.in_(HOLDS_SLOT), Clip.publish_at.between(lo, hi)) if quota.pt_day_of(t) == day)
         if load < cap:
             break
         nxt = slot + timedelta(days=1)
@@ -178,7 +180,8 @@ def run_channel(channel_id: int):
                 else:
                     ch.resolved_url, ch.name = resolve_channel(ch.query)
                 s.commit()
-            backlog = s.query(Clip).filter(Clip.destination_id == ch.destination_id, Clip.status == "queued").count()
+            backlog = s.query(Clip).filter(Clip.destination_id == ch.destination_id,
+                                           Clip.status.in_(["queued", "fetching", "rendering"])).count()
             if backlog >= MAX_QUEUED_PER_DEST:
                 ch.last_status = f"paused: {backlog} clips already queued"
                 ch.last_run = utcnow()
