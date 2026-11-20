@@ -60,6 +60,10 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 ## Helper PC (2026-11-20)
 - Railway is bot-blocked by YouTube (downloads) and Microsoft TTS. Solution in place: worker/run_worker.bat on the user's PC (approve once in dashboard). Server marks clips 'fetching'; helper downloads the section / makes voice; server renders + uploads. Cookies option still exists as an alternative.
 
+## Live state (2026-11-20 evening)
+- First uploads done (k1xahUpFFWQ, DwkHI7Mq2K4). OAuth app "In production" since 2026-11-20; Foody should be reconnected once so its token is a production one.
+- Helper auto-start via Startup folder was refused by the permission classifier: don't retry; user adds it manually.
+
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
 

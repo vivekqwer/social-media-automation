@@ -77,3 +77,10 @@
 - Live: helper fetched clip #1 (Big Buck Bunny) and clip #2 (GTA commentary); Railway rendered both at 1080x1920. Clip #2 came out 20 s instead of 50 s: the helper had no JS runtime (yt-dlp got a degraded, incomplete download).
 - Fixes: `deno` in the helper venv (worker/requirements.txt) + venv Scripts on PATH -> 1080p sources; download_section rejects incomplete video and repairs short audio (full audio track, cut, remux); render pads audio (apad) so a short audio track can't shorten a clip; editor "Re-download video" (POST /api/clips/{id}/refetch).
 - Metadata now fills automatically when a clip is created: credit + original tags/description + keyword research seeded by title, original tags and channel (topic-filtered), #shorts and channel name for 9:16.
+- Verified live: helper re-fetched clip #2 at full quality (20 MB) -> Railway render 1080x1920, 50.0 s, overlay visible; both clips now "Ready to review". Upload awaits the owner's Approve (nothing published yet).
+
+## 2026-11-20 — Task 14: Go-live actions
+- Privacy/Terms filled (operator Foody, contact funnygunction@gmail.com) and pushed.
+- Approved clips #1 and #2 from the dashboard -> uploaded to Foody: k1xahUpFFWQ (Big Buck Bunny, Studio shows "Scheduled", recognised as a Short) and DwkHI7Mq2K4 (GTA 6 commentary). Publish times 2026-11-21 09:51 and 21:51 IST.
+- Google Auth Platform: Branding links saved (home /about, /privacy, /terms), app pushed to "In production" (no more 7-day token expiry for new logins; unverified-app warning remains until verification).
+- Not done: Windows auto-start of the helper (blocked by the permission system - user must add worker\run_worker.bat to shell:startup); Foody reconnect after publishing (user); API audit submission + screencast (user).
