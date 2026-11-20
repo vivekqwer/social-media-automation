@@ -6,10 +6,13 @@ from datetime import timezone
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
+from typing import Literal
+
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from . import scheduler, youtube
 from .autopilot import run_channel
@@ -45,6 +48,13 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Clip Studio", lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    # default handler echoes the raw input, which crashes on NaN/inf; return only location + message
+    errs = [{"loc": [str(x) for x in e["loc"]], "msg": e["msg"]} for e in exc.errors()]
+    return JSONResponse({"detail": errs}, status_code=422)
 
 
 @app.middleware("http")
@@ -87,22 +97,32 @@ class ProjectIn(BaseModel):
 
 
 class ClipIn(BaseModel):
-    start: float
-    end: float
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
+
+
+class Overlay(BaseModel):
+    text: str = Field("", max_length=500)
+    start: float = Field(0, ge=0, le=36000, allow_inf_nan=False)
+    end: float = Field(3, ge=0, le=36000, allow_inf_nan=False)
+    pos: Literal["top", "center", "bottom"] = "bottom"
+    anim: Literal["fade", "slide_up", "none"] = "fade"
+    size: int = Field(56, ge=16, le=200)
+    color: str = Field("#ffffff", max_length=20)
 
 
 class ClipUpdate(BaseModel):
-    start: float | None = None
-    end: float | None = None
-    aspect: str | None = None
-    overlays: list[dict] | None = None
-    effects: list[str] | None = None
-    voice_text: str | None = None
-    voice_offset: float | None = None
-    orig_volume: float | None = None
-    title: str | None = None
-    description: str | None = None
-    tags: list[str] | None = None
+    start: float | None = Field(None, ge=0, allow_inf_nan=False)
+    end: float | None = Field(None, gt=0, allow_inf_nan=False)
+    aspect: Literal["16:9", "9:16", "1:1"] | None = None
+    overlays: list[Overlay] | None = Field(None, max_length=30)
+    effects: list[Literal["fade", "punch_in", "shake", "bw"]] | None = None
+    voice_text: str | None = Field(None, max_length=5000)
+    voice_offset: float | None = Field(None, ge=0, le=600, allow_inf_nan=False)
+    orig_volume: float | None = Field(None, ge=0, le=3, allow_inf_nan=False)
+    title: str | None = Field(None, max_length=200)
+    description: str | None = Field(None, max_length=5000)
+    tags: list[str] | None = Field(None, max_length=60)
 
 
 class TtsIn(BaseModel):
@@ -120,15 +140,15 @@ class ScheduleIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
-    query: str
+    query: str = Field(min_length=1, max_length=300)
     mode: str = "cc"
-    permission_note: str = ""
+    permission_note: str = Field("", max_length=2000)
     auto: bool = True
-    videos_per_run: int = 3
-    clips_per_video: int = 2
-    clip_len: int = 30
-    aspect: str = "9:16"
-    gap_hours: int = 12
+    videos_per_run: int = Field(3, ge=1, le=20)
+    clips_per_video: int = Field(2, ge=1, le=10)
+    clip_len: int = Field(30, ge=10, le=120)
+    aspect: Literal["16:9", "9:16", "1:1"] = "9:16"
+    gap_hours: int = Field(12, ge=1, le=720)
     destination_id: int | None = None
 
 
@@ -176,7 +196,7 @@ def get_project(pid: int):
 
 
 @app.post("/api/projects/{pid}/analyze")
-def analyze(pid: int, clip_len: int = 30):
+def analyze(pid: int, clip_len: int = Query(30, ge=5, le=600)):
     with SessionLocal() as s:
         p = _get(s, Project, pid)
         secs = parse_timestamps(fetch_comments(p.video_id), p.duration)
@@ -210,10 +230,16 @@ def update_clip(cid: int, body: ClipUpdate):
         c = _get(s, Clip, cid)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
+        render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume"}
+        changed = False
         for k, v in body.model_dump(exclude_unset=True).items():
-            setattr(c, k, v)
-        if any(k in body.model_fields_set for k in ("start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume")):
-            c.status = "draft" if c.status in ("rendered", "queued", "failed") else c.status
+            if getattr(c, k) != v:
+                changed = changed or k in render_keys
+                setattr(c, k, v)
+        if (c.end or 0) <= (c.start or 0):
+            raise HTTPException(400, "end must be greater than start")
+        if changed and c.status in ("rendered", "queued", "failed"):
+            c.status = "draft"
         s.commit()
         return to_dict(c)
 
@@ -329,9 +355,9 @@ def schedule(cid: int, body: ScheduleIn):
         if body.publish_at:
             try:
                 dt = datetime.fromisoformat(body.publish_at.replace("Z", "+00:00"))
-            except ValueError:
-                raise HTTPException(400, "publish_at must be an ISO datetime")
-            c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+                c.publish_at = dt.astimezone(timezone.utc).replace(tzinfo=None) if dt.tzinfo else dt
+            except (ValueError, OverflowError):
+                raise HTTPException(400, "publish_at must be a valid ISO datetime")
         else:
             c.publish_at = None
         c.status, c.error = "queued", None
@@ -363,8 +389,11 @@ def add_channel(body: ChannelIn):
         raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
     if body.mode == "permission" and not body.permission_note.strip():
         raise HTTPException(400, "Permission mode needs a note/proof of the creator's permission.")
-    if body.query.strip().startswith("http"):
-        _check_yt_url(body.query.strip())
+    body.query = body.query.strip()
+    if not body.query:
+        raise HTTPException(400, "Channel name/URL is empty")
+    if body.query.startswith("http"):
+        _check_yt_url(body.query)
     with SessionLocal() as s:
         if body.destination_id:
             _get(s, Destination, body.destination_id)
@@ -443,6 +472,8 @@ def delete_destination(did: int):
     with SessionLocal() as s:
         if s.query(Channel).filter(Channel.destination_id == did).count():
             raise HTTPException(409, "Some source channels still upload to this channel; remove/reassign them first.")
+        if s.query(Clip).filter(Clip.destination_id == did, Clip.status.in_(["queued", "uploading"])).count():
+            raise HTTPException(409, "Clips are still queued for this channel; wait or cancel them first.")
         s.delete(_get(s, Destination, did))
         s.commit()
         return {"deleted": True}

@@ -28,5 +28,8 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 - Paid AI needed? No.
 - Test gotchas: JS in index.html — avoid writing '\n' via python string replace (broke once).
 
+## Browser
+- claude-in-chrome: user's GitHub (vivekqwer, admin) + Railway login are in the Chrome extension named "Browser 4" (deviceId 411776ae-6568-44cf-b4ad-06636a82af53, onThisComputer). Use select_browser with it; never act (create/deploy/enter secrets) without user ask. Credentials/secrets (APP_PASSWORD, Google client secret) must be typed by the user.
+
 ## Status (2026-11-20)
-MVP built and tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
+MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.

@@ -61,7 +61,7 @@ video.v{aspect-ratio:auto;max-height:420px}
       <label>Clip sec <input id="ch-l" type="number" value="30" min="10" max="90" style="width:60px"></label>
       <label>Gap hrs <input id="ch-g" type="number" value="12" min="1" style="width:60px"></label>
       <select id="ch-a"><option value="9:16">9:16 Shorts</option><option value="16:9">16:9</option><option value="1:1">1:1</option></select>
-      <button onclick="addChannel()">Add channel</button>
+      <button onclick="once(addChannel)">Add channel</button>
     </div>
     <div class="mut">Autopilot: finds latest videos → hot moments → clips → renders → credit + tags + keywords → schedules uploads. Runs every few hours and on “Run now”.</div>
   </div>
@@ -76,7 +76,7 @@ video.v{aspect-ratio:auto;max-height:420px}
     <div class="row">
       <select id="p-mode"><option value="cc">CC video</option><option value="permission">Creator permission</option><option value="commentary">Commentary / transformative</option></select>
       <input id="p-note" class="grow" placeholder="Permission note (permission mode)">
-      <button onclick="addProject()">Load</button>
+      <button onclick="once(addProject)">Load</button>
     </div>
   </div>
   <div id="proj" class="hide">
@@ -104,11 +104,11 @@ video.v{aspect-ratio:auto;max-height:420px}
       <h2>Text overlays <button class="sec" onclick="addOv()">+ text</button></h2>
       <div id="ovs"></div>
       <h2>Voice-over</h2>
-      <div class="row"><select id="v-voice"></select><label>Offset s <input id="v-off" type="number" step="0.1" value="0" style="width:70px"></label><button class="sec" onclick="makeTts()">Generate voice</button>
+      <div class="row"><select id="v-voice"></select><label>Offset s <input id="v-off" type="number" step="0.1" value="0" style="width:70px"></label><button class="sec" onclick="once(makeTts)">Generate voice</button>
         <input type="file" id="v-file" accept="audio/*" onchange="uploadVoice()"></div>
       <textarea id="v-text" placeholder="Voice-over script (Hindi/English)"></textarea>
       <div id="v-state" class="mut"></div>
-      <div class="row" style="margin-top:10px"><button onclick="saveClip()" class="sec">Save</button><button onclick="renderClip()" id="r-btn">Save &amp; Render</button><span id="c-err" class="bad-t"></span></div>
+      <div class="row" style="margin-top:10px"><button onclick="saveClip().catch(fail)" class="sec">Save</button><button onclick="once(renderClip)" id="r-btn">Save &amp; Render</button><span id="c-err" class="bad-t"></span></div>
       <video id="vid" class="v hide" controls></video>
     </div>
     <div class="card">
@@ -121,7 +121,7 @@ video.v{aspect-ratio:auto;max-height:420px}
     </div>
     <div class="card">
       <h2>4. Schedule upload</h2>
-      <div class="row"><select id="s-dest"></select><input id="s-when" type="datetime-local"><button onclick="schedule(true)">Schedule</button><button class="sec" onclick="schedule(false)">Upload now</button></div>
+      <div class="row"><select id="s-dest"></select><input id="s-when" type="datetime-local"><button onclick="once(()=>schedule(true))">Schedule</button><button class="sec" onclick="once(()=>schedule(false))">Upload now</button></div>
       <div class="mut">Uploads need a connected channel (dashboard). Scheduled clips are uploaded early as private and go public at the chosen time.</div>
     </div>
   </div>
@@ -133,7 +133,8 @@ video.v{aspect-ratio:auto;max-height:420px}
 
 <script>
 const $=id=>document.getElementById(id);
-let P=null,C=null,poll=null;
+let P=null,C=null,poll=null,LOCK=false;
+async function once(fn){if(LOCK)return;LOCK=true;try{await fn()}finally{LOCK=false}}
 async function api(path,method='GET',body){
   const o={method,headers:{}};
   if(body instanceof FormData){o.body=body}else if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
@@ -141,7 +142,7 @@ async function api(path,method='GET',body){
   if(!r.ok){let m=r.statusText;try{m=(await r.json()).detail||m}catch(e){}throw new Error(typeof m==='string'?m:JSON.stringify(m))}
   return r.json();
 }
-const T=s=>{s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const T=s=>{if(s==null||isNaN(s))return'-';s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const fail=e=>alert(e.message||e);
 function tab(n){for(const k of['auto','manual','queue']){$(k).classList.toggle('hide',k!==n);$('t-'+k).classList.toggle('on',k===n)}
@@ -191,7 +192,7 @@ async function chDel(id){if(confirm('Remove channel?')){await api(`/api/channels
 
 /* ---------- manual ---------- */
 async function addProject(){
-  try{P=await api('/api/projects','POST',{url:$('p-url').value,mode:$('p-mode').value,permission_note:$('p-note').value});showProject();analyze()}catch(e){fail(e)}
+  try{P=await api('/api/projects','POST',{url:$('p-url').value,mode:$('p-mode').value,permission_note:$('p-note').value});C=null;$('editor').classList.add('hide');$('k-chips').innerHTML='';$('s-when').value='';$('v-file').value='';showProject();analyze()}catch(e){fail(e)}
 }
 function showProject(){
   $('proj').classList.remove('hide');
@@ -248,14 +249,14 @@ function collect(){
       pos:d.querySelector('.o-pos').value,anim:d.querySelector('.o-anim').value,size:+d.querySelector('.o-size').value,color:d.querySelector('.o-color').value})).filter(o=>o.text.trim()),
     title:$('m-title').value,description:$('m-desc').value,tags:$('m-tags').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('v-text').value};
 }
-async function saveClip(){try{C=await api('/api/clips/'+C.id,'PUT',collect());setStatus(C)}catch(e){fail(e)}}
+async function saveClip(){C=await api('/api/clips/'+C.id,'PUT',collect());setStatus(C)}
 async function renderClip(){
   try{await saveClip();await api(`/api/clips/${C.id}/render`,'POST');C.status='rendering';setStatus(C);
-    clearInterval(poll);poll=setInterval(async()=>{C=await api('/api/clips/'+C.id);setStatus(C);if(C.status!=='rendering')clearInterval(poll)},3000)}catch(e){fail(e)}
+    const rid=C.id;clearInterval(poll);poll=setInterval(async()=>{try{const x=await api('/api/clips/'+rid);if(C&&C.id===rid){C=x;setStatus(C)}if(x.status!=='rendering')clearInterval(poll)}catch(e){clearInterval(poll)}},3000)}catch(e){fail(e)}
 }
 async function makeTts(){try{await saveClip();C=await api(`/api/clips/${C.id}/tts`,'POST',{text:$('v-text').value,voice:$('v-voice').value});$('v-state').textContent='Voice generated ✔';setStatus(C)}catch(e){fail(e)}}
 async function uploadVoice(){const f=$('v-file').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
-  try{C=await api(`/api/clips/${C.id}/voice-upload`,'POST',fd);$('v-state').textContent='Voice uploaded ✔';setStatus(C)}catch(e){fail(e)}}
+  try{C=await api(`/api/clips/${C.id}/voice-upload`,'POST',fd);$('v-state').textContent='Voice uploaded ✔';setStatus(C)}catch(e){fail(e)}$('v-file').value=''}
 async function kw(){
   const q=$('k-q').value||(P&&P.title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
   $('k-chips').innerHTML=r.keywords.map(k=>`<span data-k="${esc(k)}">${esc(k)}</span>`).join('')||'<span class="mut">no suggestions</span>';
