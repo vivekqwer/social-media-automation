@@ -303,7 +303,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <iframe id="e-frame" class="player" allowfullscreen style="display:none"></iframe>
       <div class="alert bad" id="e-err" style="display:none;margin:12px 0 0"></div>
     </div>
-    <div class="tabs" id="e-tabs"><button class="tab on" data-t="trim">Trim & look</button><button class="tab" data-t="text">Text</button><button class="tab" data-t="voice">Voice</button><button class="tab" data-t="caps">Captions</button><button class="tab" data-t="meta">Details</button></div>
+    <div class="tabs" id="e-tabs"><button class="tab on" data-t="trim">Trim & look</button><button class="tab" data-t="thumb">Thumbnail</button><button class="tab" data-t="text">Text</button><button class="tab" data-t="voice">Voice</button><button class="tab" data-t="caps">Captions</button><button class="tab" data-t="meta">Details</button></div>
 
     <div class="panel on" data-t="trim">
       <div class="row">
@@ -348,8 +348,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="f">Title<input id="e-mt" placeholder="Title"></label>
       <label class="f">Description<textarea id="e-md" style="min-height:160px" placeholder="Description (credit to the original channel is added automatically)"></textarea></label>
       <label class="f">Tags<input id="e-mg" placeholder="comma separated"></label>
-      <div class="f">Thumbnail <span class="mut sm" style="font-weight:400">— made automatically after render and sent to YouTube with the video</span>
-        <div class="row" style="align-items:flex-start;flex-wrap:nowrap;margin-top:6px"><img id="e-thumb" alt="" style="width:170px;border-radius:8px;border:1px solid var(--border);background:var(--muted);object-fit:cover;aspect-ratio:16/9">
+    </div>
+    <div class="panel" data-t="thumb">
+      <div class="f"><span class="mut sm" style="font-weight:400">Made automatically after every render and sent to YouTube with the video.</span>
+        <div class="row" style="align-items:flex-start;flex-wrap:wrap;margin-top:6px"><img id="e-thumb" alt="" style="width:170px;border-radius:8px;border:1px solid var(--border);background:var(--muted);object-fit:cover;aspect-ratio:16/9">
           <div class="grow" style="display:flex;flex-direction:column;gap:8px"><input id="e-ttext" placeholder="Big text on the thumbnail (empty = from the title)">
             <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="e-tface" checked><i></i></span>Put my face on the thumbnail</label>
             <label class="row sm" style="gap:8px" id="e-tcover-row" title="YouTube picks a Short's cover from the video itself"><span class="switch"><input type="checkbox" id="e-tcover" checked><i></i></span>Shorts: show the thumbnail in the first moment (so YouTube uses it as the cover)</label>
@@ -643,7 +645,7 @@ async function loadClips(){
   $$('#tabs .tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
   const st=TAB==='queued'?'queued,uploading':TAB;
   const L=await api('/api/clips?status='+encodeURIComponent(st));
-  $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
+  $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${x.thumb_path?`/api/clips/${x.id}/thumbnail?v=${encodeURIComponent(x.thumb_note||'')}`:thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
     <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
     ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
     <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
@@ -686,7 +688,7 @@ function etab(t){$$('#e-tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset
 $$('#e-tabs .tab').forEach(b=>b.onclick=()=>etab(b.dataset.t));
 async function openEditor(id){
   const [c,v]=await Promise.all([api('/api/clips/'+id),api('/api/voices')]).catch(e=>{fail(e);return[]});
-  if(!c)return;VOICES=v;CUR=c;etab('trim');
+  if(!c)return;VOICES=v;CUR=c;etab(c.status==='uploaded'?'thumb':'trim');
   $('#e-voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join('');
   fill(c);$('#drawer').classList.add('on');$('#scrim').classList.add('on');
   if(['rendering','fetching'].includes(c.status)||c.tts_pending)startPoll(c.id);
@@ -701,7 +703,7 @@ function fill(c){
   const cs=c.caption_style||{};$('#e-con').checked=!!cs.on;$('#e-clang').value=cs.lang||'auto';$('#e-cpos').value=cs.pos||'bottom';$('#e-csize').value=cs.size||'M';$('#e-ccol').value=cs.color||'#ffffff';
   $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
   $('#e-credit').checked=c.credit_on!==false;
-  $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'110px':'170px';
+  $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'160px':'280px';
   $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
   $('#e-when').value=c.status==='queued'&&c.publish_at&&new Date(c.publish_at)>new Date()?localInput(new Date(c.publish_at)):'';
@@ -778,10 +780,10 @@ $('#e-meta').onclick=()=>once(async()=>{await save();const extra=$$('#e-chips sp
 
 
 /* ---------- thumbnail ---------- */
-$('#e-tgen').onclick=()=>once(async()=>{if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value,face:$('#e-tface').checked});fill(await api('/api/clips/'+c.id));etab('meta');
-  if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
-$('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('meta');toast('Your thumbnail will be used')});
-$('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('meta');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));
+$('#e-tgen').onclick=()=>once(async()=>{if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value,face:$('#e-tface').checked});fill(await api('/api/clips/'+c.id));etab('thumb');
+  if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
+$('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('thumb');toast('Your thumbnail will be used')});
+$('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));
 
 /* ---------- quick upload ---------- */
 let QF='shorts',QL='auto',QMODE='cc',QPID=null,QPOLL=null;
