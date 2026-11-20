@@ -75,7 +75,7 @@ input[type=checkbox]{accent-color:var(--brand)}
 label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:500}
 .badge{display:inline-flex;align-items:center;gap:5px;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:500;background:var(--muted);color:var(--mfg);border:1px solid transparent;white-space:nowrap}
 .badge.rendered{background:var(--info-soft);color:var(--info)}.badge.queued{background:var(--warn-soft);color:var(--warn)}
-.badge.uploading,.badge.rendering{background:var(--brand-soft);color:var(--brand)}.badge.uploaded{background:var(--ok-soft);color:var(--ok)}
+.badge.uploading,.badge.rendering,.badge.fetching{background:var(--brand-soft);color:var(--brand)}.badge.uploaded{background:var(--ok-soft);color:var(--ok)}
 .badge.failed{background:var(--bad-soft);color:var(--bad)}.badge.outline{background:transparent;border-color:var(--border)}
 .pulse{animation:pulse 1.2s infinite}@keyframes pulse{50%{opacity:.5}}
 .switch{position:relative;width:36px;height:20px;flex:none;display:inline-block}
@@ -246,6 +246,9 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Change password</h3><p>Minimum 12 characters.</p></div></div><div class="cb">
               <div class="grid" style="gap:10px"><input id="cp-old" type="password" placeholder="Current password" autocomplete="current-password"><input id="cp-new" type="password" placeholder="New password" autocomplete="new-password"><button class="btn" id="cp-go">Update password</button></div>
               <div class="sm mut" style="margin-top:10px">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
+            <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
+              <div id="wk-list"></div>
+              <div class="mut sm" style="margin-top:10px;line-height:1.7">Start it on your PC: open the project folder and double-click <b>worker\run_worker.bat</b>. Keep the window open. New helpers appear here — press <b>Approve</b>.</div></div></div>
             <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
               <ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.7"><li>Use a <b>spare Google account</b>, not your main one.</li><li>Open YouTube in a private window, sign in, then export <i>cookies.txt</i> for youtube.com (extension “Get cookies.txt LOCALLY”).</li><li>Close the private window, then paste the file here.</li></ol>
               <textarea id="ck-text" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;..." style="min-height:90px;font-size:12px"></textarea>
@@ -363,7 +366,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const T=s=>{if(s==null||isNaN(s))return'-';s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
 const when=iso=>iso?new Date(iso).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'as soon as possible';
 const thumb=id=>id?`https://i.ytimg.com/vi/${id}/mqdefault.jpg`:'';
-const LABEL={draft:'Draft',rendering:'Rendering…',rendered:'Ready to review',queued:'Queued',uploading:'Uploading…',uploaded:'Uploaded',failed:'Failed'};
+const LABEL={fetching:'Getting video (helper PC)…',draft:'Draft',rendering:'Rendering…',rendered:'Ready to review',queued:'Queued',uploading:'Uploading…',uploaded:'Uploaded',failed:'Failed'};
 const P={
  dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
  film:'<rect x="2" y="2" width="20" height="20" rx="2.2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/>',
@@ -441,7 +444,7 @@ async function loadDash(){
   else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
   if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
   $('#alerts').innerHTML=al;
-  $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
+  $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering+(c.fetching||0)],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
   $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
   $('#d-up').innerHTML=OV.upcoming.length?OV.upcoming.map(x=>clipMini(x,`<span class="badge ${x.status}">${LABEL[x.status]}</span>`)).join(''):empty('clock','No uploads scheduled','Approved clips show up here with their publish time.');
   $('#d-rec').innerHTML=OV.recent.length?OV.recent.map(x=>clipMini(x,x.youtube_id?`<a class="btn outline sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">Open</a>`:'')).join(''):empty('upload','Nothing uploaded yet','Your first upload will appear here.');
@@ -486,9 +489,18 @@ async function loadSources(){
 }
 
 async function loadDests(){
-  await loadOverview();loadCookies();
+  await loadOverview();loadCookies();loadWorkers();
   $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)}</span></div>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':'<span class="badge uploaded">Connected</span>'}<button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
   $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
+}
+async function loadWorkers(){
+  try{const L=await api('/api/workers');
+    $('#wk-list').innerHTML=L.length?L.map(w=>`<div class="item"><div class="avatar" style="background:var(--muted);color:var(--fg)">${ico('dashboard')}</div><div class="tx"><b>${esc(w.name)}</b><span class="mut sm">${w.last_seen?'Last seen '+when(w.last_seen):'Never seen'}</span></div>
+      ${!w.approved?'<span class="badge queued">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}">Approve</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Start worker\\run_worker.bat on your computer.');
+    $$('[data-wa]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/workers/${b.dataset.wa}/approve`,'POST');toast('Helper approved');loadWorkers()}));
+    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper PC?')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
+  }catch(e){}
 }
 async function loadCookies(){
   try{const c=await api('/api/settings/cookies');const b=$('#ck-badge');b.className='badge '+(c.saved?'uploaded':'outline');b.textContent=c.saved?c.cookies+' cookies saved':'Not set';$('#ck-del').classList.toggle('hide',!c.saved)}catch(e){}
@@ -497,11 +509,11 @@ $('#ck-save').onclick=()=>once(async()=>{await api('/api/settings/cookies','POST
 $('#ck-del').onclick=()=>once(async()=>{await api('/api/settings/cookies','DELETE');toast('Cookies removed');loadCookies()},$('#ck-del'));
 $('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
 
-const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering','Drafts']];
+const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering,fetching','Drafts']];
 async function loadClips(){
   $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
   await loadOverview();const c=OV.counts;
-  const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering':c.draft+c.rendering};
+  const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0)};
   $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} <span class="mut">${cnt[k]??0}</span></button>`).join('');
   $$('#tabs .tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
   const st=TAB==='queued'?'queued,uploading':TAB;
@@ -541,7 +553,7 @@ async function openEditor(id){
   if(!c)return;VOICES=v;CUR=c;etab('trim');
   $('#e-voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join('');
   fill(c);$('#drawer').classList.add('on');$('#scrim').classList.add('on');
-  if(c.status==='rendering')startPoll(c.id);
+  if(['rendering','fetching'].includes(c.status)||c.tts_pending)startPoll(c.id);
 }
 function fill(c){
   CUR=c;$('#e-title').textContent=c.title||c.source_title||('Clip #'+c.id);
@@ -549,14 +561,14 @@ function fill(c){
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
-  $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.voice_path?'Voice attached ✔':'';
+  $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.tts_pending?'Helper PC is making the voice…':(c.voice_path?'Voice attached ✔':'');
   const cs=c.caption_style||{};$('#e-con').checked=!!cs.on;$('#e-clang').value=cs.lang||'auto';$('#e-cpos').value=cs.pos||'bottom';$('#e-csize').value=cs.size||'M';$('#e-ccol').value=cs.color||'#ffffff';
   $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
   $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');
   setStatus(c);
 }
 function setStatus(c){
-  const s=$('#e-status');s.className='badge '+c.status+(c.status==='rendering'?' pulse':'');s.textContent=LABEL[c.status]||c.status;
+  const s=$('#e-status');s.className='badge '+c.status+(['rendering','fetching'].includes(c.status)?' pulse':'');s.textContent=LABEL[c.status]||c.status;
   const er=$('#e-err');er.style.display=c.error?'':'none';er.innerHTML=c.error?ico('alert')+esc(c.error):'';
   const has=['rendered','queued','uploading','uploaded'].includes(c.status);
   VIEW=has?VIEW:'src';
@@ -564,7 +576,7 @@ function setStatus(c){
   const vid=$('#e-video'),fr=$('#e-frame');
   if(VIEW==='out'&&has){fr.style.display='none';fr.src='about:blank';vid.style.display='';vid.src=`/api/clips/${c.id}/video?t=${Date.now()}`}
   else{vid.pause();vid.style.display='none';fr.style.display='';if(c.video_id)fr.src=`https://www.youtube.com/embed/${c.video_id}?start=${Math.floor(c.start)}`}
-  const done=c.status==='uploaded',busy=['rendering','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
+  const done=c.status==='uploaded',busy=['rendering','fetching','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
   $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!ok;
   $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
 }
@@ -595,12 +607,12 @@ function collect(){
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
-function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const x=await api('/api/clips/'+id);if(CUR&&CUR.id===id){fill(x);if(x.status!=='rendering'){clearInterval(POLL);toast(x.status==='failed'?'Render failed':'Render finished',x.status==='failed')}}else clearInterval(POLL)}catch(e){clearInterval(POLL)}},2500)}
-$('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… it rejoins the upload queue by itself')},$('#e-render'));
+function startPoll(id){clearInterval(POLL);POLL=setInterval(async()=>{try{const x=await api('/api/clips/'+id);if(CUR&&CUR.id===id){fill(x);if(!['rendering','fetching'].includes(x.status)&&!x.tts_pending){clearInterval(POLL);toast(x.status==='failed'?'Something failed — see the message':'Done',x.status==='failed')}}else clearInterval(POLL)}catch(e){clearInterval(POLL)}},2500)}
+$('#e-render').onclick=()=>once(async()=>{await save();await api(`/api/clips/${CUR.id}/render`,'POST');const c=await api('/api/clips/'+CUR.id);fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
 $('#e-approve').onclick=()=>once(async()=>{await save();const at=$('#e-when').value?new Date($('#e-when').value).toISOString():null;const c=await api(`/api/clips/${CUR.id}/approve`,'POST',{publish_at:at});fill(await api('/api/clips/'+c.id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
 $('#e-now').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/schedule`,'POST',{publish_at:null,destination_id:null});fill(await api('/api/clips/'+c.id));toast('Uploading within a minute')},$('#e-now'));
 $('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
-$('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice generated — press Save & re-render')},$('#e-tts'));
+$('#e-tts').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});Object.assign(CUR,c);const c2=await api('/api/clips/'+CUR.id);fill(c2);etab('voice');if(c2.tts_pending){startPoll(c2.id);toast('Your helper PC is making the voice…')}else toast('Voice generated — press Save & re-render')},$('#e-tts'));
 $('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice uploaded — press Save & re-render')});
 $('#e-kw').onclick=()=>once(async()=>{const q=$('#e-kq').value||(CUR&&CUR.source_title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
   $('#e-chips').innerHTML=r.keywords.map(k=>`<span data-k="${esc(k)}">${esc(k)}</span>`).join('')||'<span>no suggestions</span>';},$('#e-kw'));

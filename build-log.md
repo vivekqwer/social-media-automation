@@ -63,3 +63,14 @@
 - Video download still needs yt-dlp: added dashboard Settings card "YouTube access for the server" to paste a cookies.txt (validated, saved 0600 on the volume); friendly error text tells the user what to do.
 - Tested with a fake API client + real yt-dlp fallback; auth/approve/schedule regressions pass.
 - Found: Railway variable DATA_DIR=data (imported from .env.example) put the key file, cookies and clips on the container's throw-away disk -> every deploy logged the user out and made the stored channel login unreadable. Fix: relative DATA_DIR now maps to the mounted /data volume; .env.example fully commented so hosts can't import example values; destinations report needs_reconnect and the dashboard shows "Reconnect needed".
+
+## 2026-11-20 — Task 12: Live run from the dashboard
+- Foody reconnected (needs_reconnect=false). Official-API read works live: Big Buck Bunny (CC) and IGN "GTA 6 Review" (standard licence) read without bot error.
+- Clip #1 (BBB 10:05-10:35, 9:16, credit metadata) and clip #2 (IGN review 26:38-27:28, commentary mode: 30% original audio, 2 text overlays, Hindi voice-over, credit + commentary line) created via the dashboard.
+- Server-side edge-tts fails on Railway ("No audio was received", datacenter IP) but works locally -> voice generated locally and uploaded through the editor's voice upload.
+- Render blocked at download (YouTube bot check) -> needs cookies in "YouTube access for the server". Nothing uploaded.
+
+## 2026-11-20 — Task 13: Helper PC (beats the bot block without cookies)
+- New: app/workers.py, Worker table, worker/clipstudio_worker.py + run_worker.bat. A helper runs on the owner's PC (home IP, not blocked), registers itself, must be approved in the dashboard (My channels -> Helper PC), then polls /api/worker/jobs with its own token.
+- Jobs: "source" (download the clip's section and upload it; server renders with ffmpeg as before) and "tts" (make the voice-over when Microsoft refuses the server). Clip status "fetching" = waiting for the helper; autopilot clips in that state still get metadata + slot + autoqueue.
+- E2E test (server with simulated bot/TTS block + real helper script): register -> approve -> fetch 10s of Big Buck Bunny -> server render "rendered"; TTS through the helper -> voice attached.

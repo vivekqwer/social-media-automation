@@ -7,3 +7,4 @@ cookies.txt
 data_test/
 .venv/
 docs/
+worker/.worker_token

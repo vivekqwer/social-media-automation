@@ -58,6 +58,7 @@ class Clip(Base):
     autoqueue = Column(Boolean, default=False)  # re-queue automatically after a re-render
     captions = Column(JSON, default=list)  # [{s, e, t}] relative to clip start
     caption_style = Column(JSON)  # {on, lang, pos, size, color}
+    tts_pending = Column(Text)  # JSON {text, voice} waiting for the helper PC
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -101,6 +102,18 @@ class Destination(Base):
     channel_id = Column(String(64), unique=True)
     name = Column(String(300))
     token = Column(Text)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class Worker(Base):
+    """A helper PC that downloads video sections / makes voice-overs where YouTube doesn't block."""
+
+    __tablename__ = "workers"
+    id = Column(Integer, primary_key=True)
+    name = Column(String(120))
+    token_hash = Column(String(64), unique=True)
+    approved = Column(Boolean, default=False)
+    last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
 
 

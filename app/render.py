@@ -5,7 +5,8 @@ from pathlib import Path
 
 from .config import DATA_DIR, FONT_PATH, FONTS_DIR, ffmpeg_bin
 from .db import Clip, Project, SessionLocal
-from .ingest import download_section, friendly_error
+from . import workers
+from .ingest import download_section, friendly_error, is_bot_block
 from .policy import check_edit
 
 DIMS = {"16:9": (1280, 720), "9:16": (1080, 1920), "1:1": (1080, 1080)}
@@ -188,5 +189,8 @@ def run_render(clip_id: int):
             clip.output_path = str(render_clip(project, clip))
             clip.status = "queued" if (clip.autoqueue and clip.title and clip.description) else "rendered"
         except Exception as e:  # noqa: BLE001
-            clip.status, clip.error = "failed", friendly_error(e)
+            if is_bot_block(e) and workers.any_approved():
+                clip.status, clip.error = "fetching", None  # the helper PC downloads the section, then we render
+            else:
+                clip.status, clip.error = "failed", friendly_error(e)
         s.commit()

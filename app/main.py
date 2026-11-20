@@ -1,4 +1,5 @@
 import base64
+import json
 import secrets
 import shutil
 from urllib.parse import quote, urlparse
@@ -15,12 +16,12 @@ from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Red
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import auth, scheduler, youtube
+from . import auth, scheduler, workers, youtube
 from .autopilot import _next_slot, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
-from .db import Base, Channel, Clip, Destination, Project, SessionLocal, engine, migrate, to_dict, utcnow
+from .db import Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc
 from .jobs import executor
@@ -91,7 +92,7 @@ async def auth_gate(request: Request, call_next):
         origin = request.headers.get("origin")
         if origin and urlparse(origin).netloc != request.headers.get("host", ""):
             return PlainTextResponse("Cross-origin request blocked", status_code=403)
-    if path in PUBLIC_PATHS:
+    if path in PUBLIC_PATHS or path.startswith("/api/worker/"):
         return await call_next(request)
     if not auth.auth_configured():
         if not IS_LOCAL:
@@ -385,7 +386,7 @@ def get_clip(cid: int):
 def update_clip(cid: int, body: ClipUpdate):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("rendering", "uploading", "uploaded"):
+        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
         render_keys = {"start", "end", "aspect", "overlays", "effects", "voice_offset", "orig_volume", "captions", "caption_style"}
         changed = False
@@ -413,8 +414,13 @@ def make_tts(cid: int, body: TtsIn):
         try:
             synth(body.text, body.voice, str(path))
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(502, f"TTS failed: {str(e)[:200]}")
-        c.voice_path, c.voice_text = str(path), body.text
+            if workers.any_approved():  # voice service refuses the server's IP: let the helper PC make it
+                c.voice_text, c.tts_pending = body.text, json.dumps({"text": body.text, "voice": body.voice})
+                s.commit()
+                return to_dict(c)
+            raise HTTPException(502, "The voice service refused this server. Start the Helper PC (My channels) "
+                                     f"or upload an audio file. ({str(e)[:80]})")
+        c.voice_path, c.voice_text, c.tts_pending = str(path), body.text, None
         c.status = "draft" if c.status in ("rendered", "queued", "failed") else c.status
         s.commit()
         return to_dict(c)
@@ -425,7 +431,7 @@ def make_captions(cid: int, body: CaptionsIn):
     """Pull the video's own YouTube captions for this clip's time range (editable afterwards)."""
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("rendering", "uploading", "uploaded"):
+        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
         try:
@@ -470,7 +476,7 @@ def voice_upload(cid: int, file: UploadFile = File(...)):
 def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        if c.status in ("rendering", "uploading", "uploaded"):
+        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
         errs = check_edit(p, c)
@@ -603,7 +609,7 @@ def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
 @app.get("/api/overview")
 def overview():
     with SessionLocal() as s:
-        statuses = ("draft", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
+        statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
         counts = {k: s.query(Clip).filter(Clip.status == k).count() for k in statuses}
         upcoming = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(8).all()
         recent = s.query(Clip).filter(Clip.status == "uploaded").order_by(Clip.id.desc()).limit(6).all()
@@ -814,6 +820,134 @@ def cookies_save(body: CookiesIn):
 def cookies_delete():
     COOKIES_PATH.unlink(missing_ok=True)
     return {"saved": False}
+
+
+class WorkerRegIn(BaseModel):
+    name: str = Field("helper", max_length=120)
+
+
+class WorkerFailIn(BaseModel):
+    kind: str = Field("source", max_length=20)
+    error: str = Field("", max_length=1000)
+
+
+def _worker_or_401(request: Request) -> int:
+    found = workers.authenticate(request.headers.get("x-worker-token", ""))
+    if not found:
+        raise HTTPException(401, "Unknown helper")
+    wid, approved = found
+    if not approved:
+        raise HTTPException(403, "Waiting for approval in the dashboard")
+    return wid
+
+
+@app.post("/api/worker/register")
+def worker_register(body: WorkerRegIn, request: Request):
+    ip = _client_ip(request)
+    if auth.rate_limited(ip):
+        raise HTTPException(429, "Too many attempts")
+    auth.note_fail(ip)  # registrations count towards the same limiter
+    with SessionLocal() as s:
+        if s.query(Worker).filter(Worker.approved.is_(False)).count() >= 5:
+            raise HTTPException(429, "Too many helpers waiting for approval")
+        tok = secrets.token_urlsafe(32)
+        w = Worker(name=body.name.strip() or "helper", token_hash=workers.token_hash(tok), approved=False, last_seen=utcnow())
+        s.add(w)
+        s.commit()
+        return {"worker_id": w.id, "token": tok}
+
+
+@app.get("/api/worker/jobs")
+def worker_jobs(request: Request):
+    _worker_or_401(request)
+    jobs = []
+    with SessionLocal() as s:
+        for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(3):
+            p = s.get(Project, c.project_id)
+            jobs.append({"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end})
+        for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
+            t = json.loads(c.tts_pending)
+            jobs.append({"type": "tts", "clip_id": c.id, "text": t.get("text", ""), "voice": t.get("voice", "")})
+    return {"jobs": jobs}
+
+
+def _save_upload(file: UploadFile, dest: Path, limit: int):
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    with open(dest, "wb") as f:
+        while chunk := file.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > limit:
+                f.close()
+                dest.unlink(missing_ok=True)
+                raise HTTPException(413, "File too large")
+            f.write(chunk)
+
+
+@app.post("/api/worker/source/{cid}")
+def worker_source(cid: int, request: Request, file: UploadFile = File(...)):
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status != "fetching":
+            raise HTTPException(409, f"Clip is '{c.status}', not waiting for a video")
+        dest = DATA_DIR / "clips" / str(cid) / "src" / f"src_{int(c.start)}_{int(c.end) + 1}.mp4"
+        _save_upload(file, dest, 800 * 1024 * 1024)
+        c.status = "rendering"
+        s.commit()
+    executor.submit(run_render, cid)
+    return {"ok": True}
+
+
+@app.post("/api/worker/voice/{cid}")
+def worker_voice(cid: int, request: Request, file: UploadFile = File(...)):
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        dest = DATA_DIR / "clips" / str(cid) / "voice.mp3"
+        _save_upload(file, dest, MAX_VOICE_BYTES)
+        c.voice_path, c.tts_pending = str(dest), None
+        if c.status in ("rendered", "queued", "failed"):
+            c.status = "draft"
+        s.commit()
+    return {"ok": True}
+
+
+@app.post("/api/worker/fail/{cid}")
+def worker_fail(cid: int, body: WorkerFailIn, request: Request):
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if body.kind == "tts":
+            c.tts_pending = None
+            c.error = "Voice-over failed on the helper PC: " + body.error[:300]
+        elif c.status == "fetching":
+            c.status, c.error = "failed", body.error[:600] or "The helper PC could not download this video."
+        s.commit()
+    return {"ok": True}
+
+
+@app.get("/api/workers")
+def list_workers():
+    with SessionLocal() as s:
+        return [workers.as_dict(w) for w in s.query(Worker).order_by(Worker.id)]
+
+
+@app.post("/api/workers/{wid}/approve")
+def approve_worker(wid: int):
+    with SessionLocal() as s:
+        w = _get(s, Worker, wid)
+        w.approved = True
+        s.commit()
+        return workers.as_dict(w)
+
+
+@app.delete("/api/workers/{wid}")
+def delete_worker(wid: int):
+    with SessionLocal() as s:
+        s.delete(_get(s, Worker, wid))
+        s.commit()
+        return {"deleted": True}
 
 
 @app.get("/api/youtube/status")

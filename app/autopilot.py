@@ -123,6 +123,15 @@ def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
                 log.append(f"clip {c.id}: no captions ({str(e)[:70]})")
         run_render(c.id)
         s.refresh(c)
+        if c.status == "fetching":  # helper PC will fetch the video; render finishes later
+            auto_metadata(c.id)
+            s.refresh(c)
+            if not ch.review_first:
+                c.publish_at = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0)
+                c.autoqueue = True  # becomes 'queued' as soon as the render completes
+                s.commit()
+            log.append(f"clip {c.id}: waiting for helper PC")
+            continue
         if c.status != "rendered":
             log.append(f"clip {c.id} failed: {c.error}")
             continue

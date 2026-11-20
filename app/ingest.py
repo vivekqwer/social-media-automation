@@ -92,11 +92,16 @@ def fetch_info(url: str) -> dict:
     return _fetch_info_ytdlp(url)
 
 
+def is_bot_block(err) -> bool:
+    m = str(err)
+    return "Sign in to confirm" in m or "not a bot" in m
+
+
 def friendly_error(msg) -> str:
     m = str(msg)
     if "Sign in to confirm" in m or "not a bot" in m:
-        return ("YouTube blocked this server (bot check) while downloading. Open My channels → "
-                "“YouTube access for the server”, save cookies from a spare Google account, then press Re-render.")
+        return ("YouTube blocked this server (bot check). Start the Helper PC (My channels → Helper PC) "
+                "and press Re-render — your PC fetches the video. Or save cookies under “YouTube access for the server”.")
     if "Private video" in m or "Video unavailable" in m or "members-only" in m.lower():
         return "This video is private, removed or members-only, so it can't be used."
     if "Requested format is not available" in m:
