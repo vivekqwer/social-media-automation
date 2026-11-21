@@ -1872,6 +1872,17 @@ def worker_script(chid: int, body: ScriptIn, request: Request):
         ch = _get(s, Channel, chid)
         if not ch.script_wanted:
             raise HTTPException(409, "No script was asked for")
+        from .autopilot import script_problem
+
+        why = script_problem(body.script, body.topic)
+        if why:  # the small local model sometimes writes nonsense: ask again (3 tries), then move to the next topic
+            w = dict(ch.script_wanted)
+            w["tries"] = int(w.get("tries") or 0) + 1
+            w.pop("lease", None)
+            ch.script_wanted = w if w["tries"] < 3 else None
+            ch.last_status = f"AI script about “{body.topic[:50]}” was {why} — " + ("writing it again" if w["tries"] < 3 else "skipped")
+            s.commit()
+            return {"ok": False, "why": why}
         ch.scripts = list(ch.scripts or []) + [{"text": body.script.strip(), "used": False, "topic": body.topic}]
         ch.script_wanted = None
         ch.last_run = None  # run now

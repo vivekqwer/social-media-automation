@@ -336,7 +336,7 @@ def trending_phrase(ch: Channel) -> str:
 
     used = set((ch.seen_topics or []))
     q = (ch.query or "").strip()
-    keys = [w for w in re.findall(r"[\w']+", q.lower()) if w not in GENERIC and w not in STOP]
+    keys = [] if q.isdigit() else [w for w in re.findall(r"[\w']+", q.lower()) if w not in GENERIC and w not in STOP]
     for v in trending(q if q.isdigit() else ""):
         if youtube.RISKY.search(v["title"]):
             continue
@@ -362,9 +362,32 @@ def trending_phrase(ch: Channel) -> str:
     return ""
 
 
+GREETING = re.compile(r"^(hey|hi|hello|namaste|welcome|what'?s up|guys|friends|dosto)[\w ,']{0,25}[.!?]*$", re.I)
+
+
 def _script_title(text: str) -> str:
-    first = re.split(r"(?<=[.!?।])\s|\n", text.strip(), maxsplit=1)[0]
-    return re.sub(r"\s+", " ", first).strip()[:90] or "My reel"
+    """The reel's title: the first real sentence (greetings like "Hey there!" are skipped; a question is preferred)."""
+    sents = [re.sub(r"\s+", " ", x).strip() for x in re.split(r"(?<=[.!?।])\s|\n", text.strip()) if x.strip()]
+    good = [x for x in sents if len(x.split()) >= 4 and not GREETING.match(x)]
+    pick = next((x for x in good[:3] if x.endswith("?")), good[0] if good else (sents[0] if sents else ""))
+    return pick[:90] or "My reel"
+
+
+def script_problem(text: str, topic: str) -> str:
+    """Why a local-AI script is not good enough to become a reel ('' = fine). Bad ones are written again."""
+    text = (text or "").strip()
+    sents = [x for x in re.split(r"(?<=[.!?।])\s|\n", text) if len(x.split()) >= 3]
+    if len(text) < 200 or len(sents) < 4:
+        return "too short"
+    if len(text) > 1200:
+        return "too long"
+    words = re.findall(r"[a-z']+", text.lower())
+    if words and max(words.count(w) for w in set(words) if len(w) > 4) > max(6, len(words) // 8):
+        return "repeats itself"
+    keys = [w for w in re.findall(r"[a-z]{4,}", (topic or "").split(":")[0].lower()) if w not in ("indian", "india")]
+    if keys and not any(k[:5] in text.lower() for k in keys):
+        return "not about the topic"
+    return ""
 
 
 def _run_reels(s, ch: Channel, log: list):
@@ -374,8 +397,10 @@ def _run_reels(s, ch: Channel, log: list):
     dest = s.get(Destination, ch.destination_id) if ch.destination_id else None
     for i in todo[:ch.videos_per_run]:
         text = scripts[i]["text"].strip()
+        subject = (scripts[i].get("topic") or ch.query or "").split(":")[0].strip().lower()
         p = Project(url="", video_id=None, title=_script_title(text), channel=dest.name if dest else "",
-                    channel_url="", license="Original content (my own reel)", description=text, tags=[],
+                    channel_url="", license="Original content (my own reel)", description=text,
+                    tags=[t for t in dict.fromkeys([subject, (ch.query or "").strip().lower()]) if t][:2],
                     duration=0, heatmap=[], moments=[], mode="original", channel_ref=ch.id)
         s.add(p)
         s.commit()

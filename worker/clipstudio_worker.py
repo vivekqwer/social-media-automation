@@ -349,7 +349,8 @@ HINGLISH_EXAMPLE = (
 
 
 def _script_prompt(topic: str, lang: str) -> str:
-    rules = ("6 to 8 short, simple sentences. Start with a surprising question. Give 3 facts that are well known and "
+    rules = ("6 to 8 short, simple sentences. No greeting: the very first sentence is a surprising question about the "
+             "topic. Give 3 facts that are well known and "
              "certainly true (if unsure, give a simple tip instead of a fact). End by asking viewers to comment and follow. "
              "No labels like 'Fact one', no hashtags, emojis, quotes or scene directions. Output only the script.")
     if lang == "hi":
@@ -363,6 +364,7 @@ def _clean_script(raw: str) -> str:
     text = " ".join(line.strip().lstrip("-*0123456789.) ") for line in (raw or "").splitlines() if line.strip())
     text = re.sub(r"(?i)\b(true )?fact (one|two|three|1|2|3)[:.,]\s*|\b(first|second|third|final)(ly)?,\s*", "", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"(?i)^(hey|hi|hello|namaste)( there| guys| friends| everyone| dosto)?[!.,]+\s*", "", text)  # no greeting
     text = re.sub(r"([.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)  # after removed "First," etc.
     return text[:1].upper() + text[1:]
 
@@ -381,8 +383,9 @@ def write_script(job: dict, headers: dict):
         log("local AI: script was not in Roman letters, trying again")
     if len(text) < 40:
         raise RuntimeError("the local AI returned too little text")
-    _post(f"{SERVER}/api/worker/script/{job['source_id']}", headers, json={"topic": topic, "script": text[:3000]}, timeout=60)
-    log(f"local AI: script sent ({len(text)} characters)")
+    r = _post(f"{SERVER}/api/worker/script/{job['source_id']}", headers, json={"topic": topic, "script": text[:3000]}, timeout=60)
+    verdict = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+    log(f"local AI: script sent ({len(text)} characters)" + ("" if verdict.get("ok", True) else f" - not used: {verdict.get('why')}"))
 
 
 def handle(job: dict, headers: dict):

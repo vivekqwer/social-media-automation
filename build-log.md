@@ -262,3 +262,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 ## 2026-11-22 — Task 45: permission mails always in English
 - Owner's rule: permission mails are always English. Three English versions (subject may name the video), signed/sent as "Funny Gunction", still editable before Send. Unsent mails rewritten.
 - AI reel self-healing: helper log can print Hindi (a cp1252 console crashed a script job); the server drops AI topics broken out of Hindi titles and asks again; topics must be plain English words.
+
+## 2026-11-22 — Task 46: AI reels check themselves
+- Found live: reel sources had "Review first" OFF, so AI reels #19-21 went straight to the upload queue; #19 was an off-topic Hindi GTA script, #20/#21 were titled "Hey there!" with song hashtags.
+- Now: a script from the local AI is checked on arrival (length, sentences, no word repeated over and over, must be about the source's subject); a bad one is written again (3 tries) and then skipped. No greeting in scripts; the title is the first real sentence (a question if there is one); the subject goes into the project tags so hashtags stay on topic. Category trending sources unaffected (regression caught by tests).
