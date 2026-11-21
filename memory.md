@@ -98,3 +98,5 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Railway project is in the Chrome browser named "yaha open karo" (switch_browser); dashboard login there is not saved.
 
 - Analytics page (2026-11-21): live subs/views/per-video stats; 2-min live updates while open, 10-min background sync. Deeper stats (watch time, traffic sources, audience) need the YouTube Analytics API scope = channel reconnect.
+
+- Watch time live 2026-11-21 (Analytics API enabled, Foody reconnected with yt-analytics.readonly). New channels get the scope automatically when connected.

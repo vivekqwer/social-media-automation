@@ -167,3 +167,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - stats.sync_watch_time: last 28 days per day (views, watch minutes, avg duration, subs gained/lost), lifetime watch time, per-video watch time + average view duration/percent (top 50), traffic sources, top 10 countries. Cached per channel; synced every 3 h and on "Update now" (if older than 1 h). YouTube publishes these 1-3 days late.
 - Analytics page: watch-time card with 28-day sparkline, "Where viewers come from", "Top countries", and Watch time / Avg viewed columns per video. Tests 4/4 (+ earlier analytics 4/4).
 - Needs: YouTube Analytics API enabled in the Google Cloud project, and each channel reconnected once.
+- Live: owner enabled YouTube Analytics API (funnygunction project) and reconnected Foody with the new scope; watch-time sync status ok (lifetime 6 min so far; 28-day data still empty because YouTube adds it 1-3 days late).
