@@ -1845,6 +1845,9 @@ def worker_jobs(request: Request):
                 w = dict(ch.script_wanted or {})  # Postgres keeps an empty JSON value as 'null', which passes IS NOT NULL
                 if not w.get("topic"):
                     continue
+                if re.search(r"[^\x00-\x7f]", w["topic"]) and not re.search(r"\w{3}", w["topic"]):
+                    ch.script_wanted = None  # a topic broken out of a Hindi title: ask again on the next run
+                    continue
                 if w.get("lease") and datetime.fromisoformat(w["lease"]) > now - JOB_LEASE:
                     continue
                 w["lease"] = now.isoformat()

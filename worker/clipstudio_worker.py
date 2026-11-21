@@ -44,7 +44,9 @@ GIT_ENV = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GCM_INTERACTIVE": "never"}
 
 
 def log(msg: str):
-    print(time.strftime("%H:%M:%S"), msg, flush=True)
+    line = f"{time.strftime('%H:%M:%S')} {msg}"
+    enc = getattr(sys.stdout, "encoding", None) or "utf-8"
+    print(line.encode(enc, "replace").decode(enc), flush=True)  # Hindi text must never crash a job on a cp1252 console
 
 
 def single_instance():
