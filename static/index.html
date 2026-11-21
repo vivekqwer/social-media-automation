@@ -268,7 +268,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Competitor tracker</h3><p id="id-desc">Channels you watch. Every day the system finds their videos doing 3× or more better than usual.</p></div><button class="btn outline sm" id="id-scan">Check now</button></div>
           <div class="cb"><div class="row"><input id="id-q" class="grow" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" placeholder="Channel link or @handle, e.g. @kabitaskitchen"><button class="btn" id="id-add">Track</button></div><div id="id-chans" class="row" style="gap:6px;margin-top:10px"></div></div>
           <div class="tw" id="id-out"></div></div>
-        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Permission inbox</h3><p>Creators of popular videos you may not reuse yet. Send them the ready message; when they say yes, press “They said yes” — their new videos are then clipped and uploaded automatically, with credit. New creators also arrive on Telegram every morning.</p></div><button class="btn outline sm" id="pm-find">Find creators now</button></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Permission inbox</h3><p>Creators of popular videos you may not reuse yet. Send them the ready message; when they say yes, press “They said yes” — their new videos are then clipped and uploaded automatically, with credit. New creators also arrive on Telegram every morning.</p></div><div class="row"><button class="btn outline sm" id="pm-emails">Find emails</button><button class="btn outline sm" id="pm-find">Find creators now</button></div></div>
           <div class="cb" id="pm-list"></div></div>
         <div class="card"><div class="ch"><div><h3>Trending in India</h3><p>YouTube's trending list, updated every 6 hours.</p></div><select id="id-cat" style="width:auto"><option value="">All</option><option value="26">Howto &amp; Style (food, recipes)</option><option value="22">People &amp; Blogs</option><option value="24">Entertainment</option><option value="23">Comedy</option><option value="10">Music</option><option value="20">Gaming</option></select></div>
           <div class="tw" id="id-trend"></div></div>
@@ -623,10 +623,11 @@ $('#id-cat').onchange=()=>once(loadIdeas);
 async function loadPerms(){
   const L=await api('/api/permissions');const lab={new:['To ask','queued'],asked:['Asked','outline'],replied:['Replied!','queued'],granted:['Allowed','uploaded'],skipped:['Skipped','outline'],declined:['Said no','outline']};
   $('#pm-list').innerHTML=L.length?L.map(c=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(c.name)}</b> <span class="badge ${lab[c.status][1]}">${lab[c.status][0]}</span><span class="mut sm" style="display:block">${esc((c.video_title||'').slice(0,80))} · ${num(c.views)} views</span>
-    ${c.status==='granted'?`<span class="sm" style="display:block;color:var(--ok)">Proof: ${esc(c.proof||'')}</span>`:''}</div>
+    ${c.status==='granted'?`<span class="sm" style="display:block;color:var(--ok)">${c.auto_granted?'Said yes by mail — started automatically. ':''}Proof: ${esc(c.proof||'')}</span>`:''}</div>
+    ${c.status==='granted'&&c.auto_granted?`<button class="btn outline sm" data-pmundo="${esc(c.channel_id)}">Undo</button>`:''}
     <a class="btn ghost sm" href="${esc(c.url)}/about" target="_blank" rel="noopener">Open channel</a>
     ${c.status==='replied'?`<div class="sm" style="flex-basis:100%;margin:6px 0;padding:8px;background:var(--muted);border-radius:8px"><b>Reply from ${esc(c.reply_from||'')}:</b> ${esc(c.reply||'')}</div><button class="btn sm" data-pmgr="${esc(c.channel_id)}">✅ Permission given</button><button class="btn outline sm" data-pmno="${esc(c.channel_id)}">They said no</button>`:''}
-    ${['new','asked'].includes(c.status)&&!c.mailed?`<input class="pm-email" data-cid="${esc(c.channel_id)}" placeholder="creator's email" value="${esc(c.email||'')}" style="width:190px"><button class="btn sm" data-pmsend="${esc(c.channel_id)}">Send mail</button>`:''}
+    ${['new','asked'].includes(c.status)&&!c.mailed?`<input class="pm-email" data-cid="${esc(c.channel_id)}" placeholder="${c.email_checked?'no public email — see About page':'creator\'s email'}" value="${esc(c.email||'')}" style="width:220px">${c.email_from?`<span class="mut sm">found in ${esc(c.email_from)}</span>`:''}<button class="btn sm" data-pmsend="${esc(c.channel_id)}">Send mail</button>`:''}
     ${c.mailed&&c.status==='asked'?'<span class="mut sm">Mail sent — waiting for their reply</span>':''}
     ${!['granted','replied','declined'].includes(c.status)?`<button class="btn outline sm" data-pmcopy="${esc(c.channel_id)}">Copy message</button><button class="btn outline sm" data-pmask="${esc(c.channel_id)}">Asked</button><button class="btn sm" data-pmyes="${esc(c.channel_id)}">They said yes</button><button class="btn ghost sm" data-pmskip="${esc(c.channel_id)}">Skip</button>`:''}</div>`).join('')
     :'<span class="mut sm">Nothing yet — press “Find creators now” or wait for the morning check.</span>';
@@ -635,12 +636,14 @@ async function loadPerms(){
   $$('[data-pmsend]').forEach(b=>b.onclick=()=>once(async()=>{const id=b.dataset.pmsend,em=$(`.pm-email[data-cid="${id}"]`).value.trim();
     await api(`/api/permissions/${id}/email`,'POST',{email:em});await api(`/api/permissions/${id}/send`,'POST');toast('Mail sent from your Gmail');loadPerms()},b));
   $$('[data-pmgr]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmgr}/grant-reply`,'POST');toast('Saved — their new videos will be uploaded automatically, with credit');loadPerms()}));
+  $$('[data-pmundo]').forEach(b=>b.onclick=()=>once(async()=>{if(!confirm('Stop uploading this creator\'s videos?'))return;await api(`/api/permissions/${b.dataset.pmundo}/revoke`,'POST');toast('Stopped — decide again from their reply');loadPerms()}));
   $$('[data-pmno]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmno}/mark/declined`,'POST');loadPerms()}));
   $$('[data-pmask]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmask}/mark/asked`,'POST');loadPerms()}));
   $$('[data-pmskip]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmskip}/mark/skipped`,'POST');loadPerms()}));
   $$('[data-pmyes]').forEach(b=>b.onclick=()=>{const proof=prompt('How did they say yes? Who, how and when (e.g. "Instagram reply from @name on 22 Nov 2026"):');if(!proof)return;
     once(async()=>{await api(`/api/permissions/${b.dataset.pmyes}/grant`,'POST',{proof});toast('Saved — their new videos will be clipped and uploaded automatically');loadPerms()})});
 }
+$('#pm-emails').onclick=()=>once(async()=>{const r=await api('/api/permissions/find-emails','POST');toast(r.found?r.found+' email(s) found — check and press Send':'No public emails in their channel descriptions — use the About page');loadPerms()},$('#pm-emails'));
 $('#pm-find').onclick=()=>once(async()=>{const r=await api('/api/permissions/refresh','POST');toast(r.length?r.length+' new creator(s) found':'No new creators right now');loadPerms()},$('#pm-find'));
 $('#id-add').onclick=()=>once(async()=>{const q=$('#id-q').value.trim();if(!q)throw new Error('Type a channel link or @handle');await api('/api/ideas/competitors','POST',{query:q});$('#id-q').value='';toast('Tracking — press Check now or wait for the daily check');loadIdeas()},$('#id-add'));
 $('#id-scan').onclick=()=>once(async()=>{await api('/api/ideas/scan','POST');toast('Checked');loadIdeas()},$('#id-scan'));
@@ -697,9 +700,12 @@ async function loadSetup(){
     return `<div class="item"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}
       <span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${btn}</div>`};
   const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
-  $('#su-list').innerHTML=must.map(row).join('')+'<div class="mut sm" style="margin:12px 0 4px">Optional extras</div>'+opt.map(row).join('');
+  const up=(d.upcoming||[]).map(c=>`<div class="item"><span style="font-size:18px">📅</span><div class="tx grow"><b>${esc(c.title||'Clip #'+c.id)}</b><span class="mut sm" style="display:block">${c.status==='uploading'?'Uploading now':c.at?'Goes up '+new Date(c.at).toLocaleString([], {weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'Next free slot'}</span></div></div>`).join('');
+  $('#su-list').innerHTML=must.map(row).join('')+'<div class="mut sm" style="margin:12px 0 4px">Optional extras</div>'+opt.map(row).join('')
+    +(up?'<div class="mut sm" style="margin:12px 0 4px">Next uploads (automatic)</div>'+up:'');
+  clearTimeout(window._suT);if(d.items.some(i=>i.key==='ai'&&!i.done&&i.blocked))window._suT=setTimeout(()=>{if(location.hash===''||$('#setup').offsetParent)loadSetup()},20000);
   $$('[data-su]').forEach(btn=>btn.onclick=()=>{const it=d.items.find(i=>i.key===btn.dataset.su),a=it.action||{};
-    if(a.go)go(a.go);else if(a.help)alert(SUHELP[a.help]);else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
+    if(a.go)go(a.go);else if(a.help)alert(SUHELP[a.help]);else if(a.fix==='setup_ai')once(async()=>{const r=await api('/api/ai/setup','POST');toast(r.status);loadSetup()});else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
 }
 $('#hl-refresh').onclick=()=>once(loadHealth,$('#hl-refresh'));
 async function loadDash(){

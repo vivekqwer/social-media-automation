@@ -1231,6 +1231,38 @@ class EmailIn(BaseModel):
     email: str = Field(max_length=200)
 
 
+@app.post("/api/permissions/{cid}/revoke")
+def perm_revoke(cid: str):
+    from . import permissions
+
+    try:
+        return permissions.revoke(cid)
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
+@app.post("/api/permissions/find-emails")
+def perm_find_emails():
+    from . import permissions
+
+    return {"found": permissions.find_emails()}
+
+
+@app.post("/api/permissions/{cid}/find-email")
+def perm_find_email(cid: str):
+    from . import permissions
+
+    return {"found": permissions.find_emails(only=cid)}
+
+
+@app.post("/api/ai/setup")
+def ai_setup():
+    set_setting("ai_wanted", "1")
+    with SessionLocal() as s:
+        w = s.query(Worker).filter(Worker.approved.is_(True)).order_by(Worker.last_seen.desc()).first()
+        return {"status": (w.ai_status if w else None) or "The helper PC starts installing within a minute."}
+
+
 @app.post("/api/permissions/{cid}/email")
 def perm_email(cid: str, body: EmailIn):
     from . import permissions
@@ -1386,6 +1418,11 @@ def setup_checklist():
         dests = s.query(Destination).all()
         hp = _helper_state(s)
         llm = s.query(Worker).filter(Worker.approved.is_(True), Worker.llm.is_(True)).count() > 0
+        ai_st = next((w.ai_status for w in s.query(Worker).filter(Worker.approved.is_(True)).order_by(Worker.last_seen.desc())
+                      if w.ai_status), "")
+        upcoming = [{"id": c.id, "title": c.title, "at": (c.publish_at.isoformat() + "Z") if c.publish_at else None,
+                     "status": c.status}
+                    for c in s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(6)]
         review = s.query(Clip).filter(Clip.status == "rendered").count()
         failed = s.query(Clip).filter(Clip.status == "failed").count()
         ai_src = s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True)).count()
@@ -1404,18 +1441,21 @@ def setup_checklist():
     except Exception:  # noqa: BLE001
         pass
     need_mail = [c for c in perms if c["status"] == "new" and not c.get("email")]
+    ready = [c for c in perms if c["status"] == "new" and c.get("email") and not c.get("mailed")]
     replied = [c for c in perms if c["status"] == "replied"]
-    add("perm", "Permission inbox", not need_mail and not replied,
+    add("perm", "Permission inbox", not need_mail and not replied and not ready,
         "Creators who may let you use their videos.", {"go": "ideas", "label": "Open inbox"},
         blocked=(f"{len(replied)} creator(s) replied — decide yes/no. " if replied else "")
-        + (f"{len(need_mail)} creator(s) need an email address (from their channel About page) before you can press Send." if need_mail else ""))
+        + (f"{len(ready)} mail(s) ready — check and press Send. " if ready else "")
+        + (f"{len(need_mail)} creator(s) have no public email — open their About page (View email address) and paste it, or press Skip."
+           if need_mail else ""))
     add("review", "Clips waiting for your approval", review == 0, "Only sources with “Review first” wait for you.",
         {"go": "clips", "label": "Review clips"}, blocked=f"{review} clip(s) ready to review" if review else "")
     add("failed", "No failed clips", failed == 0, "", {"fix": "retry_failed", "label": "Retry all failed"},
         blocked=f"{failed} clip(s) failed" if failed else "")
     add("ai", "Local AI on the helper PC (Ollama)", llm, "Writes reel scripts on trending topics by itself.",
-        {"help": "ollama", "label": "How to install"}, optional=True,
-        blocked="" if llm else ("Being installed on your PC — the AI-script reels start by themselves when it is ready." if ai_src else ""))
+        {"fix": "setup_ai", "label": "Install now"}, optional=True,
+        blocked="" if llm else (ai_st or ("Installs by itself on the helper PC." if ai_src else "")))
     add("telegram", "Telegram (phone buttons)", telegram.enabled(), "Approve and reply from your phone. Without it, alerts come by Gmail.",
         {"go": "settings", "label": "Set up"}, optional=True)
     add("pexels", "Pexels key (real photos in reels)", bool(_secret_setting("pexels_key")), "Reels use stock photos instead of colours.",
@@ -1423,7 +1463,7 @@ def setup_checklist():
     add("meta", "Instagram + Facebook", meta.status()["connected"], "Every Short is also posted as a Reel on Instagram and Facebook.",
         {"go": "settings", "label": "Connect"}, optional=True)
     must = [i for i in items if not i["optional"]]
-    return {"items": items, "done": sum(i["done"] for i in must), "total": len(must)}
+    return {"items": items, "done": sum(i["done"] for i in must), "total": len(must), "upcoming": upcoming}
 
 
 # ---------- health: every problem in plain words, with a one-click fix ----------
@@ -1639,7 +1679,14 @@ def worker_jobs(request: Request):
         w = s.query(Worker).filter(Worker.token_hash == workers.token_hash(request.headers.get("x-worker-token", ""))).first()
         if w is not None:
             w.llm = request.headers.get("x-worker-llm") == "1"
+            if "x-worker-ai" in request.headers:
+                w.ai_status = request.headers["x-worker-ai"][:200]
             s.commit()
+    want_ai = False
+    if "x-worker-ai" in request.headers and request.headers.get("x-worker-llm") != "1":  # only helpers that know the job
+        with SessionLocal() as s:
+            want_ai = get_setting("ai_wanted") == "1" or s.query(Channel).filter(
+                Channel.kind == "reel", Channel.auto_scripts.is_(True)).count() > 0
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(20):
             if len(jobs) >= 2 or not free(c.job_lease):
@@ -1690,6 +1737,8 @@ def worker_jobs(request: Request):
                 ch.script_wanted = w
                 jobs.append({"type": "script", "source_id": ch.id, "topic": w["topic"], "lang": ch.permission_note or "hi"})
         s.commit()
+    if want_ai:  # the helper installs Ollama + the model by itself (it ignores this while already busy with it)
+        jobs.append({"type": "setup_ai"})
     return {"jobs": jobs, "version": SERVER_VERSION}
 
 

@@ -62,6 +62,8 @@ def refresh_inbox() -> list[dict]:
         new.append(d[cid])
     _save(d)
     if new:
+        find_emails()
+    if new:
         try:
             from .telegram import esc, notify
 
@@ -75,6 +77,44 @@ def refresh_inbox() -> list[dict]:
         except Exception:  # noqa: BLE001
             pass
     return new
+
+
+EMAIL_FIND = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+
+
+def _deobfuscate(t: str) -> str:
+    t = re.sub(r"\s*[\[(]\s*at\s*[\])]\s*", "@", t, flags=re.I)
+    return re.sub(r"\s*[\[(]\s*dot\s*[\])]\s*", ".", t, flags=re.I)
+
+
+def find_emails(only: str | None = None) -> int:
+    """Look for a public business email in each new creator's channel description (official API, 1 unit each)."""
+    from . import quota, youtube
+
+    d = _load()
+    todo = [c for c in d.values() if c["status"] in ("new", "asked") and not c.get("email") and not c.get("mailed")
+            and (only == c["channel_id"] or (only is None and not c.get("email_checked")))]
+    found = 0
+    for i in range(0, len(todo), 50):
+        batch = todo[i:i + 50]
+        try:
+            r = youtube.client().channels().list(part="snippet,brandingSettings", id=",".join(c["channel_id"] for c in batch),
+                                                 maxResults=50).execute()
+            quota.spend("read")
+        except Exception as e:  # noqa: BLE001
+            log.warning("permission inbox: email lookup: %s", str(e)[:150])
+            return found
+        texts = {it["id"]: (it.get("snippet", {}).get("description", "") + "\n"
+                            + it.get("brandingSettings", {}).get("channel", {}).get("description", "")) for it in r.get("items", [])}
+        for c in batch:
+            m = [e.strip(".") for e in EMAIL_FIND.findall(_deobfuscate(texts.get(c["channel_id"], "")))
+                 if not e.lower().endswith((".png", ".jpg", ".gif"))]
+            c["email_checked"] = True
+            if m:
+                c["email"], c["email_from"] = m[0], "their channel description"
+                found += 1
+    _save(d)
+    return found
 
 
 def listing() -> list[dict]:
@@ -124,14 +164,52 @@ def send_mail(cid: str) -> dict:
     return c
 
 
+YES_RE = re.compile(r"\b(yes|yeah|yep|yup|sure|of course|go ahead|permission granted|granted|you can|you may|allowed|ok|okay|"
+                    r"haan|han ji|haa|ji haan|bilkul|theek hai|thik hai|kar sakte|kar sakta|kar lo|kr lo|use kar)\b", re.I)
+# anything that is not a plain yes goes to the owner: refusals, conditions, money, legal words, questions
+NOT_PLAIN_YES = re.compile(r"\b(no|not|don'?t|dont|do not|never|nahi|nahin|nhi|mat|nope|sorry|can'?t|cannot|won'?t|wont|only|but|"
+                           r"however|condition|if|pay|paid|price|charge|fee|money|paise|rupees|rs|inr|license|licence|contract|"
+                           r"agreement|remove|delete|strike|copyright|claim|ask|later|wait|think|maybe|shayad|sochke)\b|\?", re.I)
+
+
+def _own_words(snippet: str) -> str:
+    """The creator's new text only (drop the quoted original mail)."""
+    t = re.split(r"\bOn .{0,80}wrote:|\bNamaste\b|\bHi .{0,40}I'm a big fan|^>", snippet or "", maxsplit=1, flags=re.I | re.M)[0]
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def plain_yes(c: dict, r: dict) -> bool:
+    """A short, unconditional yes from the address we wrote to. Everything else waits for the owner."""
+    text = _own_words(r.get("snippet", ""))
+    sender_ok = bool(c.get("email")) and c["email"].lower() in (r.get("from") or "").lower()
+    return sender_ok and 0 < len(text) <= 300 and bool(YES_RE.search(text)) and not NOT_PLAIN_YES.search(text)
+
+
+def revoke(cid: str) -> dict:
+    """Undo an automatic yes: stop the source; the reply goes back to the owner to decide."""
+    d = _load()
+    c = d.get(cid)
+    if not c:
+        raise KeyError(cid)
+    if c.get("source_id"):
+        with SessionLocal() as s:
+            ch = s.get(Channel, c["source_id"])
+            if ch:
+                ch.auto, ch.mode = False, "cc"  # paused; nothing from this creator is uploaded any more
+                s.commit()
+    c.update(status="replied" if c.get("reply") else "asked", auto_granted=False, proof=None)
+    _save(d)
+    return c
+
+
 def check_replies() -> int:
-    """Look for creators' replies in Gmail and send them to the owner to decide (yes / no) with one tap."""
+    """Look for creators' replies in Gmail. A plain yes starts their source by itself (with Undo); the rest go to the owner."""
     from . import gmail
 
     if not gmail.connected_email():
         return 0
     d = _load()
-    found = 0
+    found, auto, ask = 0, [], []
     for c in d.values():
         if c.get("status") != "asked" or not c.get("thread_id") or c.get("reply_id"):
             continue
@@ -144,16 +222,33 @@ def check_replies() -> int:
             continue
         c.update(reply_id=r["id"], reply_from=r["from"], reply_date=r["date"], reply=r["snippet"], status="replied")
         found += 1
-        try:
-            from .telegram import esc, notify
+        (auto if plain_yes(c, r) else ask).append(c["channel_id"])
+    if not found:
+        return 0
+    _save(d)
+    from .telegram import esc, notify
 
-            notify(f"📩 <b>{esc(c['name'])}</b> replied:\n<i>{esc(r['snippet'][:400])}</i>",
-                   [[{"text": "✅ Permission given", "callback_data": f"pg:{c['channel_id']}"},
-                     {"text": "❌ They said no", "callback_data": f"pn:{c['channel_id']}"}]])
+    for cid in auto:  # clear, unconditional yes from the address we wrote to
+        try:
+            g = grant_from_reply(cid)
+            d = _load()
+            d[cid]["auto_granted"] = True
+            _save(d)
+            notify(f"✅ <b>{esc(g['name'])}</b> said yes:\n<i>{esc(_own_words(g['reply'])[:300])}</i>\n\n"
+                   "Their new videos are now clipped and uploaded automatically, with credit. Wrong? Press Undo.",
+                   [[{"text": "↩️ Undo", "callback_data": f"pu:{cid}"}]])
+        except Exception as e:  # noqa: BLE001
+            log.warning("auto-grant failed for %s: %s", cid, str(e)[:150])
+            ask.append(cid)
+    d = _load()
+    for cid in ask:
+        c = d[cid]
+        try:
+            notify(f"📩 <b>{esc(c['name'])}</b> replied:\n<i>{esc(c['reply'][:400])}</i>",
+                   [[{"text": "✅ Permission given", "callback_data": f"pg:{cid}"},
+                     {"text": "❌ They said no", "callback_data": f"pn:{cid}"}]])
         except Exception:  # noqa: BLE001
             pass
-    if found:
-        _save(d)
     return found
 
 

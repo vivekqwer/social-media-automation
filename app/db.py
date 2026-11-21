@@ -148,6 +148,7 @@ class Worker(Base):
     approved = Column(Boolean, default=False)
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
     llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
+    ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

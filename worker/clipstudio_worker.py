@@ -175,6 +175,109 @@ def llm_ready() -> bool:
         return False
 
 
+AI_STATUS = ""  # sent to the server on every poll (ASCII only: it travels in a header)
+_ai_thread = None
+_ai_last_fail = 0.0
+
+
+def _ai(msg: str):
+    global AI_STATUS
+    AI_STATUS = msg.encode("ascii", "ignore").decode()[:190]
+    log("local AI: " + AI_STATUS)
+
+
+def _ollama_exe() -> str | None:
+    import shutil
+
+    p = shutil.which("ollama")
+    if p:
+        return p
+    for base in (os.getenv("LOCALAPPDATA", ""), os.getenv("ProgramFiles", "")):
+        c = pathlib.Path(base) / "Programs" / "Ollama" / "ollama.exe" if base else None
+        if c and c.exists():
+            return str(c)
+        c = pathlib.Path(base) / "Ollama" / "ollama.exe" if base else None
+        if c and c.exists():
+            return str(c)
+    return None
+
+
+def _winget_busy() -> bool:
+    try:
+        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq winget.exe"], capture_output=True, text=True, timeout=20).stdout
+        return "winget.exe" in out.lower()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _setup_ai():
+    """Install Ollama (winget) and download the model, step by step, so the dashboard can show progress."""
+    global _ai_last_fail
+    import json as _json
+
+    hidden = {"creationflags": 0x08000000} if os.name == "nt" else {}  # CREATE_NO_WINDOW
+    try:
+        exe = _ollama_exe()
+        if not exe:
+            if os.name != "nt":
+                raise RuntimeError("install Ollama from ollama.com on this PC")
+            waited = 0
+            while _winget_busy() and not _ollama_exe() and waited < 7200:
+                _ai(f"Windows is installing Ollama already ({waited // 60} min so far, slow internet takes longer)")
+                time.sleep(60)
+                waited += 60
+            if not _ollama_exe():
+                _ai("Installing Ollama (about 1 GB download)...")
+                r = subprocess.run(["winget", "install", "--id", "Ollama.Ollama", "--exact", "--silent",
+                                    "--accept-package-agreements", "--accept-source-agreements"],
+                                   capture_output=True, text=True, timeout=7200, **hidden)
+                if not _ollama_exe():
+                    raise RuntimeError("Ollama install did not finish: " + (r.stdout or r.stderr or "")[-150:].strip())
+            exe = _ollama_exe()
+        try:
+            httpx.get(f"{LLM_URL}/api/tags", timeout=3)
+        except Exception:  # noqa: BLE001
+            _ai("Starting Ollama...")
+            subprocess.Popen([exe, "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **hidden)
+            for _ in range(30):
+                time.sleep(2)
+                try:
+                    httpx.get(f"{LLM_URL}/api/tags", timeout=3)
+                    break
+                except Exception:  # noqa: BLE001
+                    pass
+        if not llm_ready():
+            _ai(f"Downloading the AI model {LLM_MODEL} (about 2 GB)...")
+            with httpx.stream("POST", f"{LLM_URL}/api/pull", json={"name": LLM_MODEL, "stream": True}, timeout=None) as r:
+                last = 0.0
+                for line in r.iter_lines():
+                    if not line:
+                        continue
+                    ev = _json.loads(line)
+                    if ev.get("error"):
+                        raise RuntimeError(ev["error"])
+                    if ev.get("total") and time.time() - last > 20:
+                        last = time.time()
+                        _ai(f"Downloading the AI model: {ev.get('completed', 0) * 100 // ev['total']}% "
+                            f"({ev.get('completed', 0) >> 20} MB of {ev['total'] >> 20} MB)")
+        if not llm_ready():
+            raise RuntimeError("the model did not load")
+        _ai("ready")
+    except Exception as e:  # noqa: BLE001
+        _ai_last_fail = time.time()
+        _ai(f"Install problem: {str(e)[:120]} (tries again in 30 min)")
+
+
+def start_ai_setup():
+    global _ai_thread
+    import threading
+
+    if (_ai_thread and _ai_thread.is_alive()) or time.time() - _ai_last_fail < 1800:
+        return
+    _ai_thread = threading.Thread(target=_setup_ai, daemon=True)
+    _ai_thread.start()
+
+
 def write_script(job: dict, headers: dict):
     topic, lang = job["topic"], job.get("lang") or "hi"
     ask = (f"Write a 30-second YouTube Shorts voice-over script about: {topic}.\n"
@@ -194,6 +297,10 @@ def write_script(job: dict, headers: dict):
 
 
 def handle(job: dict, headers: dict):
+    if job["type"] == "setup_ai":
+        return start_ai_setup()
+    if job["type"] not in ("analyze", "script", "source", "reel", "tts"):
+        return log(f"unknown job type {job['type']!r} (the helper updates itself soon)")
     if job["type"] == "analyze":
         return analyze(job, headers)
     if job["type"] == "script":
@@ -308,7 +415,8 @@ def main():
     waiting, delay = False, POLL_SECONDS
     while True:
         try:
-            r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0"}, timeout=30)
+            r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-"},
+                          timeout=30)
             delay = POLL_SECONDS
             if r.status_code == 403:
                 if not waiting:

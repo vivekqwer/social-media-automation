@@ -218,10 +218,13 @@ def _handle_callback(data: str) -> str:
     if kind == "pe":
         set_setting("tg_pending_email", cid)
         return "Send me the creator's email address (from their channel About page or Instagram bio). I'll mail them from your Gmail."
-    if kind in ("pg", "pn", "pm"):
+    if kind in ("pg", "pn", "pm", "pu"):
         from . import permissions
 
         try:
+            if kind == "pu":
+                c = permissions.revoke(cid)
+                return f"Undone. Nothing from {c['name']} will be uploaded. Their reply is in the dashboard to decide."
             if kind == "pg":
                 c = permissions.grant_from_reply(cid)
                 return f"Saved. {c['name']}'s new videos will be clipped and uploaded automatically, with credit."
