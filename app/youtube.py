@@ -269,7 +269,8 @@ def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
         if not quota.can_search():
             break
         r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
-                             safeSearch="moderate", maxResults=50, pageToken=token).execute()
+                             safeSearch="moderate", maxResults=50, pageToken=token,
+                             regionCode="IN", relevanceLanguage="hi").execute()  # Indian / Hindi videos first
         quota.spend("search")
         quota.note_search()
         for it in r.get("items", []):

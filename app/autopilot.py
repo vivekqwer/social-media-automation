@@ -254,6 +254,9 @@ def run_channel(channel_id: int):
                 s.commit()
                 return
             seen = set(ch.seen or [])
+            # never clip a video twice, whichever source found it first
+            used = {v for (v,) in s.query(Project.video_id).filter(Project.video_id.isnot(None))}
+            seen |= used
             if topic:  # Creative Commons videos only, found by YouTube search
                 ids = youtube.api_search_cc(search_q, seen, ch.videos_per_run * 3)
                 if not ids:
