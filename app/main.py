@@ -893,7 +893,9 @@ def discard_clip(cid: int):
 # ---------- autopilot channels ----------
 @app.post("/api/channels")
 def add_channel(body: ChannelIn):
-    if body.mode not in ("cc", "permission") and body.kind != "reel":
+    if body.kind in ("topic", "reel"):  # topics are always CC; reels are my own content
+        body.mode, body.permission_note = "cc", ""
+    if body.mode not in ("cc", "permission"):
         raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
     if body.mode == "permission":
         _check_permission_note(body.permission_note)
