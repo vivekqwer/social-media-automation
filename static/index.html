@@ -272,6 +272,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="grid cols">
           <div class="grid" style="align-content:start">
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
+            <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
+              <div class="cb" id="tg-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Your face for thumbnails</h3><p>Upload one clear photo (face + shoulders). The background is removed automatically and your face is put on every thumbnail. Channels you connect later use it too — or give a channel its own face above.</p></div></div>
               <div class="cb row" style="flex-wrap:nowrap;align-items:center"><div id="face-prev" style="width:96px;height:96px;border-radius:12px;background:var(--muted) center/contain no-repeat;flex:none"></div>
                 <div style="display:flex;flex-direction:column;gap:8px"><label class="btn sm"><i data-ico="image"></i><span id="face-lbl">Upload face photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-face="0" hidden></label>
@@ -704,7 +706,23 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();
+  loadFace();loadTelegram();
+}
+async function loadTelegram(){
+  let t;try{t=await api('/api/telegram')}catch(e){return}
+  const b=$('#tg-badge');b.className='badge '+(t.linked&&t.on?'uploaded':t.configured?'queued':'outline');b.textContent=t.linked?(t.on?'On':'Off'):t.configured?'Waiting for /start':'Not set up';
+  if(!t.configured){$('#tg-box').innerHTML=`<ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>In Telegram open <b>@BotFather</b> → send <b>/newbot</b> → choose a name → copy the token it gives you.</li><li>Paste the token here and press Connect.</li></ol>
+    <div class="row"><input id="tg-token" class="grow" type="password" autocomplete="off" placeholder="Bot token from @BotFather"><button class="btn" id="tg-save">Connect</button></div>`;
+    $('#tg-save').onclick=()=>once(async()=>{const r=await api('/api/telegram/setup','POST',{token:$('#tg-token').value});toast('Bot @'+r.bot+' connected — now send it the code');loadTelegram()},$('#tg-save'));return}
+  if(!t.linked){$('#tg-box').innerHTML=`<div>Open your bot${t.bot?` <a href="https://t.me/${esc(t.bot)}" target="_blank" rel="noopener">@${esc(t.bot)}</a>`:''} in Telegram and send:</div>
+    <div class="row" style="margin:10px 0"><code style="font-size:18px;padding:6px 12px;background:var(--muted);border-radius:8px">/start ${esc(t.code||'')}</code></div>
+    <div class="row"><button class="btn outline sm" id="tg-check">I sent it — check</button><button class="btn ghost sm" id="tg-del">Remove bot</button></div>`;
+    $('#tg-check').onclick=()=>once(async()=>{await new Promise(r=>setTimeout(r,2500));await loadTelegram()},$('#tg-check'))}
+  else $('#tg-box').innerHTML=`<div class="row"><button class="btn sm" id="tg-test">Send test message</button><button class="btn outline sm" id="tg-tog">${t.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="tg-del">Disconnect</button></div>
+    <div class="mut sm" style="margin-top:8px">Daily summary at 9:00 PM. Only your own Telegram chat can control the system.</div>`;
+  if($('#tg-test'))$('#tg-test').onclick=()=>once(async()=>{await api('/api/telegram/test','POST');toast('Sent — check Telegram')},$('#tg-test'));
+  if($('#tg-tog'))$('#tg-tog').onclick=()=>once(async()=>{await api('/api/telegram/toggle','POST');loadTelegram()},$('#tg-tog'));
+  if($('#tg-del'))$('#tg-del').onclick=()=>once(async()=>{if(confirm('Disconnect Telegram?')){await api('/api/telegram','DELETE');loadTelegram()}});
 }
 async function loadFace(){
   const r=await fetch('/api/faces/0',{cache:'no-store'});const has=r.ok;

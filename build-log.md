@@ -176,3 +176,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - New source type "Original reels": owner writes scripts (separated by ---), picks a voice; each run turns the next unused scripts into reels. The helper PC runs ReelGen (D:\video generator, override with CLIPSTUDIO_REELGEN) -> 9:16 reel with voice-over + word subtitles -> uploaded to the server -> thumbnail (face + text), title from the first sentence, description = script, no credit block (mode "original") -> review or auto-queue on the daily slots.
 - Sources page: Original badge, "N scripts left", "Scripts" button to add more. render: original clips use the helper's reel file; NeedsHelper state; clip length = reel length.
 - E2E test (local server + real ReelGen on this PC + render + thumbnail + approve): 12/12. Regression suites pass.
+
+## 2026-11-21 — Task 31: Telegram remote control (optional module)
+- app/telegram.py: token from @BotFather pasted by the owner in My channels (stored encrypted, checked with getMe); chat linked by sending "/start CODE" (one-time code); messages from any other chat are ignored. Polled every 20 s (no webhook).
+- Alerts: upload done/failed, YouTube problems (monitor), clip ready to review (with Approve/Discard buttons), clip failed, helper offline (max every 2 h), daily summary 9 PM IST. Commands: /status, /review, /stats, /pause, /resume, /help.
+- Every call is wrapped: Telegram errors never affect uploads or renders. Test with a fake Telegram API 9/9; regressions pass.

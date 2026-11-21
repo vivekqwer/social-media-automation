@@ -86,6 +86,12 @@ def check_uploads() -> dict:
                         "clip_range": [c.start, c.end],
                     }))
                     new += 1
+                    try:
+                        from .telegram import esc, notify
+
+                        notify(f"🚨 <b>{esc(c.title or yid)}</b> ({esc(dest.name if dest else '')})\n{esc(msg)}\nhttps://youtu.be/{yid}")
+                    except Exception:  # noqa: BLE001
+                        pass
                     if state in STRIKE_STATES and dest and not dest.paused:  # protect the channel: hold its uploads
                         dest.paused, dest.paused_at = True, utcnow()
                         dest.paused_reason = f"“{c.title or yid}”: {msg}"

@@ -974,6 +974,56 @@ class ReviewIn(BaseModel):
     review_first: bool
 
 
+# ---------- Telegram remote control (optional module) ----------
+class TgIn(BaseModel):
+    token: str = Field(min_length=20, max_length=200)
+
+
+@app.get("/api/telegram")
+def tg_status():
+    from . import telegram
+
+    return telegram.status()
+
+
+@app.post("/api/telegram/setup")
+def tg_setup(body: TgIn):
+    from . import telegram
+
+    try:
+        return telegram.setup(body.token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/telegram/toggle")
+def tg_toggle():
+    from .db import get_setting as gs, set_setting as ss
+
+    ss("tg_on", "0" if gs("tg_on") != "0" else "1")
+    from . import telegram
+
+    return telegram.status()
+
+
+@app.post("/api/telegram/test")
+def tg_test():
+    from . import telegram
+
+    if not telegram.enabled():
+        raise HTTPException(400, "Telegram is not linked yet.")
+    telegram.notify("👋 Test message from Clip Studio. Send /help to see the commands.")
+    return {"ok": True}
+
+
+@app.delete("/api/telegram")
+def tg_disconnect():
+    from . import telegram
+
+    telegram.disconnect()
+    return telegram.status()
+
+
 # ---------- analytics: live subscribers / views for my channels and videos ----------
 @app.get("/api/analytics")
 def analytics():

@@ -52,6 +52,33 @@ def recover():
         executor.submit(quick_run, pid)
 
 
+def _tg(text: str, buttons=None):
+    try:
+        from .telegram import notify
+
+        notify(text, buttons)
+    except Exception:  # noqa: BLE001  (Telegram must never break uploads)
+        pass
+
+
+def _e(t) -> str:
+    return str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def check_helper():
+    """Tell the owner on Telegram when jobs wait and no helper PC is online (at most every 2 hours)."""
+    try:
+        from .main import _helper_state
+        from .telegram import notify_once
+
+        with SessionLocal() as s:
+            hp = _helper_state(s)
+        if hp["waiting"] and not hp["online"]:
+            notify_once("helper", f"⚠️ Helper PC is offline and {hp['waiting']} job(s) are waiting. Turn the PC on.", 120)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def sweep_stale():
     """Jobs waiting for a helper PC that never comes: stop waiting, with a clear message."""
     now = utcnow()
@@ -165,6 +192,8 @@ def process_queue():
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
                 s.commit()  # saved at once: a crash now must never upload the video twice
+                _tg(f"⬆️ Uploaded: <b>{_e(c.title)}</b>\nhttps://youtu.be/{c.youtube_id}"
+                    + (f"\nGoes live {c.publish_at:%d %b %H:%M} UTC" if publish_at else "\nLive now"))
                 if c.thumb_path and Path(c.thumb_path).exists():
                     youtube.push_thumbnail(c)  # a refusal is retried by retry_thumbnails()
             except (RefreshError, TokenError):
@@ -185,6 +214,7 @@ def process_queue():
                     s.commit()
                     break
                 c.status, c.error = "failed", msg[:500]
+                _tg(f"❌ Upload failed: <b>{_e(c.title)}</b>\n{_e(msg[:300])}")
             c.attempted_at = utcnow()
             used += 1
             s.commit()
@@ -219,6 +249,11 @@ def start():
     sch.add_job(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))
     sch.add_job(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
+    # Telegram remote control (standalone: does nothing until it is set up)
+    from .telegram import daily_summary, poll
+    sch.add_job(poll, "interval", seconds=20, max_instances=1, coalesce=True)
+    sch.add_job(check_helper, "interval", minutes=30, max_instances=1, coalesce=True)
+    sch.add_job(daily_summary, "cron", hour=15, minute=30, max_instances=1, coalesce=True)  # 9:00 PM IST
     sch.add_job(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))
     sch.add_job(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,

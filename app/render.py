@@ -273,3 +273,14 @@ def run_render(clip_id: int):
         s.execute(update(Clip).where(Clip.id == clip_id, Clip.status == "rendering")
                   .values(status=final, error=error, **extra))
         s.commit()
+        if final in ("rendered", "failed"):
+            try:  # Telegram (optional): review from the phone
+                from .telegram import esc, notify
+
+                if final == "rendered":
+                    notify(f"🎬 Ready to review: <b>{esc(clip.title or f'Clip #{clip_id}')}</b>",
+                           [[{"text": "✅ Approve", "callback_data": f"ap:{clip_id}"}, {"text": "🗑 Discard", "callback_data": f"dc:{clip_id}"}]])
+                else:
+                    notify(f"❌ Clip failed: <b>{esc(clip.title or f'Clip #{clip_id}')}</b>\n{esc((error or '')[:300])}")
+            except Exception:  # noqa: BLE001
+                pass
