@@ -258,3 +258,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 ## 2026-11-22 — Task 44: local AI ready; worker jobs 500 fixed
 - qwen2.5:3b downloaded on the helper PC (Ollama). As soon as the helper reported AI ready, /api/worker/jobs returned 500: on Postgres an empty JSON column is stored as JSON 'null' and passes IS NOT NULL, so dict(None) crashed in the script-job loop. Now skips sources without a topic.
 - Local AI live: first AI reel (#19) was off-topic (GTA for "Food trends": trending topics were not filtered by the source's subject) and the Hinglish from the small 3B model was poor. Now: topics stay on the subject (matching trending video, else subject + rotating angle: history, myth vs truth, ...); better prompt (example, "only facts you are sure about", no "Fact one" labels), Devanagari retried; Sources has an English/Hinglish switch per AI source (English uses the Indian voice en-IN-PrabhatNeural). PC is 8 GB / i3, so a bigger model is not practical; AI reels stay "Review first".
+
+## 2026-11-22 — Task 45: permission mails always in English
+- Owner's rule: permission mails are always English. Three English versions (subject may name the video), signed/sent as "Funny Gunction", still editable before Send. Unsent mails rewritten.
+- AI reel self-healing: helper log can print Hindi (a cp1252 console crashed a script job); the server drops AI topics broken out of Hindi titles and asks again; topics must be plain English words.

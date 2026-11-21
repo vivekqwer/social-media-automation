@@ -19,22 +19,22 @@ LABELS = re.compile(r"music|records|songs|films|movies|studios|pictures|t-series
 
 # Written like a person would write it: short, plain, a little informal, different for each creator,
 # naming the video the owner actually liked. No emojis or polished marketing lines.
-TEMPLATES = [
-    ("Aapki videos ke baare me",
-     "Hi {name},\n\nAapki video \"{video}\" dekhi, sach me maza aa gaya. Main ek chhota YouTube channel chalata hoon jahan "
-     "{about} Shorts daalta hoon.\n\nKya main aapki videos ke chhote clips (30-40 sec) apne Shorts me use kar sakta "
-     "hoon? Har clip me aapka naam aur original video ka link daalunga, taaki log aapke channel pe bhi jaayein.\n\n"
-     "Agar aap mana karoge to bilkul theek hai, koi dikkat nahi. Aur kabhi bhi bolo to turant hata dunga.\n\nThanks,\n{sign}"),
+TEMPLATES = [  # always English (owner's choice); three versions so the mails are not identical
     ("Quick question about your videos",
      "Hey {name},\n\nI've been watching your videos for a while, the \"{video}\" one especially. I run a small channel "
      "where I post {about} Shorts.\n\nWould you be okay with me posting short clips from your videos there? I'd put your name and "
      "a link to the full video in every one.\n\nIf not, no worries at all. And if you ever want something taken down, just "
      "reply here and I'll do it straight away.\n\nThanks,\n{sign}"),
-    ("Ek chhoti si request",
-     "Namaste {name} ji,\n\nMain ek chhota {about} Shorts channel chalata hoon. Aapka content kaafi time se dekh raha hoon, \"{video}\" wali "
-     "video to kamaal thi.\n\nEk request thi. Kya main aapki videos ke chhote clips apne Shorts me daal sakta hoon? Credit me "
-     "aapka naam aur video ka link hamesha rahega.\n\nHaan ya na, jo bhi ho, bas reply kar dena. Mana karoge to koi baat nahi."
-     "\n\nDhanyawad,\n{sign}"),
+    ("About your video \"{video}\"",
+     "Hi {name},\n\nI just watched \"{video}\" and really enjoyed it. I have a small YouTube channel where I post "
+     "{about} Shorts.\n\nCould I use short clips (30-40 seconds) from your videos? Every clip would carry your name and a link "
+     "to the original video, so people can find your channel.\n\nA simple yes or no is fine. If you say no, I won't use "
+     "anything, and you can ask me to remove a clip at any time.\n\nThank you,\n{sign}"),
+    ("A small request",
+     "Hello {name},\n\nBig fan of your content. \"{video}\" was great. I run a small channel of {about} Shorts and "
+     "I'd love to share a few short clips from your videos with full credit: your name and the link to the full video "
+     "in each one.\n\nWould that be alright with you? Just reply yes or no. If it's a no, that's completely fine, and "
+     "I'll take down anything you ask me to.\n\nThanks a lot,\n{sign}"),
 ]
 
 
@@ -53,7 +53,10 @@ def compose(name: str, video_title: str, cid: str) -> tuple[str, str]:
     """(subject, body) — the template is picked from the channel id, so each creator gets one version, always the same."""
     sign, about = mail_identity()
     subj, body = TEMPLATES[sum(map(ord, cid)) % len(TEMPLATES)]
-    return subj, body.format(name=(name or "there").strip(), video=_clean_title(video_title), about=about, sign=sign)
+    video = _clean_title(video_title)
+    if video == "aapki latest video":  # nothing usable in the title
+        video = "your latest video"
+    return subj.format(video=video)[:150], body.format(name=(name or "there").strip(), video=video, about=about, sign=sign)
 
 
 DEFAULT_SIGN, DEFAULT_ABOUT = "Funny Gunction", "funny"
