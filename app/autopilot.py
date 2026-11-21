@@ -344,7 +344,10 @@ def trending_phrase(ch: Channel) -> str:
         if keys and not any(k in text for k in keys):
             continue  # not about this source's subject
         ph = trend_phrase(v["title"], v.get("tags"))
-        if ph and ph not in used:
+        # Hindi titles split into broken letters with \w (vowel signs are not word characters): plain words only
+        if not ph or not re.fullmatch(r"[a-z0-9' ]+", ph) or any(len(w) < 3 for w in ph.split()):
+            continue
+        if ph not in used:
             ch.seen_topics = list(used | {ph})[-200:]
             return ph
     if keys:
