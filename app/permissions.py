@@ -6,12 +6,16 @@ uploads their videos automatically, with credit.
 """
 import json
 import logging
+import re
 
 from .db import Channel, Destination, SessionLocal, get_setting, set_setting, utcnow
 
 log = logging.getLogger(__name__)
 KEY = "creators"
 PER_DAY = 5
+# music labels, film studios and TV networks: they never give fan pages permission and their Content ID strikes
+LABELS = re.compile(r"music|records|songs|films|movies|studios|pictures|t-series|zee|sony|star |colors|tips official|"
+                    r"saregama|aditya|lahari|speed records|bhajan|bhakti|aarti|wave|yrf|dharma|netflix|prime video|news", re.I)
 
 MESSAGE = (
     "Namaste {name} ji! Main aapka bada fan hoon aur aapke videos ke chhote clips (Shorts) ek fan page par post karna chahta hoon — "
@@ -50,7 +54,7 @@ def refresh_inbox() -> list[dict]:
         cid = v.get("channel_id") or ""
         if len(added) + len(new) >= PER_DAY:
             break
-        if not cid or cid in d or youtube.RISKY.search(v.get("title", "")):
+        if not cid or cid in d or youtube.RISKY.search(v.get("title", "")) or LABELS.search(v.get("channel", "")):
             continue
         d[cid] = {"channel_id": cid, "name": v.get("channel", ""), "url": f"https://www.youtube.com/channel/{cid}",
                   "video_id": v["video_id"], "video_title": v.get("title", ""), "views": v.get("views", 0),
