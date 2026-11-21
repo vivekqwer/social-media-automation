@@ -294,7 +294,12 @@ def _status(s, p: dict, creators: dict) -> dict:
     if st == "skipped":
         return {"step": "no", "text": "Skipped"}
     if c.get("mailed"):
-        return {"step": "wait", "text": "Mail sent " + (c.get("asked_at") or "")[:10] + " — waiting for their reply"}
+        sent = ""
+        try:
+            sent = (datetime.fromisoformat(c["asked_at"].rstrip("Z")) + IST).strftime("%d %b, %I:%M %p")
+        except Exception:  # noqa: BLE001
+            pass
+        return {"step": "wait", "text": f"Mail sent {sent} — waiting for their reply (checked every 15 min)"}
     if c.get("email"):
         return {"step": "mail", "text": "Mail ready — press Send", "action": "send", "email": c["email"]}
     return {"step": "mail", "text": "Needs the creator's email", "action": "email"}
