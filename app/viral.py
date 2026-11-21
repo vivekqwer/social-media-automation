@@ -20,7 +20,7 @@ PER_DAY = 5
 KEEP_DAYS = 30
 MIN_SECONDS = 90  # clips are cut from real videos; other people's Shorts are shown but never re-posted
 IST = timedelta(hours=5, minutes=30)
-LIVE_RE = re.compile(r"live|livestream|live stream|stream|premiere", re.I)  # stream replays make poor clips
+LIVE_RE = re.compile(r"\blive\b|livestream|live stream|\bstream\b|\bpremiere\b", re.I)  # stream replays make poor clips
 
 
 def today() -> str:
