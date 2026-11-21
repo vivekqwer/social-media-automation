@@ -241,3 +241,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 ## 2026-11-22 — Task 40: permission mails that read like a person wrote them
 - 3 plain, informal templates (Hinglish / English / Hindi-style), one fixed per creator, naming the creator's actual video (title cleaned of hashtags, emojis and "| Channel" suffix; Hindi kept). Signed with the channel name (setting mail_sign overrides). Subject varies too.
 - Inbox: "See / edit the mail" (subject + text) before Send; edits are kept. Unsent creators were given the new text (/api/permissions/rewrite).
+
+## 2026-11-22 — Task 41: Ollama install survives slow internet
+- winget failed (0x80072ee2 internet timeout; installer is 1.86 GB). Helper now downloads the official OllamaSetup.exe from GitHub releases itself in resumable pieces (HTTP Range; only github.com / githubusercontent hosts accepted), shows % on the dashboard, keeps going after drops (30 s wait, up to 60 failures), then installs silently (/VERYSILENT) and pulls the model.

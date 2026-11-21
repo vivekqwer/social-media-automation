@@ -210,6 +210,55 @@ def _winget_busy() -> bool:
         return False
 
 
+OLLAMA_SETUP_URL = "https://github.com/ollama/ollama/releases/latest/download/OllamaSetup.exe"  # official release only
+
+
+def _download_ollama() -> pathlib.Path:
+    """Download the official installer in pieces; a dropped connection carries on where it stopped (slow internet)."""
+    dest = ROOT / "data" / "worker" / "OllamaSetup.exe.part"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    total, fails, last = 0, 0, 0.0
+    while True:
+        have = dest.stat().st_size if dest.exists() else 0
+        if total and have >= total:
+            break
+        try:
+            hdr = {"Range": f"bytes={have}-"} if have else {}
+            with httpx.stream("GET", OLLAMA_SETUP_URL, headers=hdr, follow_redirects=True,
+                              timeout=httpx.Timeout(60, read=120)) as r:
+                if r.status_code == 416:  # already complete
+                    break
+                r.raise_for_status()
+                if r.status_code == 200 and have:  # server ignored the range: start again
+                    have = 0
+                    dest.unlink(missing_ok=True)
+                size = int(r.headers.get("content-length", 0))
+                total = have + size if size else total
+                if not str(r.url).startswith(("https://github.com/", "https://objects.githubusercontent.com/",
+                                              "https://release-assets.githubusercontent.com/")):
+                    raise RuntimeError("unexpected download location")
+                with open(dest, "ab") as f:
+                    for chunk in r.iter_bytes(1 << 16):
+                        f.write(chunk)
+                        have += len(chunk)
+                        if total and time.time() - last > 20:
+                            last = time.time()
+                            _ai(f"Downloading Ollama: {have * 100 // total}% ({have >> 20} MB of {total >> 20} MB)")
+            fails = 0
+            if not total:
+                break
+        except Exception as e:  # noqa: BLE001
+            fails += 1
+            if fails > 60:
+                raise RuntimeError(f"download keeps failing: {str(e)[:80]}")
+            _ai(f"Internet dropped while downloading Ollama ({have >> 20} MB saved) - carrying on in 30 s")
+            time.sleep(30)
+    final = dest.with_suffix("")  # OllamaSetup.exe
+    final.unlink(missing_ok=True)
+    dest.rename(final)
+    return final
+
+
 def _setup_ai():
     """Install Ollama (winget) and download the model, step by step, so the dashboard can show progress."""
     global _ai_last_fail
@@ -227,12 +276,16 @@ def _setup_ai():
                 time.sleep(60)
                 waited += 60
             if not _ollama_exe():
-                _ai("Installing Ollama (about 1 GB download)...")
-                r = subprocess.run(["winget", "install", "--id", "Ollama.Ollama", "--exact", "--silent",
-                                    "--accept-package-agreements", "--accept-source-agreements"],
-                                   capture_output=True, text=True, timeout=7200, **hidden)
+                setup = _download_ollama()
+                _ai("Installing Ollama...")
+                subprocess.run([str(setup), "/VERYSILENT", "/NORESTART", "/SUPPRESSMSGBOXES"], timeout=1800, **hidden)
+                for _ in range(30):
+                    if _ollama_exe():
+                        break
+                    time.sleep(2)
                 if not _ollama_exe():
-                    raise RuntimeError("Ollama install did not finish: " + (r.stdout or r.stderr or "")[-150:].strip())
+                    raise RuntimeError("the Ollama installer did not finish")
+                setup.unlink(missing_ok=True)
             exe = _ollama_exe()
         try:
             httpx.get(f"{LLM_URL}/api/tags", timeout=3)
