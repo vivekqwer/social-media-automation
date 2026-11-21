@@ -93,3 +93,6 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Basic auth removed; logout ends all sessions; ADMIN_EMAIL alone controls password reset.
 
 - Autopilot topic source #1 "street food india" -> Foody, review first ON, posts 10:00/18:00 IST (added 2026-11-21).
+
+- Git identity is not set in this repo and the privacy plugin blocks passing the email on the command line: ask the owner to run `git config user.email` once, or commit via GitHub web upload (worked 2026-11-21).
+- Railway project is in the Chrome browser named "yaha open karo" (switch_browser); dashboard login there is not saved.

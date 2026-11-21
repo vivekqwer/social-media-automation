@@ -145,3 +145,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Live: topic "street food india" (source #1, review first, 10:00/18:00 IST) produced clips #7 (AfroTalesTV24, 0-35s) and #8 (Mande Manre, 4:25-5:00) via helper analysis; both rendered with face thumbnails; waiting for owner approval.
 - Clip #7 approved on request -> uploaded vKDKFvNMnSY (private, publishes 22 Nov 10:00 IST), thumbnail set automatically. Daily upload cap (5) reached for this Pacific day.
 - Clip #8 approved on request -> queued for 22 Nov 18:00 IST (uploads after the quota reset at 13:30 IST).
+
+## 2026-11-21 — Task 24: Non-CC links handled clearly
+- New clip from a link: a non-CC video in CC mode shows a panel (title, creator, licence, strike warning) with three choices: commentary clip, "I have permission" (note field only then), or find CC videos via a topic source. Permission notes must be real proof (min 20 chars, not just "permission") in new clip, Quick upload and sources. Test 4/4.
+- Deployed by uploading app/main.py + static/index.html through GitHub web (commits 52e4159, 6760019) because the privacy plugin blocks putting the git email in commands; local git has no user.email set. GitHub stored those two files with CRLF line endings (content identical).
