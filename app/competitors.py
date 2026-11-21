@@ -109,7 +109,8 @@ def trending(category: str = "") -> list[dict]:
     raw = get_setting(key)
     if raw:
         cached = json.loads(raw)
-        if datetime.fromisoformat(cached["at"]) > utcnow() - timedelta(hours=6):
+        fresh = datetime.fromisoformat(cached["at"]) > utcnow() - timedelta(hours=6)
+        if fresh and all("channel_id" in it for it in cached["items"]):  # older caches lack the channel and licence
             return cached["items"]
     kw = {"part": "snippet,statistics,status", "chart": "mostPopular", "regionCode": "IN", "maxResults": 30}
     if category:
