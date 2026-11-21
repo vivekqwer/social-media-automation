@@ -6,7 +6,8 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 # free person-cutout model for face thumbnails (no AI service)
-RUN mkdir -p models && curl -fsSL -o models/u2net_human_seg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx
+RUN mkdir -p models && curl -fsSL -o models/u2net_human_seg.onnx https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx \
+    && curl -fsSL -o models/face_detection_yunet.onnx https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx
 COPY app app
 COPY static static
 COPY fonts fonts

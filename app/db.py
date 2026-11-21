@@ -71,6 +71,8 @@ class Clip(Base):
     thumb_note = Column(Text)  # result of setting the thumbnail on YouTube
     thumb_pending = Column(Boolean, default=False)  # YouTube refused it; retried automatically until it works
     short_cover = Column(Boolean, default=True)  # Shorts: show the thumbnail in the first moment of the video
+    reframe = Column(Boolean, default=True)  # Shorts: crop follows the person instead of the centre
+    thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low
     fetch_since = Column(DateTime)  # waiting for the helper PC since
     fetch_tries = Column(Integer, default=0)  # times a helper took the download job
     job_lease = Column(DateTime)  # a helper took this clip's job at; others wait until it expires

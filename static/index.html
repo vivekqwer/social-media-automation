@@ -255,7 +255,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       </section>
 
       <section id="p-analytics" class="hide">
-        <div class="page-h"><div><h1>Analytics</h1><div class="desc" id="an-desc">Live from YouTube — updates every 2 minutes while this page is open.</div></div><button class="btn" id="an-sync"><i data-ico="refresh"></i>Update now</button></div>
+        <div class="page-h"><div><h1>Analytics</h1><div class="desc" id="an-desc">Live from YouTube — updates every 2 minutes while this page is open.</div></div><div class="row" style="gap:8px"><button class="btn outline" id="an-report"><i data-ico="upload"></i>Weekly report (PDF)</button><button class="btn" id="an-sync"><i data-ico="refresh"></i>Update now</button></div></div>
         <div id="an-chans"></div>
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>All videos</h3><p>Every video on your channels, newest first. “New” = views since the last update.</p></div>
           <select id="an-sort" style="width:auto"><option value="date">Newest first</option><option value="views">Most views</option><option value="new">Most new views</option></select></div>
@@ -341,6 +341,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       </div>
       <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
       <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
+      <label class="row sm" style="gap:8px;margin-top:6px" title="Shorts: the crop follows the person instead of the centre"><span class="switch"><input type="checkbox" id="e-reframe" checked><i></i></span>Smart reframe (Shorts follow the person on screen)</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
 
@@ -366,6 +367,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <label class="f">Colour<input id="e-ccol" type="color" value="#ffffff" style="width:56px;padding:3px"></label>
       </div>
       <div class="mut sm">Uses the video's own captions (free). Edit or delete any line below.</div>
+      <div class="mut sm" id="e-cnote"></div>
       <div id="e-cues" style="display:flex;flex-direction:column;gap:6px"></div>
     </div>
 
@@ -450,6 +452,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <div class="f" style="margin-top:14px">Length<div class="opts" id="q-len"><button class="opt on" data-v="auto"><b>Best moment</b><span>Most replayed / most talked-about part</span></button><button class="opt" data-v="whole" disabled><b>Whole video</b><span>Only for Video</span></button></div></div>
     <div class="row" style="margin-top:14px;align-items:flex-end"><label class="f grow">When should it go live?<input id="q-when" type="datetime-local"></label><label class="row sm" style="gap:8px;padding-bottom:9px"><input type="checkbox" id="q-asap"> As soon as it's ready</label></div>
     <label class="row" style="gap:10px;margin-top:14px"><span class="switch"><input type="checkbox" id="q-caps" checked><i></i></span>Add captions (from the video's own subtitles)</label>
+    <label class="f" style="margin-top:14px">How many clips from this video?<select id="q-count"><option value="1">1 — the best moment</option><option value="2">2 — the two best moments</option><option value="3">3 — the three best moments (spread over the next slots)</option></select></label>
     <div class="mut sm" style="margin-top:10px">Automatic: credit to the creator (description + on video), original tags & description, keyword research, thumbnail, upload to your channel.</div>
     <div class="alert hide" id="q-perm" style="margin-top:14px;flex-direction:column;align-items:stretch;gap:10px"><div id="q-perm-msg"></div>
       <input id="q-note" placeholder="How did you get the creator's permission? (e.g. email from … on …)">
@@ -589,6 +592,7 @@ async function loadAnalytics(){
   clearInterval(ANPOLL);ANPOLL=setInterval(async()=>{if($('#p-analytics').classList.contains('hide'))return clearInterval(ANPOLL);try{AN=await api('/api/analytics/sync?live=1','POST');renderAnalytics()}catch(e){}},120000);
 }
 $('#an-sort').onchange=renderAnalytics;
+$('#an-report').onclick=()=>once(async()=>{const r=await api('/api/reports/weekly','POST');window.open('/api/reports/'+r.file,'_blank');toast('Report made — also sent to Telegram if connected')},$('#an-report'));
 $('#an-sync').onclick=()=>once(async()=>{const r=await api('/api/analytics/sync','POST');AN=r;renderAnalytics();toast(r.errors&&r.errors.length?'Some channels could not be read: '+r.errors[0]:'Updated from YouTube',!!(r.errors&&r.errors.length))},$('#an-sync'));
 function ideaRow(v,extra){return `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(v.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(v.title)}</span></a></td><td class="mut sm">${esc(v.channel||'')}</td>${extra}<td style="text-align:right"><button class="btn outline sm" data-topic="${esc(v.title)}">Add as topic</button></td></tr>`}
 async function loadIdeas(){
@@ -873,7 +877,8 @@ function fill(c){
   $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.tts_pending?'Helper PC is making the voice…':(c.voice_path?'Voice attached ✔':'');
   const cs=c.caption_style||{};$('#e-con').checked=!!cs.on;$('#e-clang').value=cs.lang||'auto';$('#e-cpos').value=cs.pos||'bottom';$('#e-csize').value=cs.size||'M';$('#e-ccol').value=cs.color||'#ffffff';
   $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
-  $('#e-credit').checked=c.credit_on!==false;
+  $('#e-cnote').textContent=cs.source==='whisper'?'These captions were written automatically by the helper PC (offline Whisper) because the video has no subtitles — please check the words.':'';
+  $('#e-credit').checked=c.credit_on!==false;$('#e-reframe').checked=c.reframe!==false;
   $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'160px':'280px';
   $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
@@ -920,7 +925,7 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
@@ -976,7 +981,7 @@ $('#q-close').onclick=$('#q-cancel').onclick=$('#q-done').onclick=()=>{$('#m-qui
 async function qStart(){
   const url=$('#q-url').value.trim();if(!url)throw new Error('Paste a video link first');
   let at=null;if(!$('#q-asap').checked){if(!$('#q-when').value)throw new Error('Pick when it should go live');const d=new Date($('#q-when').value);if(d<new Date())throw new Error('That time is in the past — pick a future time or tick “As soon as it\'s ready”');at=d.toISOString()}
-  const body={url,format:QF,length:QL,publish_at:at,captions:$('#q-caps').checked,mode:QMODE,permission_note:$('#q-note').value,destination_id:+$('#q-dest').value||null};
+  const body={url,format:QF,length:QL,publish_at:at,captions:$('#q-caps').checked,mode:QMODE,permission_note:$('#q-note').value,destination_id:+$('#q-dest').value||null,count:QL==='whole'?1:+$('#q-count').value};
   const r=await fetch('/api/quick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   if(r.status===401){location.href='/login';return}
   const j=await r.json().catch(()=>({}));
@@ -992,7 +997,7 @@ $('#q-editor').onclick=()=>{const u=$('#q-url').value.trim();$('#m-quick').class
 const QSTEPS=[['read','Read the video','title, licence, tags, description'],['moment','Find the best moment','most replayed + most talked-about'],['fetch','Get the video','downloaded in full quality'],['render','Cut, captions & credit','rendered for your format'],['thumb','Thumbnail','made automatically'],['sched','Schedule upload','goes live at your time']];
 async function qPoll(){
   let d;try{d=await api('/api/quick/'+QPID)}catch(e){return}
-  $('#q-thumb').src=thumb(d.video_id);$('#q-title').textContent=d.title||'';$('#q-sub').textContent=`${d.channel||''} · ${d.format==='video'?'Video (16:9)':'Shorts (9:16)'}${d.length==='whole'?' · whole video':''}${d.dest_name?' → '+d.dest_name:''}`;
+  $('#q-thumb').src=thumb(d.video_id);$('#q-title').textContent=d.title||'';$('#q-sub').textContent=`${d.channel||''} · ${d.format==='video'?'Video (16:9)':'Shorts (9:16)'}${d.length==='whole'?' · whole video':''}${d.clip_count>1?' · '+d.clip_count+' clips':''}${d.dest_name?' → '+d.dest_name:''}`;
   const c=d.clip,st=c?c.status:null;
   const doneIdx=d.state==='failed'?-1:!c?(d.state==='starting'?0:1):({fetching:2,draft:2,rendering:2,rendered:4,queued:5,uploading:5,uploaded:6,failed:2}[st]??2);
   const thumbDone=c&&c.thumb;const failed=d.state==='failed'||st==='failed';

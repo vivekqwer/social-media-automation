@@ -194,3 +194,12 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Pexels key (encrypted) -> reel jobs pass PEXELS_API_KEY + photo topic to ReelGen for real stock photos.
 - Analytics: channel health score (removals/blocks in 90 days, paused, failed clips, average % watched) and best upload hours (IST, views per day by publish hour, needs 8 public videos).
 - Tests 10/10; all dashboard pages load without JS errors (local).
+
+## 2026-11-21 — Task 34: Multi-clip Quick upload, Whisper captions, reframe, thumbnail swap, weekly report, backup
+- Quick upload: 1-3 clips from one video (non-overlapping best moments; first at the chosen time, the rest in the next free slots).
+- Whisper captions (helper PC, faster-whisper "small", CPU, offline): when a clip wants captions and the video has none, the source job carries transcribe+hint; the helper writes timed cues (Hindi hint from title/tags) and posts /api/worker/captions/{id} before the video; existing captions are never overwritten; editor shows a "check the words" note. Audio decoded with our ffmpeg (PyAV version clash avoided).
+- Smart reframe (app/reframe.py): YuNet face detector (OpenCV 5; model baked in Docker) samples 8 frames; 9:16/1:1 crop centres on the main person; centre crop when no clear person or on any error. Editor switch.
+- Thumbnail auto-swap (app/growth.py): daily 11:30 IST, clips uploaded 2-10 days ago with views/day < 40% of the channel median get a second-best-frame thumbnail once (max 2/day, quota-safe), Telegram note.
+- Weekly report PDF (reportlab): Sunday 9:05 PM IST to Telegram + "Weekly report" button on Analytics; /api/reports.
+- Backup: helper saves the dashboard data daily to backups/ on the PC (14 kept); stats tables skipped.
+- Tests: multi 5/5, whisper 5/5, batch 10/10, render e2e 3/3, all 15 regression suites pass; dashboard JS syntax checked.

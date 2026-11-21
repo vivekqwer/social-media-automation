@@ -55,26 +55,56 @@ def quick_run(pid: int):
                         _set(s, p, state="analyzing", step="Your helper PC is reading the video")
                         return
                 if p.moments:
-                    start, end = float(p.moments[0]["start"]), float(p.moments[0]["end"])
-                else:  # no signal at all: take a slice from the first third
-                    start = max(0.0, (p.duration or want) * 0.3)
-                    end = min(float(p.duration or start + want), start + want)
-            c = Clip(project_id=p.id, start=start, end=end, aspect="9:16" if fmt == "shorts" else "16:9",
-                     effects=["fade"], overlays=[], destination_id=dest.id, autoqueue=True, publish_at=_utc(q.get("publish_at")))
-            s.add(c)
-            s.commit()
-            if q.get("captions", True):
-                try:
-                    cues = parse_json3(p.caption_track, start, end) if p.caption_track else fetch_cues(p.video_id, start, end)
-                    if cues:
-                        c.captions, c.caption_style = cues, dict(CAPTION_STYLE)
-                        s.commit()
-                except Exception:  # noqa: BLE001  (no captions on this video) -> upload without
-                    pass
-            cid = c.id
-            _set(s, p, clip_id=cid, state="rendering", step="Cutting and rendering")
+                    ranges = [(float(m["start"]), float(m["end"])) for m in p.moments]
+                else:  # no signal at all: slices from the middle part of the video
+                    dur = float(p.duration or want)
+                    ranges = [(max(0.0, dur * f), min(dur, dur * f + want)) for f in (0.3, 0.5, 0.7)]
+            count = max(1, min(3, int(q.get("count") or 1)))
+            if q.get("length") == "whole" and fmt == "video":
+                ranges = [(start, end)]
+            ranges = _distinct(ranges)[:count]
+            first_at = _utc(q.get("publish_at"))
+            ids = []
+            for i, (start, end) in enumerate(ranges):
+                c = Clip(project_id=p.id, start=start, end=end, aspect="9:16" if fmt == "shorts" else "16:9",
+                         effects=["fade"], overlays=[], destination_id=dest.id, autoqueue=True,
+                         publish_at=first_at if i == 0 else _later_slot(s, dest.id, first_at))
+                s.add(c)
+                s.commit()
+                if q.get("captions", True):
+                    try:
+                        cues = parse_json3(p.caption_track, start, end) if p.caption_track else fetch_cues(p.video_id, start, end)
+                        if cues:
+                            c.captions, c.caption_style = cues, dict(CAPTION_STYLE)
+                            s.commit()
+                    except Exception:  # noqa: BLE001  (no captions on this video) -> upload without
+                        pass
+                ids.append(c.id)
+            _set(s, p, clip_id=ids[0], clip_ids=ids, state="rendering", step="Cutting and rendering")
         except Exception as e:  # noqa: BLE001
             _set(s, p, state="failed", step=str(e)[:300])
             return
-    auto_metadata(cid)  # credit + original tags/description + keywords, so it can queue itself after render
-    run_render(cid)
+    for cid in ids:
+        auto_metadata(cid)  # credit + original tags/description + keywords, so it can queue itself after render
+        run_render(cid)
+
+
+def _distinct(ranges: list) -> list:
+    """Moments that don't overlap each other (so 3 clips are 3 different parts of the video)."""
+    out = []
+    for a, b in ranges:
+        if all(b <= x or a >= y for x, y in out):
+            out.append((a, b))
+    return out
+
+
+def _later_slot(s, dest_id: int, after):
+    """The next free daily slot after the first clip (respects the daily upload budget)."""
+    from datetime import timedelta
+
+    from .autopilot import _next_slot
+
+    slot = _next_slot(s, 12, dest_id)
+    if after and slot <= after:
+        slot = after + timedelta(hours=12)
+    return slot

@@ -317,6 +317,7 @@ class ClipUpdate(BaseModel):
     caption_style: CaptionStyle | None = None
     credit_on: bool | None = None
     short_cover: bool | None = None
+    reframe: bool | None = None
 
 
 class TtsIn(BaseModel):
@@ -461,7 +462,8 @@ def _render_sig(c: Clip) -> tuple:
     caps = (tuple((r2(x.get("s")), r2(x.get("e")), str(x.get("t", "")).strip()) for x in (c.captions or [])),
             st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
-            r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False)
+            r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False,
+            c.reframe is not False)
 
 
 @app.put("/api/clips/{cid}")
@@ -1021,6 +1023,42 @@ def scan_competitors():
     return competitors.scan()
 
 
+# ---------- weekly report + backup ----------
+@app.post("/api/reports/weekly")
+def make_weekly():
+    from .growth import weekly_report
+
+    p = weekly_report()
+    if not p:
+        raise HTTPException(500, "The report could not be made right now.")
+    return {"file": p.name}
+
+
+@app.get("/api/reports")
+def list_reports():
+    d = DATA_DIR / "reports"
+    return sorted((f.name for f in d.glob("weekly-*.pdf")), reverse=True)[:20] if d.exists() else []
+
+
+@app.get("/api/reports/{name}")
+def get_report(name: str):
+    if not re.fullmatch(r"weekly-\d{4}-\d{2}-\d{2}\.pdf", name):
+        raise HTTPException(404, "Not found")
+    p = DATA_DIR / "reports" / name
+    if not p.exists():
+        raise HTTPException(404, "Not found")
+    return FileResponse(p, media_type="application/pdf", filename=name)
+
+
+@app.get("/api/worker/backup")
+def worker_backup(request: Request):
+    """The helper PC keeps a daily copy of the dashboard's data on your own computer."""
+    _worker_or_401(request)
+    from .growth import backup_data
+
+    return backup_data()
+
+
 # ---------- small settings: affiliate rules, Pexels key ----------
 def _secret_setting(key: str) -> str:
     raw = get_setting(key)
@@ -1363,7 +1401,10 @@ def worker_jobs(request: Request):
                     job["pexels_key"], job["photo_query"] = pk, (ch.query if ch and ch.query else "") or p.title
                 jobs.append(job)
                 continue
-            jobs.append({"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end})
+            job = {"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end}
+            if not c.captions and _wants_captions(s, p, c):  # no subtitles on YouTube: the helper writes them
+                job["transcribe"], job["hint"] = True, f"{p.title} {' '.join(p.tags or [])} {(p.description or '')[:300]}"
+            jobs.append(job)
         for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
             if c.status == "fetching" or not free(c.job_lease):
                 continue
@@ -1384,6 +1425,37 @@ def worker_jobs(request: Request):
                          "captions": bool((p.quick or {}).get("captions", True))})
         s.commit()
     return {"jobs": jobs, "version": SERVER_VERSION}
+
+
+def _wants_captions(s, p: Project, c: Clip) -> bool:
+    if (c.caption_style or {}).get("off"):
+        return False
+    if p.quick:
+        return bool(p.quick.get("captions", True))
+    ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
+    return bool(ch and ch.captions)
+
+
+class CaptionsIn(BaseModel):
+    cues: list[dict] = Field(max_length=2000)
+    lang: str = Field("", max_length=10)
+
+
+@app.post("/api/worker/captions/{cid}")
+def worker_captions(cid: int, body: CaptionsIn, request: Request):
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.captions:
+            return {"ok": True, "kept": "existing"}
+        cues = [{"s": float(x.get("s", 0)), "e": float(x.get("e", 0)), "t": str(x.get("t", ""))[:200]}
+                for x in body.cues if str(x.get("t", "")).strip()][:2000]
+        if cues:
+            c.captions = cues
+            c.caption_style = {"on": True, "lang": body.lang or "auto", "pos": "bottom", "size": "M", "color": "#ffffff",
+                               "source": "whisper"}
+            s.commit()
+    return {"ok": True, "lines": len(cues)}
 
 
 JOB_LEASE = timedelta(minutes=40)  # a helper that took a job gets this long before another may take it
@@ -1544,6 +1616,7 @@ class QuickIn(BaseModel):
     mode: Literal["cc", "permission"] = "cc"
     permission_note: str = Field("", max_length=2000)
     destination_id: int | None = None  # which of my channels to upload to
+    count: int = Field(1, ge=1, le=3)  # clips from this video (different best moments)
 
 
 @app.post("/api/quick")
@@ -1575,7 +1648,7 @@ def quick_start(body: QuickIn):
     with SessionLocal() as s:
         p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note,
                     quick={"format": body.format, "length": body.length, "publish_at": body.publish_at,
-                           "captions": body.captions, "destination_id": body.destination_id,
+                           "captions": body.captions, "destination_id": body.destination_id, "count": body.count,
                            "state": "starting", "step": "Reading the video"}, **info)
         s.add(p)
         s.commit()
@@ -1588,6 +1661,7 @@ def _quick_dict(s, p: Project) -> dict:
     q = p.quick or {}
     out = {"project_id": p.id, "state": q.get("state"), "step": q.get("step"), "format": q.get("format"),
            "length": q.get("length"), "title": p.title, "channel": p.channel, "video_id": p.video_id, "clip": None,
+           "clip_count": len(q.get("clip_ids") or ([q["clip_id"]] if q.get("clip_id") else [])),
            "dest_name": None}
     if q.get("clip_id"):
         c = s.get(Clip, q["clip_id"])

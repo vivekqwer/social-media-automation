@@ -67,23 +67,24 @@ def _score(rgb: np.ndarray) -> float:
     return s * (0.3 if light < 45 or light > 215 else 1.0)
 
 
-def _best_time(src: Path, dur: float) -> float:
-    best, at = -1.0, dur * 0.35
+def _best_time(src: Path, dur: float, rank: int = 0) -> float:
+    scored = []
     for f in (0.12, 0.22, 0.32, 0.42, 0.52, 0.62, 0.72, 0.85):
         t = dur * f
         r = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
                             "-vf", "scale=192:108", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
         if r.returncode or len(r.stdout) != 192 * 108 * 3:
             continue
-        sc = _score(np.frombuffer(r.stdout, np.uint8).reshape(108, 192, 3))
-        if sc > best:
-            best, at = sc, t
-    return at
+        scored.append((_score(np.frombuffer(r.stdout, np.uint8).reshape(108, 192, 3)), t))
+    if not scored:
+        return dur * 0.35
+    scored.sort(reverse=True)
+    return scored[min(rank, len(scored) - 1)][1]  # rank 1 = second-best frame (for the auto-swap variant)
 
 
-def _frame(src: Path, W: int, H: int, out: Path):
+def _frame(src: Path, W: int, H: int, out: Path, variant: int = 0):
     dur = stream_seconds(src, "v:0") or 10.0
-    at = _best_time(src, dur)
+    at = _best_time(src, dur, rank=2 if variant else 0)
     vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.12:saturation=1.35"
     r = subprocess.run([ffmpeg_bin(), "-y", "-ss", f"{at:.2f}", "-i", str(src), "-frames:v", "1", "-vf", vf, str(out)],
                        capture_output=True, text=True)
@@ -119,7 +120,8 @@ def make_thumbnail(clip, project) -> Path:
     src = workdir / "body.mp4" if (workdir / "body.mp4").exists() else Path(clip.output_path)  # without the Shorts cover
     portrait = clip.aspect == "9:16"
     W, H = (1080, 1920) if portrait else (1280, 720)
-    _frame(src, W, H, workdir / "thumb_frame.png")
+    variant = int(getattr(clip, "thumb_variant", 0) or 0)
+    _frame(src, W, H, workdir / "thumb_frame.png", variant)
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
 
     face = None
@@ -155,7 +157,7 @@ def make_thumbnail(clip, project) -> Path:
     bw, bh = box[2] - box[0], box[3] - box[1]
     size, lines, lh = _fit(text, ffile, bw, bh, 3, int(H * (0.105 if portrait else 0.22)), int(H * (0.04 if portrait else 0.09)))
     fs = lh  # libass sizes a font by its full line height; Pillow by the em
-    yellow = len(lines) - 1 if len(lines) > 1 else -1  # last line highlighted
+    yellow = (0 if variant else len(lines) - 1) if len(lines) > 1 else -1  # variant highlights the first line
     step = lh * 0.92 if fname == HINDI_FONT[0] else size * 1.06  # tight lines (Anton's own line gap is huge)
     x = int(box[0]) if anchor == 4 else W // 2
     y0 = (box[1] + box[3]) / 2 - step * (len(lines) - 1) / 2

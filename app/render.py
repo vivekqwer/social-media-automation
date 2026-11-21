@@ -117,9 +117,12 @@ def _has_audio(path) -> bool:
 
 
 def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
-                 credit: str = "") -> str:
+                 credit: str = "", subject: float | None = None) -> str:
     if clip.aspect == "16:9":
         chain = [f"scale={W}:{H}:force_original_aspect_ratio=decrease", f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"]
+    elif subject is not None:  # smart reframe: keep the person in the picture instead of the centre
+        chain = [f"scale={W}:{H}:force_original_aspect_ratio=increase",
+                 f"crop={W}:{H}:x='max(0,min(iw-ow,{subject}*iw-ow/2))':y='(ih-oh)/2'"]
     else:
         chain = [f"scale={W}:{H}:force_original_aspect_ratio=increase", f"crop={W}:{H}"]
     fx = clip.effects or []
@@ -167,6 +170,14 @@ class NeedsHelper(RuntimeError):
     """The helper PC must make this (e.g. a ReelGen reel) before it can be rendered."""
 
 
+def _subject(clip: Clip, src: Path, project: Project) -> float | None:
+    if clip.aspect == "16:9" or clip.reframe is False or project.mode == "original":
+        return None
+    from .reframe import subject_x
+
+    return subject_x(src)
+
+
 def render_clip(project: Project, clip: Clip) -> Path:
     workdir = DATA_DIR / "clips" / str(clip.id)
     workdir.mkdir(parents=True, exist_ok=True)
@@ -186,7 +197,8 @@ def render_clip(project: Project, clip: Clip) -> Path:
         cmd += ["-i", str(clip.voice_path)]
     cmd += [
         "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
-                                         f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else ""),
+                                         f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else "",
+                                         _subject(clip, src, project)),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "body.tmp.mp4",

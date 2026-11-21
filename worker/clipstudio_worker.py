@@ -160,6 +160,8 @@ def handle(job: dict, headers: dict):
             if job["type"] == "source":
                 log(f"clip {cid}: downloading {job['video_id']} {job['start']:.0f}-{job['end']:.0f}s")
                 path = download_section(job["video_id"], job["start"], job["end"], pathlib.Path(d))
+                if job.get("transcribe"):  # the video has no subtitles: write captions here (offline Whisper)
+                    send_captions(job, path, headers)
                 with open(path, "rb") as f:
                     r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
                               files={"file": ("source.mp4", f, "video/mp4")}, timeout=900)
@@ -181,6 +183,47 @@ def handle(job: dict, headers: dict):
         except Exception as e:  # noqa: BLE001
             log(f"clip {cid}: failed: {str(e)[:200]}")
             _tell_failed(cid, job["type"], friendly_error(e), headers)
+
+
+def send_captions(job: dict, path: pathlib.Path, headers: dict):
+    try:
+        from app.config import ffmpeg_bin
+        from transcribe import cues_for
+
+        lead = job["start"] - int(job["start"])  # the section starts at the whole second before the clip
+        log(f"clip {job['clip_id']}: writing captions (offline Whisper)")
+        cues, lang = cues_for(path, ffmpeg_bin(), lead, job["end"] - job["start"], job.get("hint", ""))
+        r = _post(f"{SERVER}/api/worker/captions/{job['clip_id']}", headers, json={"cues": cues, "lang": lang}, timeout=60)
+        log(f"clip {job['clip_id']}: {len(cues)} caption lines ({lang}) -> {r.status_code}")
+    except Exception as e:  # noqa: BLE001  (captions are a bonus; the video still goes up)
+        log(f"clip {job['clip_id']}: captions skipped: {str(e)[:150]}")
+
+
+BACKUP_DIR = ROOT / "backups"
+
+
+def backup_daily(headers: dict):
+    """Once a day: save the dashboard's data (not the videos) to backups/ on this PC; keep 14 days."""
+    import gzip
+    import json
+
+    day = time.strftime("%Y-%m-%d")
+    out = BACKUP_DIR / f"clipstudio-{day}.json.gz"
+    if out.exists():
+        return
+    try:
+        r = httpx.get(f"{SERVER}/api/worker/backup", headers=headers, timeout=120)
+        r.raise_for_status()
+        BACKUP_DIR.mkdir(exist_ok=True)
+        tmp = out.with_suffix(".tmp")
+        with gzip.open(tmp, "wt", encoding="utf-8") as f:
+            json.dump(r.json(), f)
+        os.replace(tmp, out)
+        for old in sorted(BACKUP_DIR.glob("clipstudio-*.json.gz"))[:-14]:
+            old.unlink(missing_ok=True)
+        log(f"backup saved: {out.name}")
+    except Exception as e:  # noqa: BLE001
+        log(f"backup skipped: {str(e)[:120]}")
 
 
 def make_reel(script: str, voice: str, out: pathlib.Path, pexels_key: str = "", photo_query: str = ""):
@@ -236,6 +279,7 @@ def main():
                 data = r.json()
                 for job in data.get("jobs", []):
                     handle(job, headers)
+                backup_daily(headers)
                 if time.time() - last_update_check > UPDATE_EVERY:
                     last_update_check = time.time()
                     maybe_update(data.get("version", ""))
