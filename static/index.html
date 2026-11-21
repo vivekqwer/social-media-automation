@@ -189,6 +189,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
     <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
     <button class="nav" data-p="analytics"><i data-ico="chart"></i>Analytics</button>
+    <button class="nav" data-p="ideas"><i data-ico="sparkles"></i>Ideas</button>
     <button class="nav" data-p="alerts"><i data-ico="bell"></i>Alerts<span class="count" id="b-alerts" style="display:none;background:var(--bad)"></span></button>
     <button class="nav quick" id="nav-quick"><i data-ico="zap"></i>Quick upload</button>
     <div class="grp">Account</div>
@@ -259,6 +260,15 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>All videos</h3><p>Every video on your channels, newest first. “New” = views since the last update.</p></div>
           <select id="an-sort" style="width:auto"><option value="date">Newest first</option><option value="views">Most views</option><option value="new">Most new views</option></select></div>
           <div class="tw" id="an-videos"></div></div>
+      </section>
+
+      <section id="p-ideas" class="hide">
+        <div class="page-h"><div><h1>Ideas</h1><div class="desc">What is working right now — use it for topics and titles (make your own version; don't re-upload other people's videos).</div></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Competitor tracker</h3><p id="id-desc">Channels you watch. Every day the system finds their videos doing 3× or more better than usual.</p></div><button class="btn outline sm" id="id-scan">Check now</button></div>
+          <div class="cb"><div class="row"><input id="id-q" class="grow" autocomplete="off" placeholder="Channel link or @handle, e.g. @kabitaskitchen"><button class="btn" id="id-add">Track</button></div><div id="id-chans" class="row" style="gap:6px;margin-top:10px"></div></div>
+          <div class="tw" id="id-out"></div></div>
+        <div class="card"><div class="ch"><div><h3>Trending in India</h3><p>YouTube's trending list, updated every 6 hours.</p></div><select id="id-cat" style="width:auto"><option value="">All</option><option value="26">Howto &amp; Style (food, recipes)</option><option value="22">People &amp; Blogs</option><option value="24">Entertainment</option><option value="23">Comedy</option><option value="10">Music</option><option value="20">Gaming</option></select></div>
+          <div class="tw" id="id-trend"></div></div>
       </section>
 
       <section id="p-alerts" class="hide">
@@ -504,12 +514,12 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',alerts:'Alerts',settings:'My channels'};
+const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -571,6 +581,23 @@ async function loadAnalytics(){
 }
 $('#an-sort').onchange=renderAnalytics;
 $('#an-sync').onclick=()=>once(async()=>{const r=await api('/api/analytics/sync','POST');AN=r;renderAnalytics();toast(r.errors&&r.errors.length?'Some channels could not be read: '+r.errors[0]:'Updated from YouTube',!!(r.errors&&r.errors.length))},$('#an-sync'));
+function ideaRow(v,extra){return `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(v.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(v.title)}</span></a></td><td class="mut sm">${esc(v.channel||'')}</td>${extra}<td style="text-align:right"><button class="btn outline sm" data-topic="${esc(v.title)}">Add as topic</button></td></tr>`}
+async function loadIdeas(){
+  $('#id-out').innerHTML=$('#id-trend').innerHTML='<div class="cb">'+skel(2)+'</div>';
+  const d=await api('/api/ideas?category='+$('#id-cat').value);
+  $('#id-desc').textContent='Channels you watch. Every day the system finds their videos doing 3× or more better than usual'+(d.checked_at?' · last check '+when(d.checked_at):'')+'.';
+  $('#id-chans').innerHTML=d.channels.map(c=>`<span class="badge outline">${esc(c.name)} <button class="btn ghost sm icon" data-unc="${esc(c.url)}" title="Stop tracking" style="height:18px;width:18px;padding:0">${ico('x')}</button></span>`).join('')||'<span class="mut sm">No channels yet — add the channels in your niche.</span>';
+  $('#id-out').innerHTML=d.outliers.length?`<table class="tbl"><thead><tr><th>Video doing well</th><th>Channel</th><th style="text-align:right">× normal</th><th style="text-align:right">Views</th><th style="text-align:right">Age</th><th></th></tr></thead><tbody>${d.outliers.map(v=>ideaRow(v,`<td style="text-align:right"><b>${v.ratio}×</b></td><td style="text-align:right">${num(v.views)}</td><td style="text-align:right" class="mut sm">${v.age_days} d</td>`)).join('')}</tbody></table>`
+    :`<div class="cb mut sm">${d.channels.length?'No outliers right now — the check runs every day.':''}</div>`;
+  $('#id-trend').innerHTML=d.trending_error?`<div class="cb mut sm">${esc(d.trending_error)}</div>`:d.trending.length?`<table class="tbl"><thead><tr><th>Trending video</th><th>Channel</th><th style="text-align:right">Views</th><th></th></tr></thead><tbody>${d.trending.map(v=>ideaRow(v,`<td style="text-align:right">${num(v.views)}</td>`)).join('')}</tbody></table>`:'<div class="cb mut sm">Nothing yet.</div>';
+  $$('[data-unc]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/ideas/competitors?url='+encodeURIComponent(b.dataset.unc),'DELETE');loadIdeas()}));
+  $$('[data-topic]').forEach(b=>b.onclick=()=>{const words=""" + JS_TOPIC + """.filter(w=>w.length>2).slice(0,4).join(' ').toLowerCase();
+    const t=prompt('Add this as a topic source (Creative Commons videos only). Edit the words if you like:',words);if(!t)return;
+    once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
+}
+$('#id-cat').onchange=()=>once(loadIdeas);
+$('#id-add').onclick=()=>once(async()=>{const q=$('#id-q').value.trim();if(!q)throw new Error('Type a channel link or @handle');await api('/api/ideas/competitors','POST',{query:q});$('#id-q').value='';toast('Tracking — press Check now or wait for the daily check');loadIdeas()},$('#id-add'));
+$('#id-scan').onclick=()=>once(async()=>{await api('/api/ideas/scan','POST');toast('Checked');loadIdeas()},$('#id-scan'));
 async function loadAlerts(){
   $('#al-list').innerHTML=skel(2);
   let d;try{d=await api('/api/alerts')}catch(e){return fail(e)}

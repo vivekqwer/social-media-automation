@@ -976,6 +976,49 @@ class ReviewIn(BaseModel):
     review_first: bool
 
 
+# ---------- Ideas: competitor outliers + trending (optional module) ----------
+class CompIn(BaseModel):
+    query: str = Field(min_length=2, max_length=300)
+
+
+@app.get("/api/ideas")
+def ideas(category: str = ""):
+    from . import competitors
+
+    if not re.fullmatch(r"\d{0,3}", category):
+        raise HTTPException(400, "bad category")
+    out = {**competitors.overview(), "trending": [], "trending_error": None}
+    try:
+        out["trending"] = competitors.trending(category)
+    except Exception as e:  # noqa: BLE001
+        out["trending_error"] = str(e)[:200]
+    return out
+
+
+@app.post("/api/ideas/competitors")
+def add_competitor(body: CompIn):
+    from . import competitors
+
+    try:
+        return competitors.add(body.query.strip())
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Could not find that channel: {str(e)[:150]}")
+
+
+@app.delete("/api/ideas/competitors")
+def del_competitor(url: str):
+    from . import competitors
+
+    return competitors.remove(url)
+
+
+@app.post("/api/ideas/scan")
+def scan_competitors():
+    from . import competitors
+
+    return competitors.scan()
+
+
 # ---------- Telegram remote control (optional module) ----------
 class TgIn(BaseModel):
     token: str = Field(min_length=20, max_length=200)

@@ -253,6 +253,9 @@ def start():
     from .telegram import daily_summary, poll
     sch.add_job(poll, "interval", seconds=20, max_instances=1, coalesce=True)
     sch.add_job(check_helper, "interval", minutes=30, max_instances=1, coalesce=True)
+    from .competitors import scan_if_due
+    sch.add_job(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=8))
     sch.add_job(daily_summary, "cron", hour=15, minute=30, max_instances=1, coalesce=True)  # 9:00 PM IST
     sch.add_job(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))

@@ -181,3 +181,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - app/telegram.py: token from @BotFather pasted by the owner in My channels (stored encrypted, checked with getMe); chat linked by sending "/start CODE" (one-time code); messages from any other chat are ignored. Polled every 20 s (no webhook).
 - Alerts: upload done/failed, YouTube problems (monitor), clip ready to review (with Approve/Discard buttons), clip failed, helper offline (max every 2 h), daily summary 9 PM IST. Commands: /status, /review, /stats, /pause, /resume, /help.
 - Every call is wrapped: Telegram errors never affect uploads or renders. Test with a fake Telegram API 9/9; regressions pass.
+
+## 2026-11-21 — Task 32: Ideas page (competitor tracker + trending)
+- app/competitors.py: owner adds channels to watch; daily (and "Check now") the newest 30 videos of each are compared on views per day with that channel's median; 3x or more (and 1,000+ views, under 30 days old) = outlier. Telegram gets the top 3. Never uses the upload budget.
+- Trending in India: YouTube mostPopular chart by category, cached 6 h (1 unit).
+- Ideas page: tracked channels, outliers table, trending table, "Add as topic" (creates a CC-only topic source with Review first on). Test 5/5.
