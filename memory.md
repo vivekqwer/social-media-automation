@@ -112,3 +112,6 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Local AI is installed by the helper itself from the dashboard (Install now); progress in checklist.
 - Viral today page (app/viral.py): dated board every 2 h + 5 picks/day; CC/allowed clipped at once, others need owner's one-press "Send all ready mails"; a plain yes clips that video automatically. YouTube quota fits ~5-6 uploads/day across all sources.
 - Gotcha: writing regex via bash/python heredocs can turn `` into a backspace char (0x08) — grep for $'' after patches.
+- Owner rule (2026-11-22): permission mails are ALWAYS in English, signed and sent as "Funny Gunction"; never name the Foody/food channel in mails.
+- Local AI = Ollama qwen2.5:3b on the helper PC (8 GB RAM, i3-7100U: no bigger model). Its Hinglish is poor, English is usable; AI scripts are checked server-side (autopilot.script_problem) and rewritten when bad. Both reel sources currently have "Review first" OFF.
+- Postgres gotcha: empty JSON columns are JSON null and pass IS NOT NULL — always `x or {}`.
