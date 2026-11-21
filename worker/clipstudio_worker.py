@@ -64,6 +64,12 @@ def _git(*args) -> subprocess.CompletedProcess:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, timeout=120, env=GIT_ENV)
 
 
+try:  # the code version this process started with
+    STARTED_AT = _git("rev-parse", "HEAD").stdout.strip()
+except Exception:  # noqa: BLE001
+    STARTED_AT = ""
+
+
 def maybe_update(server_version: str):
     """Move the helper's code to exactly the commit the server runs (fast-forward only), then restart (exit 4).
     The code always comes from GitHub over HTTPS; the server only says which commit."""
@@ -73,8 +79,13 @@ def maybe_update(server_version: str):
         if EXPECTED_ORIGIN not in _git("remote", "get-url", "origin").stdout:
             return
         head = _git("rev-parse", "HEAD").stdout.strip()
-        if head == server_version or _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
-            return  # up to date, or local edits we must not touch
+        if head == server_version:
+            if STARTED_AT and head != STARTED_AT:  # the folder already has the new code, but this process runs the old
+                log("New helper code is in the folder. Restarting...")
+                sys.exit(EXIT_UPDATED)
+            return  # up to date
+        if _git("status", "--porcelain", "--untracked-files=no").stdout.strip():
+            return  # local edits we must not touch
         if _git("fetch", "--quiet", "origin", "main").returncode:
             return
         ahead = _git("merge-base", "--is-ancestor", "HEAD", server_version).returncode == 0

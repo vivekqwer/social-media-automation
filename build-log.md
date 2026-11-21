@@ -203,3 +203,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Weekly report PDF (reportlab): Sunday 9:05 PM IST to Telegram + "Weekly report" button on Analytics; /api/reports.
 - Backup: helper saves the dashboard data daily to backups/ on the PC (14 kept); stats tables skipped.
 - Tests: multi 5/5, whisper 5/5, batch 10/10, render e2e 3/3, all 15 regression suites pass; dashboard JS syntax checked.
+- Helper fix: it runs from the same git folder the code is committed in, so "HEAD == server version" hid that the running process had old code. The helper now remembers the commit it started with and restarts (exit 4) when the folder has newer code.
