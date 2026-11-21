@@ -319,18 +319,43 @@ def trend_phrase(title: str, tags: list | None = None) -> str:
     return " ".join(words[:3]) if len(words) >= 2 else ""
 
 
+ANGLES = ["an interesting history fact", "a surprising myth vs truth", "the most famous example in India",
+          "a quick tip most people don't know", "how it is made or done", "a famous one from a big Indian city",
+          "a record-breaking fact", "a festival or tradition linked to it", "a healthy or smart way to enjoy it",
+          "something that changed over the last 50 years"]
+GENERIC = {"trends", "trend", "trending", "facts", "fact", "videos", "video", "reels", "reel", "shorts", "short", "ideas", "tips"}
+
+
 def trending_phrase(ch: Channel) -> str:
-    """The best trending topic this source has not used yet (songs, films and TV shows are skipped)."""
+    """Next topic for this source's local-AI script, not used before.
+
+    A text subject (e.g. "Food trends"): a trending India video about that subject if there is one, else the subject
+    with a fresh angle (history, myth vs truth, ...), so the script always stays on the source's subject.
+    A YouTube category id: today's trending videos of that category (songs, films and TV shows are skipped)."""
     from .competitors import trending
 
     used = set((ch.seen_topics or []))
-    for v in trending(ch.query if (ch.query or "").isdigit() else ""):
+    q = (ch.query or "").strip()
+    keys = [w for w in re.findall(r"[\w']+", q.lower()) if w not in GENERIC and w not in STOP]
+    for v in trending(q if q.isdigit() else ""):
         if youtube.RISKY.search(v["title"]):
             continue
+        text = (v["title"] + " " + " ".join(v.get("tags") or [])).lower()
+        if keys and not any(k in text for k in keys):
+            continue  # not about this source's subject
         ph = trend_phrase(v["title"], v.get("tags"))
         if ph and ph not in used:
             ch.seen_topics = list(used | {ph})[-200:]
             return ph
+    if keys:
+        subject = " ".join(keys)
+        for angle in ANGLES:
+            ph = f"Indian {subject}: {angle}" if "india" not in subject else f"{subject}: {angle}"
+            if ph not in used:
+                ch.seen_topics = list(used | {ph})[-200:]
+                return ph
+        ch.seen_topics = []  # every angle used: start the round again
+        return f"Indian {subject}: {ANGLES[0]}"
     return ""
 
 

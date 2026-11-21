@@ -340,18 +340,43 @@ def start_ai_setup():
     _ai_thread.start()
 
 
+HINGLISH_EXAMPLE = (
+    "Kya aap jaante ho ki samosa asal mein India ka nahi hai? Ye Central Asia se aaya tha, jahan isse sambosa kehte the. "
+    "Pehle isme aloo nahi, keema bhara jaata tha. Aloo wala samosa tab bana jab Portuguese aloo India laaye. "
+    "Aaj India mein roz lakhon samose bikte hain. Aapko samosa chutney ke saath pasand hai ya bina? Comment karo aur follow karo!")
+
+
+def _script_prompt(topic: str, lang: str) -> str:
+    rules = ("6 to 8 short, simple sentences. Start with a surprising question. Give 3 facts that are well known and "
+             "certainly true (if unsure, give a simple tip instead of a fact). End by asking viewers to comment and follow. "
+             "No labels like 'Fact one', no hashtags, emojis, quotes or scene directions. Output only the script.")
+    if lang == "hi":
+        return ("You write YouTube Shorts voice-overs in Hinglish: Hindi words written in English (Roman) letters. "
+                "Never use Devanagari script.\n\nExample script about samosa:\n" + HINGLISH_EXAMPLE
+                + f"\n\nNow write a new script in the same style about: {topic}.\nRules: " + rules)
+    return f"Write a 30-second YouTube Shorts voice-over in simple English about: {topic}.\nRules: " + rules
+
+
+def _clean_script(raw: str) -> str:
+    text = " ".join(line.strip().lstrip("-*0123456789.) ") for line in (raw or "").splitlines() if line.strip())
+    text = re.sub(r"(?i)\b(true )?fact (one|two|three|1|2|3)[:.,]\s*|\b(first|second|third|final)(ly)?,\s*", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"([.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)  # after removed "First," etc.
+    return text[:1].upper() + text[1:]
+
+
 def write_script(job: dict, headers: dict):
     topic, lang = job["topic"], job.get("lang") or "hi"
-    ask = (f"Write a 30-second YouTube Shorts voice-over script about: {topic}.\n"
-           + ("Write in simple Hinglish (Hindi in Roman letters). " if lang == "hi" else "Write in simple English. ")
-           + "6 to 8 short sentences. Start with a surprising hook question. Give 3 interesting, true, general facts or tips. "
-             "End by asking viewers to comment and follow. No hashtags, no emojis, no scene directions, no quotes. "
-             "Do not mention any real person's private details. Only the sentences.")
     log(f"local AI: writing a script about “{topic}”")
-    r = httpx.post(f"{LLM_URL}/api/generate", json={"model": LLM_MODEL, "prompt": ask, "stream": False,
-                                                     "options": {"temperature": 0.7, "num_predict": 400}}, timeout=600)
-    r.raise_for_status()
-    text = " ".join(line.strip(" -*0123456789.") for line in r.json().get("response", "").splitlines() if line.strip())
+    text = ""
+    for attempt in range(2):
+        r = httpx.post(f"{LLM_URL}/api/generate", json={"model": LLM_MODEL, "prompt": _script_prompt(topic, lang), "stream": False,
+                                                         "options": {"temperature": 0.6, "num_predict": 350}}, timeout=900)
+        r.raise_for_status()
+        text = _clean_script(r.json().get("response", ""))
+        if len(text) >= 80 and not re.search(r"[\u0900-\u097F]", text) or lang != "hi":
+            break
+        log("local AI: script was not in Roman letters, trying again")
     if len(text) < 40:
         raise RuntimeError("the local AI returned too little text")
     _post(f"{SERVER}/api/worker/script/{job['source_id']}", headers, json={"topic": topic, "script": text[:3000]}, timeout=60)

@@ -1618,6 +1618,23 @@ def retry_failed():
     return {"retried": n}
 
 
+class ReelLangIn(BaseModel):
+    language: Literal["hi", "en"]
+
+
+@app.post("/api/channels/{chid}/language")
+def channel_language(chid: int, body: ReelLangIn):
+    """Language of the local AI's reel scripts (and a matching Indian voice)."""
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        if ch.kind != "reel" or not ch.auto_scripts:
+            raise HTTPException(400, "Only for AI-script reel sources")
+        ch.permission_note = body.language
+        ch.voice = "en-IN-PrabhatNeural" if body.language == "en" else "hi-IN-MadhurNeural"
+        s.commit()
+        return to_dict(ch)
+
+
 @app.post("/api/channels/{chid}/review")
 def set_review(chid: int, body: ReviewIn):
     """Switch a source between 'auto upload' and 'review first'."""
