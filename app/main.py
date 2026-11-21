@@ -1231,6 +1231,30 @@ class EmailIn(BaseModel):
     email: str = Field(max_length=200)
 
 
+class MailTextIn(BaseModel):
+    subject: str = Field(default="", max_length=150)
+    message: str = Field(max_length=4000)
+
+
+@app.post("/api/permissions/{cid}/message")
+def perm_message(cid: str, body: MailTextIn):
+    from . import permissions
+
+    try:
+        return permissions.set_message(cid, body.subject, body.message)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
+@app.post("/api/permissions/rewrite")
+def perm_rewrite():
+    from . import permissions
+
+    return {"rewritten": permissions.rewrite_unsent()}
+
+
 @app.post("/api/permissions/{cid}/revoke")
 def perm_revoke(cid: str):
     from . import permissions

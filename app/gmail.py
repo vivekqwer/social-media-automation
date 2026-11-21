@@ -77,14 +77,14 @@ def _sent_today() -> int:
     return int(get_setting("gmail_sent:" + utcnow().strftime("%Y-%m-%d")) or 0)
 
 
-def send(to: str, body: str) -> dict:
+def send(to: str, body: str, subject: str | None = None) -> dict:
     to = (to or "").strip()
     if not EMAIL_RE.match(to):
         raise ValueError("That email address does not look right.")
     if _sent_today() >= MAX_PER_DAY:
         raise ValueError(f"Already {MAX_PER_DAY} permission mails today — the rest go tomorrow (more would look like spam).")
     msg = MIMEText(body, "plain", "utf-8")
-    msg["to"], msg["subject"] = to, SUBJECT
+    msg["to"], msg["subject"] = to, (subject or SUBJECT)[:150]
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     res = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
     key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")

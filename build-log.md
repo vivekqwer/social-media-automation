@@ -237,3 +237,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Local AI: dashboard "Install now" -> helper installs Ollama (winget) + pulls qwen2.5:3b in the background and reports progress (Worker.ai_status via x-worker-ai header) shown live on the checklist. Starts by itself when an AI-script reel source exists. Old helpers never get the job.
 - Checklist shows the next automatic uploads with times. Reel #15 approved -> queued for 27 Nov 10:00 IST.
 - Tests 18/18; dashboard JS checked; deployed bf7239b.
+
+## 2026-11-22 — Task 40: permission mails that read like a person wrote them
+- 3 plain, informal templates (Hinglish / English / Hindi-style), one fixed per creator, naming the creator's actual video (title cleaned of hashtags, emojis and "| Channel" suffix; Hindi kept). Signed with the channel name (setting mail_sign overrides). Subject varies too.
+- Inbox: "See / edit the mail" (subject + text) before Send; edits are kept. Unsent creators were given the new text (/api/permissions/rewrite).

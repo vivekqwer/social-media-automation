@@ -17,6 +17,48 @@ PER_DAY = 5
 LABELS = re.compile(r"music|records|songs|films|movies|studios|pictures|t-series|zee|sony|star |colors|tips official|"
                     r"saregama|aditya|lahari|speed records|bhajan|bhakti|aarti|wave|yrf|dharma|netflix|prime video|news", re.I)
 
+# Written like a person would write it: short, plain, a little informal, different for each creator,
+# naming the video the owner actually liked. No emojis or polished marketing lines.
+TEMPLATES = [
+    ("Aapki videos ke baare me",
+     "Hi {name},\n\nAapki video \"{video}\" dekhi, sach me maza aa gaya. Main {channel} naam se ek chhota YouTube channel "
+     "chalata hoon jahan Shorts daalta hoon.\n\nKya main aapki videos ke chhote clips (30-40 sec) apne Shorts me use kar sakta "
+     "hoon? Har clip me aapka naam aur original video ka link daalunga, taaki log aapke channel pe bhi jaayein.\n\n"
+     "Agar aap mana karoge to bilkul theek hai, koi dikkat nahi. Aur kabhi bhi bolo to turant hata dunga.\n\nThanks,\n{sign}"),
+    ("Quick question about your videos",
+     "Hey {name},\n\nI've been watching your videos for a while, the \"{video}\" one especially. I run a small Shorts "
+     "channel called {channel}.\n\nWould you be okay with me posting short clips from your videos there? I'd put your name and "
+     "a link to the full video in every one.\n\nIf not, no worries at all. And if you ever want something taken down, just "
+     "reply here and I'll do it straight away.\n\nThanks,\n{sign}"),
+    ("Ek chhoti si request",
+     "Namaste {name} ji,\n\nMain {channel} channel se hoon. Aapka content kaafi time se dekh raha hoon, \"{video}\" wali "
+     "video to kamaal thi.\n\nEk request thi. Kya main aapki videos ke chhote clips apne Shorts me daal sakta hoon? Credit me "
+     "aapka naam aur video ka link hamesha rahega.\n\nHaan ya na, jo bhi ho, bas reply kar dena. Mana karoge to koi baat nahi."
+     "\n\nDhanyawad,\n{sign}"),
+]
+
+
+def _clean_title(t: str) -> str:
+    t = re.split(r"\s[|•/]\s|\s-\s", t or "")[0]  # "Title | Channel name" -> "Title"
+    import unicodedata
+
+    t = re.sub(r"#\S+", " ", t)  # no hashtags
+    t = "".join(" " if unicodedata.category(ch)[0] == "S" or ch in "️|[]{}<>\"*_~^" or unicodedata.category(ch) in ("Co", "Cs")
+                else ch for ch in t)  # no emojis / symbols (Hindi vowel signs are kept)
+    t = re.sub(r"\s+", " ", t).strip(" -|,.")
+    return (t[:60].rsplit(" ", 1)[0] if len(t) > 60 else t) or "aapki latest video"
+
+
+def compose(name: str, video_title: str, cid: str) -> tuple[str, str]:
+    """(subject, body) — the template is picked from the channel id, so each creator gets one version, always the same."""
+    with SessionLocal() as s:
+        dest = s.query(Destination).order_by(Destination.id).first()
+        channel = (dest.name if dest else "") or "my channel"
+    sign = get_setting("mail_sign") or channel
+    subj, body = TEMPLATES[sum(map(ord, cid)) % len(TEMPLATES)]
+    return subj, body.format(name=(name or "there").strip(), video=_clean_title(video_title), channel=channel, sign=sign)
+
+
 MESSAGE = (
     "Namaste {name} ji! Main aapka bada fan hoon aur aapke videos ke chhote clips (Shorts) ek fan page par post karna chahta hoon — "
     "har clip me aapka naam, channel link aur original video ka link credit me rahega. Kya aap mujhe aapke videos ke clips "
@@ -58,7 +100,8 @@ def refresh_inbox() -> list[dict]:
             continue
         d[cid] = {"channel_id": cid, "name": v.get("channel", ""), "url": f"https://www.youtube.com/channel/{cid}",
                   "video_id": v["video_id"], "video_title": v.get("title", ""), "views": v.get("views", 0),
-                  "status": "new", "added": today, "message": MESSAGE.format(name=v.get("channel", "") or "creator")}
+                  "status": "new", "added": today}
+        d[cid]["subject"], d[cid]["message"] = compose(v.get("channel", ""), v.get("title", ""), cid)
         new.append(d[cid])
     _save(d)
     if new:
@@ -146,6 +189,31 @@ def set_email(cid: str, email: str) -> dict:
     return d[cid]
 
 
+def rewrite_unsent() -> int:
+    """Give creators who have not been mailed yet the new, natural message (keeps messages the owner edited)."""
+    d = _load()
+    n = 0
+    for c in d.values():
+        if not c.get("mailed") and not c.get("edited") and c["status"] in ("new", "asked"):
+            c["subject"], c["message"] = compose(c.get("name", ""), c.get("video_title", ""), c["channel_id"])
+            n += 1
+    _save(d)
+    return n
+
+
+def set_message(cid: str, subject: str, message: str) -> dict:
+    d = _load()
+    if cid not in d:
+        raise KeyError(cid)
+    if d[cid].get("mailed"):
+        raise ValueError("Already sent.")
+    if len((message or "").strip()) < 30:
+        raise ValueError("The message is too short.")
+    d[cid].update(subject=(subject or "").strip()[:150] or d[cid].get("subject"), message=message.strip()[:4000], edited=True)
+    _save(d)
+    return d[cid]
+
+
 def send_mail(cid: str) -> dict:
     """Send the ready message from the owner's Gmail (only when the owner presses Send)."""
     from . import gmail
@@ -158,7 +226,7 @@ def send_mail(cid: str) -> dict:
         raise ValueError("Add the creator's email first (channel About page → business email, or their Instagram bio).")
     if c.get("thread_id"):
         raise ValueError("Already sent to this creator.")
-    res = gmail.send(c["email"], c["message"])
+    res = gmail.send(c["email"], c["message"], c.get("subject"))
     c.update(status="asked", asked_at=utcnow().isoformat() + "Z", thread_id=res["thread_id"], mailed=True)
     _save(d)
     return c
