@@ -210,3 +210,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Kept internal names on purpose (renaming would break things): file names (clipstudio_worker.py), cookies, env vars (CLIPSTUDIO_*), Startup entry ClipStudioHelper.vbs, backup file names.
 - To do by owner (optional): rename the Google OAuth app (Google Cloud → Branding) so the Google sign-in screen also says Raji Studio.
 - Link fields: Chrome ignored autocomplete=off and filled the saved username; fields are now read-only until focused (Chrome never autofills read-only fields).
+- 2026-11-21: Owner renamed the Google OAuth app to "Raji Studio" (Branding page confirmed). Google still shows the domain on the account chooser for unverified apps.
