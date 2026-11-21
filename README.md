@@ -1,4 +1,4 @@
-# Clip Studio
+# Raji Studio
 
 YouTube hot-moment clipper + editor + scheduled uploader. Add source channels once; it finds videos, picks the most-replayed/most-commented moments, clips, renders, adds credit + original tags + researched keywords, and uploads to **your** channel(s) on a schedule.
 

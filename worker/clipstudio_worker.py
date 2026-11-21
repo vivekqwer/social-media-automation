@@ -1,4 +1,4 @@
-"""Clip Studio helper PC.
+"""Raji Studio helper PC.
 
 Runs on your own computer (home internet, which YouTube does not bot-block) and does the two jobs the
 server cannot: download the needed section of a video, and generate voice-overs. Rendering and uploading
@@ -54,7 +54,7 @@ def single_instance():
         lock.bind(("127.0.0.1", 47613))
     except OSError as e:
         if e.errno == errno.EADDRINUSE or getattr(e, "winerror", 0) == 10048:
-            log("Another Clip Studio helper is already running on this PC. Closing this one.")
+            log("Another Raji Studio helper is already running on this PC. Closing this one.")
             sys.exit(EXIT_ALREADY_RUNNING)
         log(f"Could not take the single-helper lock ({e}); continuing.")  # e.g. Windows reserved that port today
     return lock
@@ -267,7 +267,7 @@ def main():
     tok = get_token()
     headers = {"x-worker-token": tok}
     last_update_check = time.time()  # first check after a while: a fresh start never loops straight into an update
-    log(f"Clip Studio helper running for {SERVER}. Keep this window open.")
+    log(f"Raji Studio helper running for {SERVER}. Keep this window open.")
     waiting, delay = False, POLL_SECONDS
     while True:
         try:

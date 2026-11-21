@@ -101,6 +101,8 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 
 - Watch time live 2026-11-21 (Analytics API enabled, Foody reconnected with yt-analytics.readonly). New channels get the scope automatically when connected.
 
-- Project guide PDF: docs/Clip-Studio-Project-Guide.pdf (regenerate with docs/tools/make_guide.py; reportlab installed only in local venv).
+- Project guide PDF: docs/Raji-Studio-Project-Guide.pdf (regenerate with docs/tools/make_guide.py; reportlab installed only in local venv).
 
 - Before every deploy: extract the <script> from static/index.html and run `node --check` (a broken script blanks the whole dashboard).
+
+- Product name: **Raji Studio** (since 2026-11-21). Internal ids keep "clipstudio" (files, cookies, env vars, ClipStudioHelper.vbs).

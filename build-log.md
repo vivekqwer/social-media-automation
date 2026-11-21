@@ -204,3 +204,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Backup: helper saves the dashboard data daily to backups/ on the PC (14 kept); stats tables skipped.
 - Tests: multi 5/5, whisper 5/5, batch 10/10, render e2e 3/3, all 15 regression suites pass; dashboard JS syntax checked.
 - Helper fix: it runs from the same git folder the code is committed in, so "HEAD == server version" hid that the running process had old code. The helper now remembers the commit it started with and restarts (exit 4) when the folder has newer code.
+
+## 2026-11-21 — Task 35: Renamed to "Raji Studio"
+- Owner chose the name Raji Studio. Changed everywhere it is shown: dashboard (title, sidebar, breadcrumb), login/forgot/reset/about/privacy/terms pages, Telegram messages, weekly report, helper window/log text, launchers, README, project guide PDF (docs/Raji-Studio-Project-Guide.pdf) and API audit draft.
+- Kept internal names on purpose (renaming would break things): file names (clipstudio_worker.py), cookies, env vars (CLIPSTUDIO_*), Startup entry ClipStudioHelper.vbs, backup file names.
+- To do by owner (optional): rename the Google OAuth app (Google Cloud → Branding) so the Google sign-in screen also says Raji Studio.

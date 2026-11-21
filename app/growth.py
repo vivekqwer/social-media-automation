@@ -77,7 +77,7 @@ def weekly_report() -> Path | None:
         st = getSampleStyleSheet()
         out = DATA_DIR / "reports" / f"weekly-{now:%Y-%m-%d}.pdf"
         out.parent.mkdir(parents=True, exist_ok=True)
-        story = [Paragraph(f"Clip Studio — weekly report ({(now - timedelta(days=7)):%d %b} – {now:%d %b %Y})", st["Title"]),
+        story = [Paragraph(f"Raji Studio — weekly report ({(now - timedelta(days=7)):%d %b} – {now:%d %b %Y})", st["Title"]),
                  Paragraph(f"Uploads this week: <b>{uploaded}</b> · Problems on YouTube: <b>{problems}</b>", st["Normal"]), Spacer(1, 6)]
         for c in o["channels"]:
             w = c.get("watch") or {}

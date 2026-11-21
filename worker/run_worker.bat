@@ -1,5 +1,5 @@
 @echo off
-title Clip Studio helper PC
+title Raji Studio helper PC
 cd /d "%~dp0.."
 set "PY=python"
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"

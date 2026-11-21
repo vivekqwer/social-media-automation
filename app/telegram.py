@@ -123,7 +123,7 @@ def _cmd_status() -> str:
         dests = s.query(Destination).all()
         hp = _helper_state(s)
     q = quota.summary()
-    lines = ["<b>Clip Studio</b>",
+    lines = ["<b>Raji Studio</b>",
              f"Ready to review: {cnt['rendered']} · Queued: {cnt['queued']} · Waiting for helper: {cnt['fetching']}",
              f"Failed: {cnt['failed']} · Uploaded: {cnt['uploaded']}",
              f"Uploads left today: {q['uploads_left']}",
@@ -235,7 +235,7 @@ def poll():
                     if code and code in text.upper():
                         set_setting("tg_chat", cid)
                         set_setting("tg_link_code", "")
-                        notify("✅ Linked to Clip Studio. You will get alerts here.\nSend /help to see what you can do.")
+                        notify("✅ Linked to Raji Studio. You will get alerts here.\nSend /help to see what you can do.")
                     continue
                 if cid != chat_id():
                     continue  # strangers are ignored

@@ -71,7 +71,7 @@ async def lifespan(app: FastAPI):
     sch.shutdown(wait=False)
 
 
-app = FastAPI(title="Clip Studio", lifespan=lifespan)
+app = FastAPI(title="Raji Studio", lifespan=lifespan)
 
 
 @app.exception_handler(RequestValidationError)
@@ -1151,7 +1151,7 @@ def tg_test():
 
     if not telegram.enabled():
         raise HTTPException(400, "Telegram is not linked yet.")
-    telegram.notify("👋 Test message from Clip Studio. Send /help to see the commands.")
+    telegram.notify("👋 Test message from Raji Studio. Send /help to see the commands.")
     return {"ok": True}
 
 

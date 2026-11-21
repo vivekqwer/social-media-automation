@@ -1,5 +1,5 @@
 @echo off
-rem Makes the Clip Studio helper start by itself (hidden) every time you sign in to Windows.
+rem Makes the Raji Studio helper start by itself (hidden) every time you sign in to Windows.
 set "VBS=%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\ClipStudioHelper.vbs"
 > "%VBS%" echo CreateObject("WScript.Shell").Run """%~dp0run_hidden.bat""", 0, False
 echo.
