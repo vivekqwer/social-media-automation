@@ -92,6 +92,31 @@ def send(to: str, body: str) -> dict:
     return {"thread_id": res.get("threadId"), "message_id": res.get("id")}
 
 
+OWNER_PER_DAY = 40  # alerts to the owner's own inbox (separate from creator mails)
+
+
+def notify_owner(text: str):
+    """An alert to the owner's own Gmail (used when Telegram is not set up)."""
+    import html
+
+    from .config import BASE_URL
+
+    me = connected_email()
+    if not me:
+        return
+    key = "gmail_owner:" + utcnow().strftime("%Y-%m-%d")
+    n = int(get_setting(key) or 0)
+    if n >= OWNER_PER_DAY:
+        return
+    plain = html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
+    first = plain.splitlines()[0][:90] if plain else "Update"
+    msg = MIMEText(plain + f"\n\nOpen Raji Studio: {BASE_URL}/\n(These alerts come from your own Gmail. Connect Telegram in "
+                           "My channels to get them as phone messages with buttons instead.)", "plain", "utf-8")
+    msg["to"], msg["subject"] = me, "Raji Studio: " + first
+    _service().users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
+    set_setting(key, str(n + 1))
+
+
 def _header(msg: dict, name: str) -> str:
     for h in (msg.get("payload") or {}).get("headers", []):
         if h.get("name", "").lower() == name.lower():

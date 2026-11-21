@@ -72,8 +72,14 @@ def disconnect():
 
 
 def notify(text: str, buttons: list | None = None):
-    """Send a message to the owner. Never raises."""
+    """Send a message to the owner (Telegram, or the owner's own Gmail when Telegram is not set up). Never raises."""
     if not enabled():
+        try:
+            from .gmail import notify_owner
+
+            notify_owner(text)
+        except Exception as e:  # noqa: BLE001
+            log.warning("mail alert: %s", str(e)[:200])
         return
     try:
         kw = {"chat_id": chat_id(), "text": text[:4000], "parse_mode": "HTML", "disable_web_page_preview": True}
@@ -98,6 +104,12 @@ def notify_once(key: str, text: str, every_minutes: int = 60):
 
 def send_document(path: str, caption: str = ""):
     if not enabled():
+        try:
+            from .gmail import notify_owner
+
+            notify_owner(f"<b>{caption}</b>\nOpen it on the dashboard: Analytics → Weekly report.")
+        except Exception:  # noqa: BLE001
+            pass
         return
     try:
         tok = _token()
