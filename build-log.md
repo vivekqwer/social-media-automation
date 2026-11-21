@@ -217,3 +217,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Permission inbox (app/permissions.py): every morning up to 5 creators of popular non-CC videos (trending + competitor outliers), with a ready Hinglish+English message and channel link, sent to Telegram with buttons (They said yes / Asked / Skip). "They said yes" needs written proof (dashboard prompt or Telegram reply) and then creates an automatic permission source for that creator. Owner sends the message; refused: auto-emailing creators (no API, spam) and uploading after silence (silence is not permission).
 - Reel source option "Fully automatic": the helper's local AI (Ollama, default qwen2.5:3b at 127.0.0.1:11434) writes a Hinglish/English script on the next trending topic -> /api/worker/script -> ReelGen reel -> upload. Script jobs go only to helpers reporting x-worker-llm: 1; source shows "waiting for the local AI" otherwise.
 - Tests 15/15; all regression suites pass; dashboard JS checked.
+
+## 2026-11-22 — Task 37: Gmail permission mails + reply watcher; trending source live
+- Live: source "Trending (CC clips): food & how-to" (every 3 h, auto upload) created and started.
+- app/gmail.py: owner connects Gmail once (/auth/gmail, scopes gmail.send + gmail.readonly, token encrypted, state prefix "gmail:" on the shared callback). Permission mails go out only when the owner presses Send (dashboard or Telegram "Add email & send" -> reply with the address); max 5 a day; never twice to the same creator.
+- Every 15 min the threads are checked; a creator's reply goes to Telegram + Ideas with "Permission given" / "They said no". One tap creates the automatic permission source with the reply saved as proof. Nothing is decided without the owner.
+- Tests 10/10; regressions pass.

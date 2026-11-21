@@ -64,8 +64,9 @@ def refresh_inbox() -> list[dict]:
             for c in new:
                 notify(f"🤝 <b>Ask for permission:</b> {esc(c['name'])}\nTheir video: {esc(c['video_title'][:80])}\n"
                        f"Channel: {c['url']}\n\nMessage to send (copy):\n<code>{esc(c['message'])}</code>",
-                       [[{"text": "✅ They said yes", "callback_data": f"py:{c['channel_id']}"},
-                         {"text": "Asked", "callback_data": f"pa:{c['channel_id']}"},
+                       [[{"text": "📧 Add email & send", "callback_data": f"pe:{c['channel_id']}"},
+                         {"text": "✅ They said yes", "callback_data": f"py:{c['channel_id']}"}],
+                        [{"text": "Asked another way", "callback_data": f"pa:{c['channel_id']}"},
                          {"text": "Skip", "callback_data": f"ps:{c['channel_id']}"}]])
         except Exception:  # noqa: BLE001
             pass
@@ -73,7 +74,8 @@ def refresh_inbox() -> list[dict]:
 
 
 def listing() -> list[dict]:
-    return sorted(_load().values(), key=lambda c: ({"new": 0, "asked": 1, "granted": 2, "skipped": 3}.get(c["status"], 4), c["name"]))
+    return sorted(_load().values(), key=lambda c: ({"replied": 0, "new": 1, "asked": 2, "granted": 3, "skipped": 4, "declined": 5}
+                                                   .get(c["status"], 6), c["name"]))
 
 
 def set_status(cid: str, status: str) -> dict:
@@ -84,6 +86,80 @@ def set_status(cid: str, status: str) -> dict:
     d[cid][status + "_at"] = utcnow().isoformat() + "Z"
     _save(d)
     return d[cid]
+
+
+def set_email(cid: str, email: str) -> dict:
+    from .gmail import EMAIL_RE
+
+    email = (email or "").strip()
+    if not EMAIL_RE.match(email):
+        raise ValueError("That email address does not look right.")
+    d = _load()
+    if cid not in d:
+        raise KeyError(cid)
+    d[cid]["email"] = email
+    _save(d)
+    return d[cid]
+
+
+def send_mail(cid: str) -> dict:
+    """Send the ready message from the owner's Gmail (only when the owner presses Send)."""
+    from . import gmail
+
+    d = _load()
+    if cid not in d:
+        raise KeyError(cid)
+    c = d[cid]
+    if not c.get("email"):
+        raise ValueError("Add the creator's email first (channel About page → business email, or their Instagram bio).")
+    if c.get("thread_id"):
+        raise ValueError("Already sent to this creator.")
+    res = gmail.send(c["email"], c["message"])
+    c.update(status="asked", asked_at=utcnow().isoformat() + "Z", thread_id=res["thread_id"], mailed=True)
+    _save(d)
+    return c
+
+
+def check_replies() -> int:
+    """Look for creators' replies in Gmail and send them to the owner to decide (yes / no) with one tap."""
+    from . import gmail
+
+    if not gmail.connected_email():
+        return 0
+    d = _load()
+    found = 0
+    for c in d.values():
+        if c.get("status") != "asked" or not c.get("thread_id") or c.get("reply_id"):
+            continue
+        try:
+            r = gmail.reply_in_thread(c["thread_id"])
+        except Exception as e:  # noqa: BLE001
+            log.warning("gmail reply check: %s", str(e)[:150])
+            continue
+        if not r:
+            continue
+        c.update(reply_id=r["id"], reply_from=r["from"], reply_date=r["date"], reply=r["snippet"], status="replied")
+        found += 1
+        try:
+            from .telegram import esc, notify
+
+            notify(f"📩 <b>{esc(c['name'])}</b> replied:\n<i>{esc(r['snippet'][:400])}</i>",
+                   [[{"text": "✅ Permission given", "callback_data": f"pg:{c['channel_id']}"},
+                     {"text": "❌ They said no", "callback_data": f"pn:{c['channel_id']}"}]])
+        except Exception:  # noqa: BLE001
+            pass
+    if found:
+        _save(d)
+    return found
+
+
+def grant_from_reply(cid: str) -> dict:
+    d = _load()
+    c = d.get(cid)
+    if not c or not c.get("reply"):
+        raise KeyError(cid)
+    proof = f"Email reply from {c.get('reply_from', '')} on {c.get('reply_date', '')}: “{c['reply'][:300]}”"
+    return grant(cid, proof)
 
 
 def grant(cid: str, proof: str) -> dict:

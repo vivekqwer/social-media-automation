@@ -203,6 +203,25 @@ def _handle_callback(data: str) -> str:
     from . import main
 
     kind, _, cid = (data or "").partition(":")
+    if kind == "pe":
+        set_setting("tg_pending_email", cid)
+        return "Send me the creator's email address (from their channel About page or Instagram bio). I'll mail them from your Gmail."
+    if kind in ("pg", "pn", "pm"):
+        from . import permissions
+
+        try:
+            if kind == "pg":
+                c = permissions.grant_from_reply(cid)
+                return f"Saved. {c['name']}'s new videos will be clipped and uploaded automatically, with credit."
+            if kind == "pn":
+                permissions.set_status(cid, "declined")
+                return "OK — they will not be used."
+            c = permissions.send_mail(cid)
+            return f"Mail sent to {c['email']}. You'll get their reply here."
+        except (KeyError, ValueError) as e:
+            return f"Could not do that: {e}"
+        except Exception as e:  # noqa: BLE001
+            return f"Could not send: {str(e)[:150]}"
     if kind in ("pa", "ps", "py"):
         from . import permissions
 
@@ -253,6 +272,20 @@ def poll():
                     continue
                 if cid != chat_id():
                     continue  # strangers are ignored
+                pending_mail = get_setting("tg_pending_email")
+                if pending_mail and text and not text.startswith("/"):
+                    from . import permissions
+
+                    set_setting("tg_pending_email", "")
+                    try:
+                        permissions.set_email(pending_mail, text.strip())
+                        c = permissions.send_mail(pending_mail)
+                        notify(f"📧 Mail sent to {esc(c['email'])}. I'll tell you when they reply.")
+                    except (ValueError, KeyError) as e:
+                        notify(f"Not sent: {esc(str(e))}")
+                    except Exception as e:  # noqa: BLE001
+                        notify(f"Not sent (Gmail): {esc(str(e)[:150])} — is Gmail connected in My channels?")
+                    continue
                 pending = get_setting("tg_pending_allow")
                 if pending and text and not text.startswith("/"):
                     from . import permissions

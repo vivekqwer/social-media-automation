@@ -1151,13 +1151,75 @@ def perm_refresh():
 
 
 @app.post("/api/permissions/{cid}/mark/{status}")
-def perm_status(cid: str, status: Literal["asked", "skipped", "new"]):
+def perm_status(cid: str, status: Literal["asked", "skipped", "new", "declined"]):
     from . import permissions
 
     try:
         return permissions.set_status(cid, status)
     except KeyError:
         raise HTTPException(404, "Not in the list")
+
+
+class EmailIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+@app.post("/api/permissions/{cid}/email")
+def perm_email(cid: str, body: EmailIn):
+    from . import permissions
+
+    try:
+        return permissions.set_email(cid, body.email)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
+@app.post("/api/permissions/{cid}/send")
+def perm_send(cid: str):
+    from . import permissions
+
+    try:
+        return permissions.send_mail(cid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Gmail could not send it: {str(e)[:150]}")
+
+
+@app.post("/api/permissions/{cid}/grant-reply")
+def perm_grant_reply(cid: str):
+    from . import permissions
+
+    try:
+        return permissions.grant_from_reply(cid)
+    except KeyError:
+        raise HTTPException(404, "No reply saved for this creator")
+
+
+@app.get("/api/gmail")
+def gmail_status():
+    from . import gmail
+
+    return {"email": gmail.connected_email()}
+
+
+@app.get("/auth/gmail")
+def gmail_login():
+    from . import gmail
+
+    return RedirectResponse(gmail.login_url(), status_code=302)
+
+
+@app.delete("/api/gmail")
+def gmail_disconnect():
+    from . import gmail
+
+    gmail.disconnect()
+    return {"email": None}
 
 
 @app.post("/api/permissions/{cid}/grant")
@@ -1339,9 +1401,19 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         resp = RedirectResponse("/reset", status_code=302)
         _set_cookie(resp, auth.RESET_COOKIE, auth.make_reset_token(email), auth.RESET_TTL)
         return resp
-    # connecting a YouTube channel: only for a logged-in dashboard user
+    # connecting a YouTube channel or Gmail: only for a logged-in dashboard user
     if auth.auth_configured() and not auth.request_authenticated(request):
         return RedirectResponse("/login?next=/", status_code=302)
+    if state and state.startswith("gmail:"):
+        from . import gmail
+
+        if error or not code:
+            return RedirectResponse("/#settings", status_code=302)
+        try:
+            gmail.handle_callback(code, state)
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(400, f"Gmail connection failed: {str(e)[:200]}")
+        return RedirectResponse("/?gmail=ok", status_code=302)
     if error or not code or not state:
         return RedirectResponse("/", status_code=302)
     try:

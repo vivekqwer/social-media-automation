@@ -257,7 +257,8 @@ def start():
     sch.add_job(lambda: executor.submit(swap_weak_thumbnails), "cron", hour=6, minute=0, max_instances=1, coalesce=True)
     sch.add_job(lambda: executor.submit(weekly_report), "cron", day_of_week="sun", hour=15, minute=35, max_instances=1,
                 coalesce=True)  # Sunday 9:05 PM IST
-    from .permissions import refresh_inbox
+    from .permissions import check_replies, refresh_inbox
+    sch.add_job(lambda: executor.submit(check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
     sch.add_job(lambda: executor.submit(refresh_inbox), "cron", hour=4, minute=30, max_instances=1, coalesce=True)  # 10 AM IST
     from .competitors import scan_if_due
     sch.add_job(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
