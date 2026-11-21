@@ -1248,6 +1248,30 @@ def perm_message(cid: str, body: MailTextIn):
         raise HTTPException(404, "Not in the list")
 
 
+class MailIdIn(BaseModel):
+    sign: str = Field(default="", max_length=60)
+    about: str = Field(default="", max_length=40)
+
+
+@app.get("/api/settings/mail")
+def mail_id_get():
+    from . import permissions
+
+    sign, about = permissions.mail_identity()
+    return {"sign": sign, "about": about}
+
+
+@app.post("/api/settings/mail")
+def mail_id_set(body: MailIdIn):
+    from . import permissions
+
+    set_setting("mail_sign", body.sign.strip())
+    set_setting("mail_about", body.about.strip())
+    n = permissions.rewrite_unsent()
+    sign, about = permissions.mail_identity()
+    return {"sign": sign, "about": about, "rewritten": n}
+
+
 @app.post("/api/permissions/rewrite")
 def perm_rewrite():
     from . import permissions

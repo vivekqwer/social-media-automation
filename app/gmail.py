@@ -85,6 +85,13 @@ def send(to: str, body: str, subject: str | None = None) -> dict:
         raise ValueError(f"Already {MAX_PER_DAY} permission mails today — the rest go tomorrow (more would look like spam).")
     msg = MIMEText(body, "plain", "utf-8")
     msg["to"], msg["subject"] = to, (subject or SUBJECT)[:150]
+    me = connected_email()
+    if me:  # the creator sees the name set on the dashboard (e.g. "Funny Gunction"), not just the address
+        from email.utils import formataddr
+
+        from .permissions import mail_identity
+
+        msg["from"] = formataddr((mail_identity()[0], me))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     res = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
     key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")

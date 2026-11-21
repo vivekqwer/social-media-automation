@@ -872,8 +872,13 @@ async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
 }
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
-  $('#gm-box').innerHTML=g.email?`<div class="row"><span>Sending as <b>${esc(g.email)}</b></span><button class="btn ghost sm" id="gm-del">Disconnect</button></div>`
+  const mi=await api('/api/settings/mail');
+  $('#gm-box').innerHTML=g.email?`<div class="row"><span>Sending as <b>${esc(g.email)}</b></span><button class="btn ghost sm" id="gm-del">Disconnect</button></div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap"><label class="sm grow">Name at the end of mails<input id="gm-sign" value="${esc(mi.sign)}" maxlength="60"></label>
+    <label class="sm grow">Your channel posts … Shorts<input id="gm-about" value="${esc(mi.about)}" maxlength="40" placeholder="funny"></label><button class="btn sm" id="gm-idsave" style="align-self:flex-end">Save</button></div>
+    <div class="mut sm" style="margin-top:4px">Mails say e.g. “I run a small channel where I post <b>${esc(mi.about)}</b> Shorts … Thanks, <b>${esc(mi.sign)}</b>”. Unsent mails are updated.</div>`
     :`<a class="btn" href="/auth/gmail">${ico('plus')}Connect Gmail</a><div class="mut sm" style="margin-top:8px">Pick your Google account, then on “unverified app” press Advanced → Go to Raji Studio, tick both Gmail boxes and Allow.</div>`;
+  if($('#gm-idsave'))$('#gm-idsave').onclick=()=>once(async()=>{const r=await api('/api/settings/mail','POST',{sign:$('#gm-sign').value,about:$('#gm-about').value});toast(`Saved — ${r.rewritten} unsent mail(s) updated`);loadGmail()},$('#gm-idsave'));
   if($('#gm-del'))$('#gm-del').onclick=()=>once(async()=>{if(confirm('Disconnect Gmail?')){await api('/api/gmail','DELETE');loadGmail()}})}
 async function loadPexels(){const r=await api('/api/settings/pexels');const b=$('#px-badge');b.className='badge '+(r.set?'uploaded':'outline');b.textContent=r.set?'Key saved':'Not set'}
 $('#px-save').onclick=()=>once(async()=>{await api('/api/settings/pexels','POST',{key:$('#px-key').value});$('#px-key').value='';toast('Pexels key saved');loadPexels()},$('#px-save'));

@@ -251,3 +251,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Each pick shows its step live (Needs you / Waiting / Clipping / Review / Scheduled with time / On YouTube / Failed). Owner can pick any board video by hand. Checklist line "Today's viral picks".
 - Tests 28/28; regressions pass (test_mailnotify subject check fails before this change too; test_trend3 expects the old mail text).
 - Live 2026-11-22: board 49 videos; 5 picks (Techno Gamerz, Radha Seervi's Diaries, The Roamer Amit, Shivang Mini, Carry Depie), all with public emails, mails ready. Live-stream replays excluded (a `\b` in the regex had been written as a backspace char; fixed). Shorts list fills when the day's search budget allows.
+
+## 2026-11-22 — Task 43: permission mails as "Funny Gunction"
+- Owner did not want the food channel named in mails. Mails no longer name the upload channel: "I run a small channel where I post funny Shorts", signed "Funny Gunction"; the Gmail sender name is the same (From: Funny Gunction <address>). Both editable on My channels → Gmail ("Name at the end of mails", "Your channel posts … Shorts"); saving rewrites unsent mails. The 5 mails already sent are unchanged.
