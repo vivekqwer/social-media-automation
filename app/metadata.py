@@ -18,7 +18,24 @@ def _clean(s: str) -> str:
     return (s or "").replace("<", "").replace(">", "")
 
 
+def _build_original(project: Project, clip: Clip, keywords: list[str]) -> dict:
+    """My own reel: no credit block, the script itself is the description."""
+    title = _clean(project.title)[:100]
+    shorts = clip.aspect == "9:16"
+    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", k) for k in keywords[:3] if k])
+    description = _cut((hashtags + "\n\n" + _clean(project.description)).strip(), 4900)
+    tags, total = [], 0
+    for t in keywords + (["shorts"] if shorts else []):
+        t = _clean(t).strip()
+        if t and t.lower() not in (x.lower() for x in tags) and total + len(t) + 3 <= 480:
+            tags.append(t)
+            total += len(t) + 3
+    return {"title": title, "description": description, "tags": tags}
+
+
 def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
+    if project.mode == "original":
+        return _build_original(project, clip, keywords)
     base = _clean(project.title)
     title = f"{base} | Best Moment"
     if len(title) > 100:
@@ -58,7 +75,8 @@ def auto_metadata(clip_id: int, extra_keywords: list[str] | None = None) -> dict
         clip = s.get(Clip, clip_id)
         project = s.get(Project, clip.project_id)
         # what people actually type: title words, the original's top tags and the channel name
-        seeds = [" ".join(project.title.split()[:5])] + list(project.tags or [])[:2] + [project.channel]
+        seeds = [" ".join(project.title.split()[:5])] + list(project.tags or [])[:2] + \
+            ([] if project.mode == "original" else [project.channel])
         found = [suggest(seeds[0], 15)] + [suggest(sd, 6, expand=2) for sd in seeds[1:] if sd]
         kws, seen = [], set()
         for k in list(extra_keywords or []) + [k for group in zip(*[g + [None] * (15 - len(g)) for g in found]) for k in group if k]:

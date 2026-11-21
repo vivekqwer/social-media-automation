@@ -171,3 +171,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 
 ## 2026-11-21 — Task 29: Project guide PDF
 - docs/Clip-Studio-Project-Guide.pdf (13 pages, A4): what it does, pipeline, architecture, every dashboard page and editor tab, workflows, automatic jobs, copyright safety, helper PC, thumbnails/Shorts cover, analytics, limits, security, deployment/env vars, data, troubleshooting, status + owner checklist, API endpoints, file map. Generator: docs/tools/make_guide.py (reportlab; docs/ is gitignored, local only).
+
+## 2026-11-21 — Task 30: Original reels (ReelGen integration)
+- New source type "Original reels": owner writes scripts (separated by ---), picks a voice; each run turns the next unused scripts into reels. The helper PC runs ReelGen (D:\video generator, override with CLIPSTUDIO_REELGEN) -> 9:16 reel with voice-over + word subtitles -> uploaded to the server -> thumbnail (face + text), title from the first sentence, description = script, no credit block (mode "original") -> review or auto-queue on the daily slots.
+- Sources page: Original badge, "N scripts left", "Scripts" button to add more. render: original clips use the helper's reel file; NeedsHelper state; clip length = reel length.
+- E2E test (local server + real ReelGen on this PC + render + thumbnail + approve): 12/12. Regression suites pass.

@@ -163,10 +163,19 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
     return fc
 
 
+class NeedsHelper(RuntimeError):
+    """The helper PC must make this (e.g. a ReelGen reel) before it can be rendered."""
+
+
 def render_clip(project: Project, clip: Clip) -> Path:
     workdir = DATA_DIR / "clips" / str(clip.id)
     workdir.mkdir(parents=True, exist_ok=True)
-    src = download_section(project.video_id, clip.start, clip.end, workdir / "src")
+    if project.mode == "original":  # my own reel, made by ReelGen on the helper PC
+        src = workdir / "src" / "reel.mp4"
+        if not src.exists():
+            raise NeedsHelper("The helper PC makes this reel from your script.")
+    else:
+        src = download_section(project.video_id, clip.start, clip.end, workdir / "src")
     W, H = DIMS.get(clip.aspect, DIMS["16:9"])
     dur = clip.end - clip.start
     has_voice = bool(clip.voice_path) and Path(clip.voice_path).exists()
@@ -254,11 +263,12 @@ def run_render(clip_id: int):
                     extra["thumb_note"] = f"Thumbnail could not be made: {str(te)[:150]}"
             apply_short_cover(clip)
         except Exception as e:  # noqa: BLE001
-            if is_bot_block(e) and workers.any_recent():
+            if (is_bot_block(e) or isinstance(e, NeedsHelper)) and workers.any_recent():
                 final = "fetching"  # the helper PC downloads the section, then we render
                 extra["fetch_since"] = clip.fetch_since or utcnow()
             else:
-                final, error = "failed", friendly_error(e)
+                final, error = "failed", ("Start the helper PC — it makes reels from your scripts."
+                                          if isinstance(e, NeedsHelper) else friendly_error(e))
                 extra["output_path"] = None  # an old video must never be uploaded for a failed render
         s.execute(update(Clip).where(Clip.id == clip_id, Clip.status == "rendering")
                   .values(status=final, error=error, **extra))

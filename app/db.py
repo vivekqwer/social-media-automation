@@ -30,7 +30,7 @@ class Project(Base):
     duration = Column(Integer, default=0)
     heatmap = Column(JSON, default=list)
     moments = Column(JSON, default=list)
-    mode = Column(String(20))  # cc | permission | commentary
+    mode = Column(String(20))  # cc | permission | commentary | original (my own ReelGen reel)
     permission_note = Column(Text)
     channel_ref = Column(Integer, index=True)  # set when created by autopilot
     quick = Column(JSON)  # Quick upload settings + progress {format, length, publish_at, captions, state, step, clip_id}
@@ -91,7 +91,9 @@ class Channel(Base):
 
     __tablename__ = "channels"
     id = Column(Integer, primary_key=True)
-    kind = Column(String(10), default="channel")  # channel | topic (search Creative Commons videos by keywords)
+    kind = Column(String(10), default="channel")  # channel | topic (CC search) | reel (my own scripts -> ReelGen)
+    scripts = Column(JSON, default=list)  # reel sources: [{"text": ..., "used": bool}]
+    voice = Column(String(60))  # reel sources: edge-tts voice (empty = from the script's language)
     query = Column(String(300))  # name, @handle or URL as typed by user; keywords for a topic
     resolved_url = Column(String(500))
     name = Column(String(300))

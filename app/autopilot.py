@@ -212,6 +212,12 @@ def run_channel(channel_id: int):
                 ch.last_run = utcnow()
                 s.commit()
                 return
+            if ch.kind == "reel":
+                _run_reels(s, ch, log)
+                ch.last_status = "; ".join(log) or "no scripts left — add more scripts"
+                ch.last_run = utcnow()
+                s.commit()
+                return
             topic = ch.kind == "topic"
             if not ch.resolved_url:
                 if topic:
@@ -269,6 +275,36 @@ def autopilot_tick():
             run_channel(i)
         except Exception:  # noqa: BLE001
             continue
+
+
+def _script_title(text: str) -> str:
+    first = re.split(r"(?<=[.!?।])\s|\n", text.strip(), maxsplit=1)[0]
+    return re.sub(r"\s+", " ", first).strip()[:90] or "My reel"
+
+
+def _run_reels(s, ch: Channel, log: list):
+    """Reel source: turn the next unused scripts into reels (made by ReelGen on the helper PC)."""
+    scripts = [dict(x) for x in (ch.scripts or [])]
+    todo = [i for i, x in enumerate(scripts) if not x.get("used") and (x.get("text") or "").strip()]
+    dest = s.get(Destination, ch.destination_id) if ch.destination_id else None
+    for i in todo[:ch.videos_per_run]:
+        text = scripts[i]["text"].strip()
+        p = Project(url="", video_id=None, title=_script_title(text), channel=dest.name if dest else "",
+                    channel_url="", license="Original content (my own reel)", description=text, tags=[],
+                    duration=0, heatmap=[], moments=[], mode="original", channel_ref=ch.id)
+        s.add(p)
+        s.commit()
+        c = Clip(project_id=p.id, start=0, end=60, aspect="9:16", effects=[], overlays=[], credit_on=False,
+                 destination_id=ch.destination_id, status="fetching", fetch_since=utcnow())
+        if not ch.review_first:
+            c.publish_at = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0)
+            c.autoqueue = True  # becomes 'queued' as soon as the reel is made and rendered
+        s.add(c)
+        scripts[i]["used"] = True
+        ch.scripts = scripts
+        s.commit()
+        auto_metadata(c.id)
+        log.append(f"reel {c.id}: “{p.title[:40]}” — helper PC is making it")
 
 
 def resume_after_analysis(pid: int):

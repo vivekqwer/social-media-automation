@@ -34,6 +34,8 @@ SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFA
 if not (SERVER.startswith("https://") or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", SERVER)):
     sys.exit("The server address must start with https:// (the helper sends videos and its key there).")
 TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
+# ReelGen (text -> reel engine) lives in its own project folder on this PC
+REELGEN_DIR = pathlib.Path(os.getenv("CLIPSTUDIO_REELGEN", r"D:\video generator"))
 POLL_SECONDS = 8
 UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
 EXPECTED_ORIGIN = "github.com/vivekqwer/social-media-automation"  # only ever update from this repository
@@ -162,6 +164,13 @@ def handle(job: dict, headers: dict):
                     r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
                               files={"file": ("source.mp4", f, "video/mp4")}, timeout=900)
                 log(f"clip {cid}: video sent ({path.stat().st_size // 1024} KB) -> {r.status_code}; server is rendering")
+            elif job["type"] == "reel":
+                out = pathlib.Path(d) / "reel.mp4"
+                make_reel(job["script"], job.get("voice") or "", out)
+                with open(out, "rb") as f:
+                    r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
+                              files={"file": ("reel.mp4", f, "video/mp4")}, timeout=900)
+                log(f"clip {cid}: reel made and sent ({out.stat().st_size // 1024} KB) -> {r.status_code}")
             elif job["type"] == "tts":
                 p = pathlib.Path(d) / "voice.mp3"
                 synth(job["text"], job["voice"], str(p))
@@ -172,6 +181,21 @@ def handle(job: dict, headers: dict):
         except Exception as e:  # noqa: BLE001
             log(f"clip {cid}: failed: {str(e)[:200]}")
             _tell_failed(cid, job["type"], friendly_error(e), headers)
+
+
+def make_reel(script: str, voice: str, out: pathlib.Path):
+    """Run ReelGen (the user's text -> 9:16 reel engine) in its own folder."""
+    main = REELGEN_DIR / "main.py"
+    if not main.exists():
+        raise RuntimeError(f"ReelGen not found at {REELGEN_DIR}. Set CLIPSTUDIO_REELGEN to its folder.")
+    cmd = [sys.executable, str(main), "--text", script, "-o", str(out)]
+    if voice:
+        cmd += ["--voice", voice]
+    log(f"making a reel ({len(script)} characters of script)")
+    r = subprocess.run(cmd, cwd=REELGEN_DIR, capture_output=True, text=True, timeout=1800,
+                       env={**os.environ, "PYTHONUTF8": "1"})
+    if r.returncode != 0 or not out.exists():
+        raise RuntimeError("ReelGen failed: " + (r.stderr or r.stdout)[-300:])
 
 
 def _tell_failed(id_: int, kind: str, error: str, headers: dict):

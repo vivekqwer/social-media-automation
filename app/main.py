@@ -332,7 +332,9 @@ class ScheduleIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
-    kind: Literal["channel", "topic"] = "channel"
+    kind: Literal["channel", "topic", "reel"] = "channel"
+    scripts: list[str] = Field(default_factory=list, max_length=500)
+    voice: str = Field("", max_length=60)
     query: str = Field(min_length=1, max_length=300)
     mode: str = "cc"
     permission_note: str = Field("", max_length=2000)
@@ -891,14 +893,17 @@ def discard_clip(cid: int):
 # ---------- autopilot channels ----------
 @app.post("/api/channels")
 def add_channel(body: ChannelIn):
-    if body.mode not in ("cc", "permission"):
+    if body.mode not in ("cc", "permission") and body.kind != "reel":
         raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
     if body.mode == "permission":
         _check_permission_note(body.permission_note)
     body.query = body.query.strip()
     if not body.query:
         raise HTTPException(400, "Channel name/URL is empty")
-    if body.kind == "topic":
+    if body.kind == "reel":  # my own scripts -> original reels (no copyright risk)
+        if not any(t.strip() for t in body.scripts):
+            raise HTTPException(400, "Add at least one script.")
+    elif body.kind == "topic":
         body.mode, body.permission_note = "cc", ""  # topics only ever use Creative Commons videos
         if body.query.startswith("http"):
             raise HTTPException(400, "A topic is words like 'street food india', not a link")
@@ -915,8 +920,29 @@ def add_channel(body: ChannelIn):
             if not first:
                 raise HTTPException(400, "Connect your own YouTube channel first (dashboard), then add sources.")
             body.destination_id = first.id
-        ch = Channel(**body.model_dump())
+        data = body.model_dump()
+        scripts = [{"text": t.strip()[:5000], "used": False} for t in data.pop("scripts") if t.strip()]
+        ch = Channel(**data)
+        if body.kind == "reel":
+            ch.scripts, ch.mode, ch.permission_note, ch.resolved_url = scripts, "original", "", "reel"
+            ch.name, ch.aspect, ch.voice = "Original reels: " + body.query[:60], "9:16", body.voice or None
         s.add(ch)
+        s.commit()
+        return to_dict(ch)
+
+
+class ScriptsIn(BaseModel):
+    scripts: list[str] = Field(max_length=500)
+
+
+@app.post("/api/channels/{chid}/scripts")
+def add_scripts(chid: int, body: ScriptsIn):
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        if ch.kind != "reel":
+            raise HTTPException(400, "Scripts can only be added to an Original reels source.")
+        new = [{"text": t.strip()[:5000], "used": False} for t in body.scripts if t.strip()]
+        ch.scripts = list(ch.scripts or []) + new
         s.commit()
         return to_dict(ch)
 
@@ -1178,6 +1204,10 @@ def worker_jobs(request: Request):
                 continue
             c.job_lease, c.fetch_tries = now, (c.fetch_tries or 0) + 1
             p = s.get(Project, c.project_id)
+            if p.mode == "original":  # ReelGen makes the whole reel from my script on the helper PC
+                ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
+                jobs.append({"type": "reel", "clip_id": c.id, "script": p.description or "", "voice": (ch.voice if ch else "") or ""})
+                continue
             jobs.append({"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end})
         for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
             if c.status == "fetching" or not free(c.job_lease):
@@ -1225,7 +1255,8 @@ def worker_source(cid: int, request: Request, file: UploadFile = File(...)):
         c = _get(s, Clip, cid)
         if c.status != "fetching":
             raise HTTPException(409, f"Clip is '{c.status}', not waiting for a video")
-        dest = DATA_DIR / "clips" / str(cid) / "src" / f"src_{int(c.start)}_{int(c.end) + 1}.mp4"
+        original = s.get(Project, c.project_id).mode == "original"
+        dest = DATA_DIR / "clips" / str(cid) / "src" / ("reel.mp4" if original else f"src_{int(c.start)}_{int(c.end) + 1}.mp4")
         tmp = dest.with_name(f"{dest.stem}.{secrets.token_hex(4)}.part")
         _save_upload(file, tmp, 900 * 1024 * 1024)
         res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == "fetching")
@@ -1235,6 +1266,13 @@ def worker_source(cid: int, request: Request, file: UploadFile = File(...)):
             tmp.unlink(missing_ok=True)
             raise HTTPException(409, "Already delivered")
         tmp.replace(dest)
+        if original:  # the reel's own length is the clip
+            from .ingest import stream_seconds
+
+            secs = stream_seconds(dest, "v:0")
+            if secs > 1:
+                s.query(Clip).filter(Clip.id == cid).update({"end": round(secs, 2)})
+                s.commit()
     executor.submit(run_render, cid)
     return {"ok": True}
 

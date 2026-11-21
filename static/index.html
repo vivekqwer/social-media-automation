@@ -383,10 +383,19 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
   </div>
 </div>
 
+<div class="modal" id="m-scripts"><div class="card">
+  <div class="ch"><div><h3>Add scripts</h3><p>One script per reel; separate them with a line containing only ---</p></div><button class="btn ghost icon" id="sc-close"><i data-ico="x"></i></button></div>
+  <div class="cb"><input type="hidden" id="sc-id"><textarea id="sc-text" style="min-height:220px"></textarea>
+    <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn brand" id="sc-save">Add scripts</button></div></div>
+</div></div>
+
 <div class="modal" id="m-add"><div class="card">
   <div class="ch"><div><h3>Add sources</h3><p>One per line: channel link, @handle or name.</p></div><button class="btn ghost icon" id="m-add-close"><i data-ico="x"></i></button></div>
   <div class="cb">
-    <label class="f" style="margin-bottom:10px">Source type<select id="s-kind"><option value="channel">Channels (link, @handle or name)</option><option value="topic">Topics — the system finds Creative Commons videos itself</option></select></label>
+    <label class="f" style="margin-bottom:10px">Source type<select id="s-kind"><option value="channel">Channels (link, @handle or name)</option><option value="topic">Topics — the system finds Creative Commons videos itself</option><option value="reel">Original reels — from my own scripts (ReelGen, no copyright risk)</option></select>
+    <div id="s-reel" class="hide" style="margin-bottom:10px"><div class="row" style="gap:10px"><label class="f grow">Name<input id="s-rname" placeholder="e.g. Food facts"></label>
+      <label class="f">Voice<select id="s-voice"><option value="">Auto (from the script's language)</option><option value="hi-IN-MadhurNeural">Hindi — male</option><option value="hi-IN-SwaraNeural">Hindi — female</option><option value="en-US-AndrewNeural">English — male</option><option value="en-US-AvaNeural">English — female</option><option value="en-IN-PrabhatNeural">Indian English — male</option></select></label></div>
+      <div class="mut sm" style="margin-top:6px">Write one script per reel. Separate scripts with a line containing only <b>---</b>. Each sentence becomes a scene with voice-over and subtitles.</div></div></label>
     <textarea id="s-q" placeholder="https://youtube.com/@channel&#10;@handle&#10;Channel name"></textarea>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
       <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
@@ -650,9 +659,14 @@ $('#open-add').onclick=openAdd;$('#m-add-close').onclick=$('#m-add-cancel').oncl
 $('#h-kind').onchange=()=>{const t=$('#h-kind').value==='topic';$('#h-mode').classList.toggle('hide',t);if(t)$('#h-note').classList.add('hide');
   $('#h-q').placeholder=t?'Topic, e.g.  street food india  ·  funny cats  ·  cooking hacks':'https://youtube.com/@channel  ·  @handle  ·  video link';
   $('#h-help').textContent=t?'Give a topic — the system searches YouTube for Creative Commons videos only, clips the best moments and uploads them.':'Channel link, @handle or name. Paste a single video link to clip it yourself.'};
-$('#s-kind').onchange=()=>{const t=$('#s-kind').value==='topic';$('#s-mode').disabled=t;if(t)$('#s-mode').value='cc';
+$('#s-kind').onchange=()=>{const k=$('#s-kind').value,t=k==='topic',r=k==='reel';$('#s-mode').disabled=t||r;if(t)$('#s-mode').value='cc';$('#s-reel').classList.toggle('hide',!r);
+  if(r){$('#s-q').placeholder='Delhi ki gali mein milta hai sabse kurkura samosa. Ek baar khao, baar baar aao.'+String.fromCharCode(10)+'---'+String.fromCharCode(10)+'Next script...';return}
   $('#s-q').placeholder=t?'street food india'+String.fromCharCode(10)+'funny cats'+String.fromCharCode(10)+'cooking hacks':'https://youtube.com/@channel'+String.fromCharCode(10)+'@handle'+String.fromCharCode(10)+'Channel name'};
 $('#s-add').onclick=()=>once(async()=>{
+  if($('#s-kind').value==='reel'){const scripts=splitScripts($('#s-q').value);if(!scripts.length)throw new Error('Write at least one script');
+    await api('/api/channels','POST',{kind:'reel',query:$('#s-rname').value.trim()||'My reels',scripts,voice:$('#s-voice').value,destination_id:+$('#s-dest').value||null,
+      videos_per_run:+$('#s-v').value,gap_hours:+$('#s-g').value,review_first:$('#s-review').checked,post_times:$('#s-times').value,tz_offset:new Date().getTimezoneOffset()});
+    $('#s-q').value='';toast(`${scripts.length} script(s) added — reels are made by the helper PC`);$('#m-add').classList.remove('on');go('sources');return}
   const lines=$('#s-q').value.split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean);
   if(!lines.length)throw new Error('Add at least one channel');
   const errs=[];
@@ -661,16 +675,21 @@ $('#s-add').onclick=()=>once(async()=>{
   if(errs.length){toast(errs.join(' | '),true);$('#s-q').value=errs.map(e=>e.split(': ')[0]).join(String.fromCharCode(10))}else{$('#s-q').value='';toast('Sources added');$('#m-add').classList.remove('on')}
   go('sources');
 },$('#s-add'));
+const splitScripts=t=>t.split(/^\s*---\s*$/m).map(x=>x.trim()).filter(Boolean);
+$('#sc-close').onclick=()=>$('#m-scripts').classList.remove('on');
+$('#sc-save').onclick=()=>once(async()=>{const scripts=splitScripts($('#sc-text').value);if(!scripts.length)throw new Error('Write at least one script');
+  await api(`/api/channels/${$('#sc-id').value}/scripts`,'POST',{scripts});$('#m-scripts').classList.remove('on');toast(`${scripts.length} script(s) added`);loadSources()},$('#sc-save'));
 async function loadSources(){
   $('#src-list').innerHTML='<div class="cb">'+skel(3)+'</div>';
   await loadOverview();const L=await api('/api/channels');
   $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
     <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
-    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}<span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
+    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}${c.kind==='reel'?`<span class="badge uploaded">Original</span><span class="badge outline">${(c.scripts||[]).filter(x=>!x.used).length} scripts left</span>`:`<span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>`}${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
     <td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
     <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
     <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
-    <td><div class="row" style="justify-content:flex-end;gap:6px"><button class="btn sm" data-run="${c.id}" title="Run now">${ico('play')}Run</button><button class="btn outline sm icon" data-tog="${c.id}" title="${c.auto?'Pause':'Resume'}">${ico(c.auto?'pause':'refresh')}</button><button class="btn bad sm icon" data-del="${c.id}" title="Remove">${ico('trash')}</button></div></td></tr>`).join('')+'</tbody></table>':'<div class="cb">'+empty('rss','No sources yet','Add a channel and the system takes over.','<button class="btn" onclick="openAdd()">'+ico('plus')+'Add sources</button>')+'</div>';
+    <td><div class="row" style="justify-content:flex-end;gap:6px">${c.kind==='reel'?`<button class="btn outline sm" data-scripts="${c.id}">${ico('plus')}Scripts</button>`:''}<button class="btn sm" data-run="${c.id}" title="Run now">${ico('play')}Run</button><button class="btn outline sm icon" data-tog="${c.id}" title="${c.auto?'Pause':'Resume'}">${ico(c.auto?'pause':'refresh')}</button><button class="btn bad sm icon" data-del="${c.id}" title="Remove">${ico('trash')}</button></div></td></tr>`).join('')+'</tbody></table>':'<div class="cb">'+empty('rss','No sources yet','Add a channel and the system takes over.','<button class="btn" onclick="openAdd()">'+ico('plus')+'Add sources</button>')+'</div>';
+  $$('[data-scripts]').forEach(b=>b.onclick=()=>{$('#sc-id').value=b.dataset.scripts;$('#sc-text').value='';$('#m-scripts').classList.add('on');setTimeout(()=>$('#sc-text').focus(),50)});
   $$('[data-run]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.run}/run`,'POST');toast('Started — clips appear in Clips as they finish')}));
   $$('[data-tog]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.tog}/toggle`,'POST');loadSources()}));
   $$('[data-del]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this source?')){await api(`/api/channels/${b.dataset.del}`,'DELETE');loadSources()}}));
