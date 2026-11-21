@@ -168,3 +168,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Analytics page: watch-time card with 28-day sparkline, "Where viewers come from", "Top countries", and Watch time / Avg viewed columns per video. Tests 4/4 (+ earlier analytics 4/4).
 - Needs: YouTube Analytics API enabled in the Google Cloud project, and each channel reconnected once.
 - Live: owner enabled YouTube Analytics API (funnygunction project) and reconnected Foody with the new scope; watch-time sync status ok (lifetime 6 min so far; 28-day data still empty because YouTube adds it 1-3 days late).
+
+## 2026-11-21 — Task 29: Project guide PDF
+- docs/Clip-Studio-Project-Guide.pdf (13 pages, A4): what it does, pipeline, architecture, every dashboard page and editor tab, workflows, automatic jobs, copyright safety, helper PC, thumbnails/Shorts cover, analytics, limits, security, deployment/env vars, data, troubleshooting, status + owner checklist, API endpoints, file map. Generator: docs/tools/make_guide.py (reportlab; docs/ is gitignored, local only).
