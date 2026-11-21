@@ -157,3 +157,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 
 ## 2026-11-21 — Task 26: Problems & fixes card
 - Dashboard card lists every problem in plain words with a one-click fix: reconnect channel, resume paused uploads, retry all failed clips (POST /api/fix/retry-failed, rules re-checked), run a source that failed or has not run, helper setup steps; "Everything is working" when clean. Raw bot-check text no longer shown in source status for missing captions. Test 3/3.
+- 2026-11-21: Owner ran install_autostart.bat; Startup entry ClipStudioHelper.vbs present; hidden helper (run_hidden.bat) running and online, logging to worker\helper.log. Assistant cannot add/launch startup items itself (permission classifier) — owner did it.
