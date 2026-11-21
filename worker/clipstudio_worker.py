@@ -299,20 +299,29 @@ def _setup_ai():
                     break
                 except Exception:  # noqa: BLE001
                     pass
-        if not llm_ready():
+        fails = 0
+        while not llm_ready():  # Ollama keeps the downloaded part, so each retry carries on where it stopped
             _ai(f"Downloading the AI model {LLM_MODEL} (about 2 GB)...")
-            with httpx.stream("POST", f"{LLM_URL}/api/pull", json={"name": LLM_MODEL, "stream": True}, timeout=None) as r:
-                last = 0.0
-                for line in r.iter_lines():
-                    if not line:
-                        continue
-                    ev = _json.loads(line)
-                    if ev.get("error"):
-                        raise RuntimeError(ev["error"])
-                    if ev.get("total") and time.time() - last > 20:
-                        last = time.time()
-                        _ai(f"Downloading the AI model: {ev.get('completed', 0) * 100 // ev['total']}% "
-                            f"({ev.get('completed', 0) >> 20} MB of {ev['total'] >> 20} MB)")
+            try:
+                with httpx.stream("POST", f"{LLM_URL}/api/pull", json={"name": LLM_MODEL, "stream": True},
+                                  timeout=httpx.Timeout(60, read=600)) as r:
+                    last = 0.0
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        ev = _json.loads(line)
+                        if ev.get("error"):
+                            raise RuntimeError(ev["error"])
+                        if ev.get("total") and time.time() - last > 20:
+                            last = time.time()
+                            _ai(f"Downloading the AI model: {ev.get('completed', 0) * 100 // ev['total']}% "
+                                f"({ev.get('completed', 0) >> 20} MB of {ev['total'] >> 20} MB)")
+            except Exception as e:  # noqa: BLE001
+                fails += 1
+                if fails > 60:
+                    raise
+                _ai(f"Internet dropped while downloading the AI model ({str(e)[:60]}) - carrying on in 30 s")
+                time.sleep(30)
         if not llm_ready():
             raise RuntimeError("the model did not load")
         _ai("ready")
