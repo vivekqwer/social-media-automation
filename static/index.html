@@ -286,6 +286,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
+            <div class="card"><div class="ch"><div><h3>Instagram + Facebook</h3><p>Every Short that goes up on YouTube is also posted as an Instagram Reel and on your Facebook Page (Creative Commons, own and original videos only).</p></div><span class="badge" id="mt-badge">…</span></div>
+              <div class="cb" id="mt-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Gmail (permission mails)</h3><p>Mails to creators go from your Gmail only when you press Send (max 5 a day); their replies come to Telegram and the Ideas page.</p></div><span class="badge" id="gm-badge">…</span></div>
               <div class="cb" id="gm-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Affiliate links</h3><p>When a video's title or tags contain your keywords, the matching line is added to its description (with a short disclosure).</p></div></div>
@@ -780,7 +782,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadTelegram();loadAffiliate();loadPexels();loadGmail();
+  loadFace();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -789,6 +791,15 @@ async function loadAffiliate(){const r=await api('/api/settings/affiliate');$('#
 $('#af-add').onclick=()=>afRow({});
 $('#af-save').onclick=()=>once(async()=>{const rules=$$('#af-list .af').map(d=>({keywords:$('.af-k',d).value,text:$('.af-t',d).value})).filter(r=>r.keywords.trim()&&r.text.trim());
   await api('/api/settings/affiliate','POST',{rules});toast('Saved — used for new videos');loadAffiliate()},$('#af-save'));
+async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');b.className='badge '+(m.connected&&m.on?'uploaded':m.connected?'queued':'outline');b.textContent=m.connected?(m.on?'On':'Off'):'Not connected';
+  $('#mt-box').innerHTML=m.connected?`<div>Facebook Page: <b>${esc(m.page||'')}</b>${m.instagram?` · Instagram: <b>@${esc(m.instagram)}</b>`:' · <span class="mut">no Instagram linked to this Page</span>'}</div>
+    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="mt-tog">${m.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="mt-del">Disconnect</button></div>`
+    :`<ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Instagram → switch to a <b>Professional</b> account and link it to a <b>Facebook Page</b>.</li><li>Open developers.facebook.com → Graph API Explorer → choose your app → <b>Get User Access Token</b> with: pages_show_list, pages_read_engagement, pages_manage_posts, instagram_basic, instagram_content_publish.</li><li>Paste the token here and press Connect.</li></ol>
+    <div class="row"><input id="mt-token" class="grow" type="password" autocomplete="off" placeholder="Meta access token"><button class="btn" id="mt-save">Connect</button></div>`;
+  if($('#mt-save'))$('#mt-save').onclick=()=>once(async()=>{const r=await api('/api/meta/setup','POST',{token:$('#mt-token').value});toast('Connected: '+(r.page||'')+(r.instagram?' + @'+r.instagram:''));loadMeta()},$('#mt-save'));
+  if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
+  if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
+}
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
   $('#gm-box').innerHTML=g.email?`<div class="row"><span>Sending as <b>${esc(g.email)}</b></span><button class="btn ghost sm" id="gm-del">Disconnect</button></div>`
     :`<a class="btn" href="/auth/gmail">${ico('plus')}Connect Gmail</a><div class="mut sm" style="margin-top:8px">Pick your Google account, then on “unverified app” press Advanced → Go to Raji Studio, tick both Gmail boxes and Allow.</div>`;

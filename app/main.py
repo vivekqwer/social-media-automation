@@ -104,6 +104,8 @@ async def auth_gate(request: Request, call_next):
             return PlainTextResponse("Cross-origin request blocked", status_code=403)
     if ".." in path:
         return PlainTextResponse("Not found", status_code=404)
+    if path.startswith("/media/"):  # signed, short-lived video links for Instagram/Facebook (checked in the route)
+        return _secure(await call_next(request))
     try:
         size = int(request.headers.get("content-length") or 0)
     except ValueError:
@@ -1129,6 +1131,71 @@ def set_pexels(body: KeyIn):
             raise HTTPException(400, "Pexels did not accept this key.")
     set_setting("pexels_key", encrypt(k) if k else "")
     return {"set": bool(k)}
+
+
+# ---------- Instagram + Facebook cross-post (optional module) ----------
+class MetaIn(BaseModel):
+    token: str = Field(min_length=20, max_length=1000)
+
+
+@app.get("/media/{cid}/{exp}/{sig}.mp4")
+def public_media(cid: int, exp: int, sig: str):
+    from .meta import check_link
+
+    if not check_link(cid, exp, sig):
+        raise HTTPException(404, "Not found")
+    with SessionLocal() as s:
+        c = s.get(Clip, cid)
+        if not c or not c.output_path or not Path(c.output_path).exists():
+            raise HTTPException(404, "Not found")
+        return FileResponse(c.output_path, media_type="video/mp4")
+
+
+@app.get("/api/meta")
+def meta_status():
+    from . import meta
+
+    return meta.status()
+
+
+@app.post("/api/meta/setup")
+def meta_setup(body: MetaIn):
+    from . import meta
+
+    try:
+        return meta.setup(body.token)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(400, f"Could not reach Meta: {str(e)[:150]}")
+
+
+@app.post("/api/meta/toggle")
+def meta_toggle():
+    from . import meta
+
+    set_setting("meta_on", "0" if get_setting("meta_on") != "0" else "1")
+    return meta.status()
+
+
+@app.delete("/api/meta")
+def meta_disconnect():
+    from . import meta
+
+    meta.disconnect()
+    return meta.status()
+
+
+@app.post("/api/clips/{cid}/crosspost")
+def clip_crosspost(cid: int):
+    from . import meta
+
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.status != "uploaded":
+            raise HTTPException(409, "Upload it to YouTube first")
+    executor.submit(meta.crosspost, cid)
+    return {"started": True}
 
 
 # ---------- permission inbox ----------

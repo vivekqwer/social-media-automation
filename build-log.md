@@ -225,3 +225,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Tests 10/10; regressions pass.
 - Gmail connected live (funnygunction@gmail.com; Gmail API enabled in clip-studio). Alerts fall back to the owner's own Gmail when Telegram is not set up (plain text + dashboard link, max 40/day, separate from creator mails). Owner asked the assistant to set up Telegram too — not possible without pasting the bot token (a secret), so email alerts cover it.
 - Owner asked: removed 2 queued Indonesian-titled clips (#12, #16); replaced topic "street food india" with "indian street food hindi" (same settings, auto upload). CC topic search now prefers Indian/Hindi results (regionCode IN, relevanceLanguage hi), and no video is ever clipped twice across sources (projects' video ids are skipped).
+
+## 2026-11-22 — Task 38: Instagram + Facebook cross-post (optional module)
+- app/meta.py: owner pastes a Meta token (Graph API Explorer); the Page and its linked Instagram professional account are found; the Page token is stored encrypted. After each YouTube upload of a 9:16 clip from CC / own / original sources (not permission or commentary), the same video is posted as an Instagram Reel (container -> wait FINISHED -> publish) and to the Facebook Page (/videos with file_url). Instagram fetches the file through a signed, 2-hour /media link (HMAC; no login). Never posted twice; results on the clip; Telegram/Gmail note. Needs the owner's Meta setup to go live.
+- Tests (mock Graph API) 9/9; regressions pass.

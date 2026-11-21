@@ -196,6 +196,13 @@ def process_queue():
                     + (f"\nGoes live {c.publish_at:%d %b %H:%M} UTC" if publish_at else "\nLive now"))
                 if c.thumb_path and Path(c.thumb_path).exists():
                     youtube.push_thumbnail(c)  # a refusal is retried by retry_thumbnails()
+                try:  # Instagram + Facebook (optional module; never blocks YouTube)
+                    from .meta import crosspost, status as meta_status
+
+                    if meta_status()["connected"]:
+                        executor.submit(crosspost, c.id)
+                except Exception:  # noqa: BLE001
+                    pass
             except (RefreshError, TokenError):
                 c.status, c.error = "queued", "Reconnect your YouTube channel (login expired, revoked or unreadable)."
                 d = s.get(Destination, c.destination_id)
