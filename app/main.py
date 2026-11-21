@@ -366,20 +366,28 @@ def _get(s, model, id_):
 
 
 # ---------- projects ----------
+def _check_permission_note(note: str):
+    """Permission mode needs real proof (who allowed it, how, when) — not just the word 'permission'."""
+    n = (note or "").strip()
+    if len(n) < 20 or n.lower() in {"permission", "i have permission", "yes", "allowed", "ok"}:
+        raise HTTPException(400, "Write how you got the creator's permission — who, how and when "
+                                 "(e.g. 'Email from @channel on 20 Nov 2026 allowing reuse of this video').")
+
+
 @app.post("/api/projects")
 def create_project(body: ProjectIn):
     if body.mode not in MODES:
         raise HTTPException(400, "mode must be cc, permission or commentary")
-    if body.mode == "permission" and not body.permission_note.strip():
-        raise HTTPException(400, "Permission mode needs a note/proof of the creator's permission.")
+    if body.mode == "permission":
+        _check_permission_note(body.permission_note)
     _check_yt_url(body.url)
     try:
         info = fetch_info(body.url)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, f"Could not read video: {friendly_error(e)}")
     if body.mode == "cc" and not is_cc(info["license"]):
-        raise HTTPException(400, f"Not a Creative Commons video (license: {info['license'] or 'Standard YouTube'}). "
-                                 "Use permission or commentary mode.")
+        raise HTTPException(409, {"code": "not_cc", "license": info["license"] or "Standard YouTube License",
+                                  "title": info["title"], "channel": info["channel"]})
     with SessionLocal() as s:
         p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note, **info)
         s.add(p)
@@ -885,8 +893,8 @@ def discard_clip(cid: int):
 def add_channel(body: ChannelIn):
     if body.mode not in ("cc", "permission"):
         raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
-    if body.mode == "permission" and not body.permission_note.strip():
-        raise HTTPException(400, "Permission mode needs a note/proof of the creator's permission.")
+    if body.mode == "permission":
+        _check_permission_note(body.permission_note)
     body.query = body.query.strip()
     if not body.query:
         raise HTTPException(400, "Channel name/URL is empty")
@@ -1287,8 +1295,8 @@ def quick_start(body: QuickIn):
     if body.mode == "cc" and not is_cc(info["license"]):
         raise HTTPException(409, {"code": "not_cc", "license": info["license"] or "Standard YouTube License",
                                   "title": info["title"], "channel": info["channel"]})
-    if body.mode == "permission" and not body.permission_note.strip():
-        raise HTTPException(400, "Write how you got the creator's permission.")
+    if body.mode == "permission":
+        _check_permission_note(body.permission_note)
     if body.length == "whole" and info["duration"] > 90 * 60:
         raise HTTPException(400, "Whole-video upload works for videos up to 90 minutes. Choose Best moment instead.")
     with SessionLocal() as s:
