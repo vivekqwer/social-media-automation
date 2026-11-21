@@ -147,6 +147,7 @@ class Worker(Base):
     token_hash = Column(String(64), unique=True)
     approved = Column(Boolean, default=False)
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
+    llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

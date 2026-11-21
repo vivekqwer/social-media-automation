@@ -1371,6 +1371,61 @@ def analytics_sync(live: int = 0):
     return {**overview(), "errors": errors}
 
 
+# ---------- setup checklist: everything the owner still has to do, in one place ----------
+@app.get("/api/setup")
+def setup_checklist():
+    from . import faces, gmail, meta, telegram
+
+    items = []
+
+    def add(key, title, done, why, action=None, optional=False, blocked=""):
+        items.append({"key": key, "title": title, "done": bool(done), "why": why, "action": action, "optional": optional,
+                      "blocked": blocked})
+
+    with SessionLocal() as s:
+        dests = s.query(Destination).all()
+        hp = _helper_state(s)
+        llm = s.query(Worker).filter(Worker.approved.is_(True), Worker.llm.is_(True)).count() > 0
+        review = s.query(Clip).filter(Clip.status == "rendered").count()
+        failed = s.query(Clip).filter(Clip.status == "failed").count()
+        ai_src = s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True)).count()
+    add("youtube", "YouTube channel connected", dests and not any(_dest_dict(d)["needs_reconnect"] for d in dests),
+        "Uploads go to your channel.", {"href": "/auth/login", "label": "Connect / reconnect"})
+    add("face", "Your face photo", faces.DEFAULT_FACE.exists(), "Put on every thumbnail.", {"go": "settings", "label": "Upload photo"})
+    add("helper", "Helper PC online", hp["online"], "Downloads videos, makes reels and captions from your home internet.",
+        {"help": "helper", "label": "How to start it"}, blocked="" if hp["online"] else f"{hp['waiting']} job(s) are waiting for it")
+    add("gmail", "Gmail connected", gmail.connected_email(), "Alerts to your inbox and permission mails to creators.",
+        {"href": "/auth/gmail", "label": "Connect Gmail"})
+    perms = []
+    try:
+        from .permissions import listing
+
+        perms = listing()
+    except Exception:  # noqa: BLE001
+        pass
+    need_mail = [c for c in perms if c["status"] == "new" and not c.get("email")]
+    replied = [c for c in perms if c["status"] == "replied"]
+    add("perm", "Permission inbox", not need_mail and not replied,
+        "Creators who may let you use their videos.", {"go": "ideas", "label": "Open inbox"},
+        blocked=(f"{len(replied)} creator(s) replied — decide yes/no. " if replied else "")
+        + (f"{len(need_mail)} creator(s) need an email address (from their channel About page) before you can press Send." if need_mail else ""))
+    add("review", "Clips waiting for your approval", review == 0, "Only sources with “Review first” wait for you.",
+        {"go": "clips", "label": "Review clips"}, blocked=f"{review} clip(s) ready to review" if review else "")
+    add("failed", "No failed clips", failed == 0, "", {"fix": "retry_failed", "label": "Retry all failed"},
+        blocked=f"{failed} clip(s) failed" if failed else "")
+    add("ai", "Local AI on the helper PC (Ollama)", llm, "Writes reel scripts on trending topics by itself.",
+        {"help": "ollama", "label": "How to install"}, optional=True,
+        blocked="" if llm else ("Being installed on your PC — the AI-script reels start by themselves when it is ready." if ai_src else ""))
+    add("telegram", "Telegram (phone buttons)", telegram.enabled(), "Approve and reply from your phone. Without it, alerts come by Gmail.",
+        {"go": "settings", "label": "Set up"}, optional=True)
+    add("pexels", "Pexels key (real photos in reels)", bool(_secret_setting("pexels_key")), "Reels use stock photos instead of colours.",
+        {"go": "settings", "label": "Add key"}, optional=True)
+    add("meta", "Instagram + Facebook", meta.status()["connected"], "Every Short is also posted as a Reel on Instagram and Facebook.",
+        {"go": "settings", "label": "Connect"}, optional=True)
+    must = [i for i in items if not i["optional"]]
+    return {"items": items, "done": sum(i["done"] for i in must), "total": len(must)}
+
+
 # ---------- health: every problem in plain words, with a one-click fix ----------
 @app.get("/api/health")
 def health():
@@ -1580,6 +1635,11 @@ def worker_jobs(request: Request):
     _worker_or_401(request)
     jobs, now = [], utcnow()
     free = lambda lease: not lease or lease < now - JOB_LEASE  # noqa: E731
+    with SessionLocal() as s:  # remember whether this helper has a local AI (for the setup checklist)
+        w = s.query(Worker).filter(Worker.token_hash == workers.token_hash(request.headers.get("x-worker-token", ""))).first()
+        if w is not None:
+            w.llm = request.headers.get("x-worker-llm") == "1"
+            s.commit()
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(20):
             if len(jobs) >= 2 or not free(c.job_lease):

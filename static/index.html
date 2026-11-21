@@ -212,6 +212,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <section id="p-dashboard">
         <div class="page-h"><div><h1>Dashboard</h1><div class="desc">Paste a source — clips are cut, credited and uploaded to your channel automatically.</div></div></div>
         <div id="alerts"></div>
+        <div class="card" id="setup" style="margin-bottom:16px"><div class="ch"><div><h3>What you need to do</h3><p id="su-sub">Everything that needs you, in one place. The rest runs by itself.</p></div><span class="badge" id="su-badge">…</span></div><div class="cb" id="su-list"></div></div>
         <div class="card" id="health" style="margin-bottom:16px"><div class="ch"><div><h3>Problems &amp; fixes</h3><p>Everything that needs attention, with a button to fix it.</p></div><button class="btn outline sm" id="hl-refresh">Check again</button></div><div class="cb" id="hl-list"></div></div>
         <div class="card" style="margin-bottom:16px">
           <div class="ch"><div><h3>Add a source</h3><p id="h-help">Channel link, @handle or name. Paste a single video link to clip it yourself.</p></div></div>
@@ -687,6 +688,19 @@ async function loadHealth(){
     else if(it.fix==='helper'){alert('The helper PC downloads videos from your home internet (YouTube blocks the server).'+String.fromCharCode(10,10)+'One time only: open the folder D:'+String.fromCharCode(92)+'social medi engin'+String.fromCharCode(92)+'worker and double-click install_autostart.bat.'+String.fromCharCode(10)+'After that it starts by itself whenever your PC is on.');return}
     loadDash()}));
 }
+const SUHELP={helper:'The helper PC is your own computer. It starts by itself when you sign in to Windows (worker\\install_autostart.bat was run once). If it is offline: turn the PC on and make sure the internet works.',
+  ollama:'The local AI (Ollama) writes reel scripts for free on your PC. It is being installed for you. If you ever need to install it again: get it from ollama.com, then run:  ollama pull qwen2.5:3b'};
+async function loadSetup(){
+  let d;try{d=await api('/api/setup')}catch(e){return}
+  const b=$('#su-badge');b.className='badge '+(d.done===d.total?'uploaded':'queued');b.textContent=`${d.done} / ${d.total} done`;
+  const row=it=>{const a=it.action||{};const btn=it.done?'':a.href?`<a class="btn sm" href="${a.href}">${esc(a.label)}</a>`:`<button class="btn sm" data-su="${it.key}">${esc(a.label||'Open')}</button>`;
+    return `<div class="item"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}
+      <span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${btn}</div>`};
+  const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
+  $('#su-list').innerHTML=must.map(row).join('')+'<div class="mut sm" style="margin:12px 0 4px">Optional extras</div>'+opt.map(row).join('');
+  $$('[data-su]').forEach(btn=>btn.onclick=()=>{const it=d.items.find(i=>i.key===btn.dataset.su),a=it.action||{};
+    if(a.go)go(a.go);else if(a.help)alert(SUHELP[a.help]);else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
+}
 $('#hl-refresh').onclick=()=>once(loadHealth,$('#hl-refresh'));
 async function loadDash(){
   if(!OV){$('#kpis').innerHTML=Array.from({length:4},()=>'<div class="card stat"><div class="sk" style="height:70px"></div></div>').join('');['#d-review','#d-up','#d-rec','#d-fail','#d-pipe'].forEach(s=>$(s).innerHTML=skel(2))}
@@ -702,7 +716,7 @@ async function loadDash(){
   const hp=OV.helper||{};if(hp.waiting&&!hp.online)al+=`<div class="alert bad">${ico('alert')}<span><b>Helper PC is offline</b> — ${hp.waiting} job${hp.waiting===1?'':'s'} waiting${hp.last_seen?' (last seen '+when(hp.last_seen)+')':''}. Start it, or run <b>worker\\install_autostart.bat</b> once so it always starts by itself.</span></div>`;
   if(OV.thumbs_pending)al+=`<div class="alert">${ico('image')}<span><b>${OV.thumbs_pending} thumbnail${OV.thumbs_pending===1?' is':'s are'} waiting.</b> YouTube allows custom thumbnails only after the channel's phone number is verified. Verify once — they are sent automatically (checked every 30 minutes).</span><a class="btn sm" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Verify phone</a></div>`;
   if(OV.alerts_unseen)al+=`<div class="alert bad">${ico('bell')}${OV.alerts_unseen} of your uploaded videos had a problem on YouTube (deleted, copyright or blocked).<button class="btn sm" onclick="go('alerts')">See details</button></div>`;
-  $('#alerts').innerHTML=al;loadHealth();
+  $('#alerts').innerHTML=al;loadHealth();loadSetup();
   $$('[data-resume]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Resume uploads to this channel? Only do this if the strike/removal is dealt with.')){await api(`/api/destinations/${b.dataset.resume}/resume`,'POST');toast('Uploads resumed');loadDash()}}));
   const Q=OV.quota;if(Q){const pct=Math.min(100,Math.round(Q.used*100/Q.limit));
     $('#q-reset').textContent='Resets '+new Date(Q.resets_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
