@@ -62,7 +62,8 @@ app/{main,config,db,ingest,hot,render,tts,keywords,metadata,youtube,policy,autop
 
 ## Live state (2026-11-20 evening)
 - First uploads done (k1xahUpFFWQ, DwkHI7Mq2K4). OAuth app "In production" since 2026-11-20; Foody should be reconnected once so its token is a production one.
-- Helper auto-start installed by owner 2026-11-21 (StartupClipStudioHelper.vbs -> workerun_hidden.bat, log workerhelper.log).
+- Helper auto-start installed by owner 2026-11-21 (StartupClipStudioHelper.vbs -> worker
+un_hidden.bat, log workerhelper.log).
 
 ## Status (2026-11-20)
 MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg render, CC gate, live yt-dlp, channel resolve/list, section download, dashboard). NOT yet tested: real YouTube upload (needs OAuth creds), full autopilot run, Railway deploy.
@@ -106,3 +107,6 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Before every deploy: extract the <script> from static/index.html and run `node --check` (a broken script blanks the whole dashboard).
 
 - Product name: **Raji Studio** (since 2026-11-21). Internal ids keep "clipstudio" (files, cookies, env vars, ClipStudioHelper.vbs).
+
+- Permission flow (2026-11-22): owner presses Send (never auto-mailed); a plain "yes" reply from the same address auto-starts the source with Undo; conditional/unclear replies wait for the owner. Never auto-upload on silence.
+- Local AI is installed by the helper itself from the dashboard (Install now); progress in checklist.
