@@ -215,13 +215,9 @@ def start():
     recover()
     sch = BackgroundScheduler(timezone="UTC")
     sch.add_job(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
-    hours = int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6")
-    with SessionLocal() as s:  # deploys restart the timer: run soon if the last run is already overdue
-        from .db import Channel
-        last = s.query(func.min(Channel.last_run)).filter(Channel.auto.is_(True)).scalar()
-        overdue = s.query(Channel).filter(Channel.auto.is_(True)).count() and (not last or last < utcnow() - timedelta(hours=hours))
-    sch.add_job(lambda: executor.submit(autopilot_tick), "interval", hours=hours, max_instances=1, coalesce=True,
-                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5) if overdue else None)
+    # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
+    sch.add_job(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))
     sch.add_job(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
     sch.add_job(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))

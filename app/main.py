@@ -27,7 +27,7 @@ from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS
 from .monitor import check_uploads
 from .db import Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
-from .ingest import fetch_info, friendly_error, is_cc
+from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
 from .jobs import executor
 from .keywords import suggest
 from .metadata import auto_metadata
@@ -904,6 +904,9 @@ def add_channel(body: ChannelIn):
             raise HTTPException(400, "A topic is words like 'street food india', not a link")
     elif body.query.startswith("http"):
         _check_yt_url(body.query)
+        if video_id_from_url(body.query):
+            raise HTTPException(400, "That is a single video link, not a channel. Use Quick upload or New clip for one "
+                                     "video; add a channel link (youtube.com/@name) or a topic as a source.")
     with SessionLocal() as s:
         if body.destination_id:
             _get(s, Destination, body.destination_id)

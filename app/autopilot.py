@@ -1,4 +1,5 @@
 """Autopilot: channel name/URL in -> latest videos -> hot moments -> clips -> render -> metadata -> scheduled."""
+import os
 import re
 from datetime import timedelta
 from urllib.parse import quote
@@ -255,9 +256,14 @@ def run_channel(channel_id: int):
         s.commit()
 
 
+INTERVAL = timedelta(hours=int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6"))
+
+
 def autopilot_tick():
+    """Run every source whose interval has passed since its last run (called every 15 minutes)."""
+    due = utcnow() - INTERVAL
     with SessionLocal() as s:
-        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all()]
+        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all() if not c.last_run or c.last_run < due]
     for i in ids:
         try:
             run_channel(i)

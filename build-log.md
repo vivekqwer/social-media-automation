@@ -149,3 +149,7 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 ## 2026-11-21 — Task 24: Non-CC links handled clearly
 - New clip from a link: a non-CC video in CC mode shows a panel (title, creator, licence, strike warning) with three choices: commentary clip, "I have permission" (note field only then), or find CC videos via a topic source. Permission notes must be real proof (min 20 chars, not just "permission") in new clip, Quick upload and sources. Test 4/4.
 - Deployed by uploading app/main.py + static/index.html through GitHub web (commits 52e4159, 6760019) because the privacy plugin blocks putting the git email in commands; local git has no user.email set. GitHub stored those two files with CRLF line endings (content identical).
+
+## 2026-11-21 — Task 25: Autopilot schedule bug + wrong source
+- Bug: autopilot job was added with next_run_time=None when not overdue at boot, which APScheduler treats as PAUSED, so sources stopped running after deploys (topic source idle 21 h). Now the tick runs every 15 min and each source runs when its own 6 h interval has passed. Test 2/2.
+- A single Short link (Q46S5BfashM) had been added as a channel source (Add sources dialog) and failed every run; the server now refuses video links as sources with a clear message; the broken source was removed.
