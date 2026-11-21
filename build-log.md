@@ -209,3 +209,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Owner chose the name Raji Studio. Changed everywhere it is shown: dashboard (title, sidebar, breadcrumb), login/forgot/reset/about/privacy/terms pages, Telegram messages, weekly report, helper window/log text, launchers, README, project guide PDF (docs/Raji-Studio-Project-Guide.pdf) and API audit draft.
 - Kept internal names on purpose (renaming would break things): file names (clipstudio_worker.py), cookies, env vars (CLIPSTUDIO_*), Startup entry ClipStudioHelper.vbs, backup file names.
 - To do by owner (optional): rename the Google OAuth app (Google Cloud → Branding) so the Google sign-in screen also says Raji Studio.
+- Link fields: Chrome ignored autocomplete=off and filled the saved username; fields are now read-only until focused (Chrome never autofills read-only fields).
