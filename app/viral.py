@@ -9,6 +9,7 @@ Music labels, studios, TV and risky titles are never picked. Nothing is uploaded
 """
 import json
 import logging
+import re
 from datetime import datetime, timedelta
 
 from . import quota, youtube
@@ -19,6 +20,7 @@ PER_DAY = 5
 KEEP_DAYS = 30
 MIN_SECONDS = 90  # clips are cut from real videos; other people's Shorts are shown but never re-posted
 IST = timedelta(hours=5, minutes=30)
+LIVE_RE = re.compile(r"live|livestream|live stream|stream|premiere", re.I)  # stream replays make poor clips
 
 
 def today() -> str:
@@ -137,6 +139,17 @@ def pick_today(extra: str | None = None) -> list:
     day = today()
     allp = _picks()
     picks = allp.get(day, [])
+    creators0 = permissions._load()
+    # drop today's automatic picks that newer rules exclude, as long as nothing was sent or made for them yet
+    keep = [p for p in picks if p.get("by_hand") or p.get("project_id") or creators0.get(p["channel_id"], {}).get("mailed")
+            or not LIVE_RE.search(p["title"])]
+    if len(keep) != len(picks):
+        for p in picks:
+            c = creators0.get(p["channel_id"], {})
+            if p not in keep and c.get("video_id") == p["video_id"] and c.get("status") == "new" and not c.get("mailed"):
+                permissions.set_status(p["channel_id"], "skipped")  # their inbox mail was only for this pick
+        allp[day] = picks = keep
+        _save_picks(allp)
     if len(picks) >= PER_DAY and not extra:
         return picks
     board = _get("viral:" + day, {}).get("videos", {})
@@ -154,6 +167,7 @@ def pick_today(extra: str | None = None) -> list:
     else:
         cands = [r for r in cands if r["video_id"] not in used and r["duration"] >= MIN_SECONDS
                  and not youtube.RISKY.search(r["title"]) and not permissions.LABELS.search(r["channel"])
+                 and not LIVE_RE.search(r["title"])
                  and creators.get(r["channel_id"], {}).get("status") not in ("declined", "skipped")]
     # creators who already said yes first, then Creative Commons, then everyone else
     cands.sort(key=lambda r: 0 if creators.get(r["channel_id"], {}).get("status") == "granted" else 1 if r["cc"] else 2)
