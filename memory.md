@@ -110,3 +110,5 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 
 - Permission flow (2026-11-22): owner presses Send (never auto-mailed); a plain "yes" reply from the same address auto-starts the source with Undo; conditional/unclear replies wait for the owner. Never auto-upload on silence.
 - Local AI is installed by the helper itself from the dashboard (Install now); progress in checklist.
+- Viral today page (app/viral.py): dated board every 2 h + 5 picks/day; CC/allowed clipped at once, others need owner's one-press "Send all ready mails"; a plain yes clips that video automatically. YouTube quota fits ~5-6 uploads/day across all sources.
+- Gotcha: writing regex via bash/python heredocs can turn `` into a backspace char (0x08) — grep for $'' after patches.
