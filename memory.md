@@ -92,7 +92,7 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 - Past publish times are refused; "Upload now" asks for confirmation (goes public at once).
 - Basic auth removed; logout ends all sessions; ADMIN_EMAIL alone controls password reset.
 
-- Autopilot topic source #1 "street food india" -> Foody, review first ON, posts 10:00/18:00 IST (added 2026-11-21).
+- Autopilot topic source #1 "street food india" -> Foody, review first OFF since 2026-11-21 (fully automatic), posts 10:00/18:00 IST.
 
 - Git identity: repo-local user.name vivekqwer + GitHub noreply address (set 2026-11-21); commits and pushes work again.
 - Railway project is in the Chrome browser named "yaha open karo" (switch_browser); dashboard login there is not saved.
