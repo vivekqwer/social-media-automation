@@ -401,7 +401,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
   <div class="ch"><div><h3>New clip from a video</h3><p>Paste a video link; we find the hot moments.</p></div><button class="btn ghost icon" id="m-close"><i data-ico="x"></i></button></div>
   <div class="cb">
     <div class="row"><input id="n-url" class="grow" autocomplete="off" name="video-link-2" placeholder="https://www.youtube.com/watch?v=..."><select id="n-mode" style="width:auto"><option value="cc">CC video</option><option value="permission">Permission</option><option value="commentary">Commentary</option></select><button class="btn" id="n-load">Find hot moments</button></div>
-    <input id="n-note" style="margin-top:10px" placeholder="Permission note (permission mode)">
+    <input id="n-note" class="hide" style="margin-top:10px" placeholder="How did you get the creator's permission? Who, how, when — e.g. Email from @channel on 20 Nov 2026">
     <div id="n-out" style="margin-top:14px"></div>
   </div>
 </div></div>
@@ -668,11 +668,27 @@ function refreshAfter(){const p=$$('main section').find(s=>!s.classList.contains
 
 function openNewModal(){$('#m-new').classList.add('on')}
 $('#new-clip').onclick=openNewModal;$('#m-close').onclick=()=>$('#m-new').classList.remove('on');
-async function openNew(url,mode,note){$('#n-url').value=url||'';$('#n-mode').value=mode||'cc';$('#n-note').value=note||'';$('#n-out').innerHTML='';openNewModal();if(url)await loadHot()}
+async function openNew(url,mode,note){$('#n-url').value=url||'';$('#n-mode').value=mode||'cc';$('#n-note').value=note||'';$('#n-mode').onchange();$('#n-out').innerHTML='';openNewModal();if(url)await loadHot()}
+$('#n-mode').onchange=()=>{const perm=$('#n-mode').value==='permission';$('#n-note').classList.toggle('hide',!perm);if(perm)setTimeout(()=>$('#n-note').focus(),30)};
 $('#n-load').onclick=()=>once(loadHot,$('#n-load'));
 let NP=null;
 async function loadHot(){
-  NP=await api('/api/projects','POST',{url:$('#n-url').value,mode:$('#n-mode').value,permission_note:$('#n-note').value});
+  const r0=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('#n-url').value.trim(),mode:$('#n-mode').value,permission_note:$('#n-note').value})});
+  if(r0.status===401){location.href='/login';return}
+  const j0=await r0.json().catch(()=>({}));
+  if(r0.status===409&&j0.detail&&j0.detail.code==='not_cc'){const x=j0.detail;
+    $('#n-out').innerHTML=`<div class="alert" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div><b>“${esc(x.title)}”</b> by ${esc(x.channel)} is <b>not Creative Commons</b> (${esc(x.license)}). Re-uploading it as it is can bring a copyright strike — your channel already has one.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="n-to-comm">Make a commentary clip (your voice + text)</button>
+        <button class="btn outline sm" id="n-to-perm">I have the creator's permission</button>
+        <button class="btn ghost sm" id="n-to-topic">Find Creative Commons videos instead</button></div></div>`;
+    $('#n-to-comm').onclick=()=>{$('#n-mode').value='commentary';$('#n-mode').onchange();once(loadHot,$('#n-load'))};
+    $('#n-to-perm').onclick=()=>{$('#n-mode').value='permission';$('#n-mode').onchange();toast('Write who allowed it, how and when, then press Find hot moments')};
+    $('#n-to-topic').onclick=()=>{$('#m-new').classList.remove('on');go('dashboard');$('#h-kind').value='topic';$('#h-kind').onchange();$('#h-q').focus()};
+    return}
+  if(!r0.ok)throw new Error(typeof j0.detail==='string'?j0.detail:'Could not read the video');
+  NP=j0;
   const head=`<div class="row" style="flex-wrap:nowrap"><img src="${thumb(NP.video_id)}" style="width:120px;border-radius:8px"><div><b>${esc(NP.title)}</b><div class="mut sm">${esc(NP.channel)} · ${T(NP.duration)} · ${esc(NP.license||'Standard YouTube License')}</div></div></div>`;
   $('#n-out').innerHTML=head+'<div class="mut" style="margin:12px 0">Finding most-replayed &amp; most-commented moments…</div><div class="sk" style="height:46px"></div>';
   const r=await api(`/api/projects/${NP.id}/analyze`,'POST');
