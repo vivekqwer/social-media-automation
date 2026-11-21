@@ -284,6 +284,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
+            <div class="card"><div class="ch"><div><h3>Affiliate links</h3><p>When a video's title or tags contain your keywords, the matching line is added to its description (with a short disclosure).</p></div></div>
+              <div class="cb"><div id="af-list"></div><div class="row" style="margin-top:8px"><button class="btn outline sm" id="af-add"><i data-ico="plus"></i>Add rule</button><button class="btn sm" id="af-save">Save</button></div></div></div>
+            <div class="card"><div class="ch"><div><h3>Stock photos for reels (Pexels)</h3><p>Free key from pexels.com/api — original reels then use real photos instead of colour backgrounds.</p></div><span class="badge" id="px-badge">…</span></div>
+              <div class="cb"><div class="row"><input id="px-key" class="grow" type="password" autocomplete="off" placeholder="Pexels API key"><button class="btn" id="px-save">Save</button><button class="btn ghost sm" id="px-del">Remove</button></div></div></div>
             <div class="card"><div class="ch"><div><h3>Your face for thumbnails</h3><p>Upload one clear photo (face + shoulders). The background is removed automatically and your face is put on every thumbnail. Channels you connect later use it too — or give a channel its own face above.</p></div></div>
               <div class="cb row" style="flex-wrap:nowrap;align-items:center"><div id="face-prev" style="width:96px;height:96px;border-radius:12px;background:var(--muted) center/contain no-repeat;flex:none"></div>
                 <div style="display:flex;flex-direction:column;gap:8px"><label class="btn sm"><i data-ico="image"></i><span id="face-lbl">Upload face photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-face="0" hidden></label>
@@ -410,7 +414,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <div class="mut sm" style="margin-top:6px">Write one script per reel. Separate scripts with a line containing only <b>---</b>. Each sentence becomes a scene with voice-over and subtitles.</div></div></label>
     <textarea id="s-q" placeholder="https://youtube.com/@channel&#10;@handle&#10;Channel name"></textarea>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:14px">
-      <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option></select></label>
+      <label class="f">Mode<select id="s-mode"><option value="cc">CC videos only</option><option value="permission">I have permission</option><option value="own">My own channel (long videos → Shorts)</option></select></label>
       <label class="f">Upload to<select id="s-dest"></select></label>
       <label class="f">Upload as<select id="s-a"><option value="9:16">Shorts (9:16)</option><option value="16:9">Video (16:9)</option><option value="1:1">Square (1:1)</option></select></label>
       <label class="f">Videos per run<input id="s-v" type="number" value="3" min="1" max="20"></label>
@@ -549,6 +553,11 @@ function watchCard(c){const w=c.watch,st=c.watch_status||'';
     return `<div class="card stat"><div class="l">${esc(c.name)} · watch time<span class="ic">${ico('clock')}</span></div><div class="sm" style="margin-top:8px">${msg}</div></div>`}
   return `<div class="card stat"><div class="l">${esc(c.name)} · watch time (28 days)<span class="ic">${ico('clock')}</span></div><div class="v">${hrs(w.minutes_28d)}</div>
     <div class="d">${hrs(w.lifetime_minutes)} all time · subs +${num(w.subs_gained_28d)} / −${num(w.subs_lost_28d)}</div><div>${spark(w.daily,'minutes')}</div></div>`}
+function healthCard(c){const h=c.health||{score:null,notes:[]},b=c.best_hours||{};
+  const col=h.score>=80?'var(--ok)':h.score>=50?'var(--warn)':'var(--bad)';
+  const best=b.enough?b.ranked.slice(0,3).map(x=>`${String(x.hour).padStart(2,'0')}:00`).join(', '):`needs ${Math.max(0,8-(b.videos||0))} more public videos`;
+  return `<div class="card stat"><div class="l">${esc(c.name)} · channel health<span class="ic">${ico('check')}</span></div><div class="v" style="color:${col}">${h.score==null?'—':h.score}<span class="mut sm">/100</span></div>
+    <div class="d">${esc(h.notes.join(' · '))}</div><div class="sm" style="margin-top:6px">Best upload times so far: <b>${esc(best)}</b></div></div>`}
 function watchDetails(c){const w=c.watch;if(!w)return '';const bar=(v,mx)=>`<div class="bar" style="width:100%;max-width:none"><i style="width:${mx?Math.round(v*100/mx):0}%"></i></div>`;
   const tmax=Math.max(1,...w.traffic.map(t=>t.views)),cmax=Math.max(1,...w.countries.map(t=>t.views));
   return `<div class="grid cols" style="margin-top:16px">
@@ -563,7 +572,7 @@ function renderAnalytics(){
     <div class="card stat"><div class="l">${esc(c.name)} · subscribers<span class="ic">${ico('youtube')}</span></div><div class="v">${c.subscribers_hidden?'hidden':num(c.subscribers)}</div><div class="d">${delta(c.subs_24h)} today · ${delta(c.subs_7d)} this week</div></div>
     <div class="card stat"><div class="l">${esc(c.name)} · total views<span class="ic">${ico('chart')}</span></div><div class="v">${num(c.views)}</div><div class="d">${delta(c.views_24h)} today · ${delta(c.views_7d)} this week</div><div>${spark(c.daily,'views')}</div></div>
     <div class="card stat"><div class="l">${esc(c.name)} · videos<span class="ic">${ico('film')}</span></div><div class="v">${num(c.videos)}</div><div class="d">${c.synced_at?'updated '+when(c.synced_at):'first update in a minute'}</div></div>
-    ${watchCard(c)}`).join('')}</div>${d.channels.map(watchDetails).join('')}`
+    ${watchCard(c)}${healthCard(c)}`).join('')}</div>${d.channels.map(watchDetails).join('')}`
     :empty('youtube','No channel connected','Connect a YouTube channel to see its numbers.');
   const sort=$('#an-sort').value,v=[...d.videos];
   if(sort==='views')v.sort((a,b)=>b.views-a.views);if(sort==='new')v.sort((a,b)=>(b.new_views||0)-(a.new_views||0));
@@ -591,7 +600,7 @@ async function loadIdeas(){
     :`<div class="cb mut sm">${d.channels.length?'No outliers right now — the check runs every day.':''}</div>`;
   $('#id-trend').innerHTML=d.trending_error?`<div class="cb mut sm">${esc(d.trending_error)}</div>`:d.trending.length?`<table class="tbl"><thead><tr><th>Trending video</th><th>Channel</th><th style="text-align:right">Views</th><th></th></tr></thead><tbody>${d.trending.map(v=>ideaRow(v,`<td style="text-align:right">${num(v.views)}</td>`)).join('')}</tbody></table>`:'<div class="cb mut sm">Nothing yet.</div>';
   $$('[data-unc]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/ideas/competitors?url='+encodeURIComponent(b.dataset.unc),'DELETE');loadIdeas()}));
-  $$('[data-topic]').forEach(b=>b.onclick=()=>{const words=""" + JS_TOPIC + """.filter(w=>w.length>2).slice(0,4).join(' ').toLowerCase();
+  $$('[data-topic]').forEach(b=>b.onclick=()=>{const words=b.dataset.topic.replace(/[#|:()\[\]!?.,'"]/g,' ').split(/\s+/).filter(w=>w.length>2).slice(0,4).join(' ').toLowerCase();
     const t=prompt('Add this as a topic source (Creative Commons videos only). Edit the words if you like:',words);if(!t)return;
     once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
 }
@@ -713,7 +722,7 @@ async function loadSources(){
   await loadOverview();const L=await api('/api/channels');
   $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
     <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
-    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}${c.kind==='reel'?`<span class="badge uploaded">Original</span><span class="badge outline">${(c.scripts||[]).filter(x=>!x.used).length} scripts left</span>`:`<span class="badge outline">${c.mode==='cc'?'CC only':'Permission'}</span>`}${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
+    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}${c.kind==='reel'?`<span class="badge uploaded">Original</span><span class="badge outline">${(c.scripts||[]).filter(x=>!x.used).length} scripts left</span>`:`<span class="badge outline">${c.mode==='cc'?'CC only':c.mode==='own'?'My own videos':'Permission'}</span>`}${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
     <td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
     <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
     <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
@@ -733,8 +742,18 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadTelegram();
+  loadFace();loadTelegram();loadAffiliate();loadPexels();
 }
+function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
+  d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
+  $('.af-del',d).onclick=()=>d.remove();$('#af-list').appendChild(d)}
+async function loadAffiliate(){const r=await api('/api/settings/affiliate');$('#af-list').innerHTML='';(r.rules.length?r.rules:[{}]).forEach(afRow)}
+$('#af-add').onclick=()=>afRow({});
+$('#af-save').onclick=()=>once(async()=>{const rules=$$('#af-list .af').map(d=>({keywords:$('.af-k',d).value,text:$('.af-t',d).value})).filter(r=>r.keywords.trim()&&r.text.trim());
+  await api('/api/settings/affiliate','POST',{rules});toast('Saved — used for new videos');loadAffiliate()},$('#af-save'));
+async function loadPexels(){const r=await api('/api/settings/pexels');const b=$('#px-badge');b.className='badge '+(r.set?'uploaded':'outline');b.textContent=r.set?'Key saved':'Not set'}
+$('#px-save').onclick=()=>once(async()=>{await api('/api/settings/pexels','POST',{key:$('#px-key').value});$('#px-key').value='';toast('Pexels key saved');loadPexels()},$('#px-save'));
+$('#px-del').onclick=()=>once(async()=>{await api('/api/settings/pexels','POST',{key:''});loadPexels()});
 async function loadTelegram(){
   let t;try{t=await api('/api/telegram')}catch(e){return}
   const b=$('#tg-badge');b.className='badge '+(t.linked&&t.on?'uploaded':t.configured?'queued':'outline');b.textContent=t.linked?(t.on?'On':'Off'):t.configured?'Waiting for /start':'Not set up';

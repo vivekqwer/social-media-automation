@@ -111,7 +111,12 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
 def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
     """Returns True if the video yielded clips."""
     info = fetch_info(f"https://www.youtube.com/watch?v={vid}")
-    if (ch.mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
+    if ch.mode == "own":  # only videos that really are on one of my connected channels
+        mine = {d.channel_id for d in s.query(Destination).all()}
+        if not any(cid and cid in (info.get("channel_url") or "") for cid in mine):
+            log.append(f"skip {vid}: not on one of your connected channels")
+            return False
+    elif (ch.mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
         log.append(f"skip {vid}: not CC")
         return False
     p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=ch.mode,
@@ -163,7 +168,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
         log.append(f"{p.video_id}: no replay data, using the middle of the video")
     for m in moments[:ch.clips_per_video]:
         c = Clip(project_id=p.id, start=m["start"], end=m["end"], aspect=ch.aspect, effects=["fade"],
-                 destination_id=ch.destination_id)
+                 destination_id=ch.destination_id, credit_on=ch.mode != "own")
         s.add(c)
         s.commit()
         if ch.captions:

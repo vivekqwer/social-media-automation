@@ -166,7 +166,7 @@ def handle(job: dict, headers: dict):
                 log(f"clip {cid}: video sent ({path.stat().st_size // 1024} KB) -> {r.status_code}; server is rendering")
             elif job["type"] == "reel":
                 out = pathlib.Path(d) / "reel.mp4"
-                make_reel(job["script"], job.get("voice") or "", out)
+                make_reel(job["script"], job.get("voice") or "", out, job.get("pexels_key") or "", job.get("photo_query") or "")
                 with open(out, "rb") as f:
                     r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
                               files={"file": ("reel.mp4", f, "video/mp4")}, timeout=900)
@@ -183,7 +183,7 @@ def handle(job: dict, headers: dict):
             _tell_failed(cid, job["type"], friendly_error(e), headers)
 
 
-def make_reel(script: str, voice: str, out: pathlib.Path):
+def make_reel(script: str, voice: str, out: pathlib.Path, pexels_key: str = "", photo_query: str = ""):
     """Run ReelGen (the user's text -> 9:16 reel engine) in its own folder."""
     main = REELGEN_DIR / "main.py"
     if not main.exists():
@@ -191,9 +191,12 @@ def make_reel(script: str, voice: str, out: pathlib.Path):
     cmd = [sys.executable, str(main), "--text", script, "-o", str(out)]
     if voice:
         cmd += ["--voice", voice]
+    env = {**os.environ, "PYTHONUTF8": "1"}
+    if pexels_key and photo_query:  # real stock photos for the backgrounds
+        cmd += ["--query", photo_query[:80]]
+        env["PEXELS_API_KEY"] = pexels_key
     log(f"making a reel ({len(script)} characters of script)")
-    r = subprocess.run(cmd, cwd=REELGEN_DIR, capture_output=True, text=True, timeout=1800,
-                       env={**os.environ, "PYTHONUTF8": "1"})
+    r = subprocess.run(cmd, cwd=REELGEN_DIR, capture_output=True, text=True, timeout=1800, env=env)
     if r.returncode != 0 or not out.exists():
         raise RuntimeError("ReelGen failed: " + (r.stderr or r.stdout)[-300:])
 

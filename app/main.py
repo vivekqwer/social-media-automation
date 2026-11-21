@@ -12,6 +12,7 @@ from pathlib import Path
 
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -25,7 +26,8 @@ from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .monitor import check_uploads
-from .db import Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, migrate, to_dict, utcnow
+from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, get_setting, migrate,
+                 set_setting, to_dict, utcnow)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
 from .jobs import executor
@@ -895,8 +897,8 @@ def discard_clip(cid: int):
 def add_channel(body: ChannelIn):
     if body.kind in ("topic", "reel"):  # topics are always CC; reels are my own content
         body.mode, body.permission_note = "cc", ""
-    if body.mode not in ("cc", "permission"):
-        raise HTTPException(400, "Autopilot supports cc or permission mode only (commentary needs manual edit).")
+    if body.mode not in ("cc", "permission", "own"):
+        raise HTTPException(400, "Autopilot supports cc, permission or own-channel mode (commentary needs manual edit).")
     if body.mode == "permission":
         _check_permission_note(body.permission_note)
     body.query = body.query.strip()
@@ -1017,6 +1019,60 @@ def scan_competitors():
     from . import competitors
 
     return competitors.scan()
+
+
+# ---------- small settings: affiliate rules, Pexels key ----------
+def _secret_setting(key: str) -> str:
+    raw = get_setting(key)
+    try:
+        return decrypt(raw) if raw else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+class AffRule(BaseModel):
+    keywords: str = Field(max_length=300)
+    text: str = Field(max_length=500)
+
+
+class AffIn(BaseModel):
+    rules: list[AffRule] = Field(max_length=50)
+
+
+@app.get("/api/settings/affiliate")
+def get_affiliate():
+    return {"rules": json.loads(get_setting("affiliate_rules") or "[]")}
+
+
+@app.post("/api/settings/affiliate")
+def set_affiliate(body: AffIn):
+    rules = [r.model_dump() for r in body.rules if r.keywords.strip() and r.text.strip()]
+    for r in rules:
+        for u in re.findall(r"https?://\S+", r["text"]):
+            if not u.startswith("https://"):
+                raise HTTPException(400, "Use https:// links only.")
+    set_setting("affiliate_rules", json.dumps(rules))
+    return {"rules": rules}
+
+
+class KeyIn(BaseModel):
+    key: str = Field("", max_length=200)
+
+
+@app.get("/api/settings/pexels")
+def get_pexels():
+    return {"set": bool(_secret_setting("pexels_key"))}
+
+
+@app.post("/api/settings/pexels")
+def set_pexels(body: KeyIn):
+    k = body.key.strip()
+    if k:
+        r = httpx.get("https://api.pexels.com/v1/search", params={"query": "food", "per_page": 1}, headers={"Authorization": k}, timeout=20)
+        if r.status_code != 200:
+            raise HTTPException(400, "Pexels did not accept this key.")
+    set_setting("pexels_key", encrypt(k) if k else "")
+    return {"set": bool(k)}
 
 
 # ---------- Telegram remote control (optional module) ----------
@@ -1301,7 +1357,11 @@ def worker_jobs(request: Request):
             p = s.get(Project, c.project_id)
             if p.mode == "original":  # ReelGen makes the whole reel from my script on the helper PC
                 ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
-                jobs.append({"type": "reel", "clip_id": c.id, "script": p.description or "", "voice": (ch.voice if ch else "") or ""})
+                job = {"type": "reel", "clip_id": c.id, "script": p.description or "", "voice": (ch.voice if ch else "") or ""}
+                pk = _secret_setting("pexels_key")
+                if pk:  # real stock photos instead of colour backgrounds
+                    job["pexels_key"], job["photo_query"] = pk, (ch.query if ch and ch.query else "") or p.title
+                jobs.append(job)
                 continue
             jobs.append({"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end})
         for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):

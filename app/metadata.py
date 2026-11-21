@@ -10,6 +10,33 @@ LICENSE_LINE = {
 }
 
 
+def affiliate_lines(text: str) -> list[str]:
+    """Owner's affiliate rules (keywords -> line) that match this video's words."""
+    import json as _json
+
+    from .db import get_setting
+
+    try:
+        rules = _json.loads(get_setting("affiliate_rules") or "[]")
+    except ValueError:
+        return []
+    words = set(re.findall(r"\w+", (text or "").lower()))
+    out = []
+    for r in rules:
+        keys = [k.strip().lower() for k in (r.get("keywords") or "").split(",") if k.strip()]
+        if r.get("text") and any((set(k.split()) <= words) for k in keys):
+            out.append(r["text"].strip())
+    return out[:5]
+
+
+def _with_affiliates(meta: dict, text: str) -> dict:
+    lines = affiliate_lines(text)
+    if lines:
+        meta["description"] = _cut(meta["description"] + "\n\n" + "\n".join(lines)
+                                   + "\n(Some links are affiliate links — I may earn a small commission.)", 4900)
+    return meta
+
+
 def _cut(s: str, n: int) -> str:
     return s.encode()[:n].decode(errors="ignore")  # YouTube limits description by bytes
 
@@ -34,8 +61,19 @@ def _build_original(project: Project, clip: Clip, keywords: list[str]) -> dict:
 
 
 def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
+    words = " ".join([project.title or "", " ".join(project.tags or []), " ".join(keywords)])
     if project.mode == "original":
-        return _build_original(project, clip, keywords)
+        return _with_affiliates(_build_original(project, clip, keywords), words)
+    if project.mode == "own":  # my own long video -> Short: link back to the full video, no credit block
+        meta = _build_original(project, clip, keywords)
+        meta["title"] = (_clean(project.title) + " | Best Moment")[:100]
+        meta["description"] = _cut(meta["description"].split("\n\n")[0] + f"\n\nFull video: https://youtu.be/{project.video_id}"
+                                    + "\n\n" + _clean(project.description)[:1500], 4900)
+        return _with_affiliates(meta, words)
+    return _with_affiliates(_build(project, clip, keywords), words)
+
+
+def _build(project: Project, clip: Clip, keywords: list[str]) -> dict:
     base = _clean(project.title)
     title = f"{base} | Best Moment"
     if len(title) > 100:

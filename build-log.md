@@ -186,3 +186,11 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - app/competitors.py: owner adds channels to watch; daily (and "Check now") the newest 30 videos of each are compared on views per day with that channel's median; 3x or more (and 1,000+ views, under 30 days old) = outlier. Telegram gets the top 3. Never uses the upload budget.
 - Trending in India: YouTube mostPopular chart by category, cached 6 h (1 unit).
 - Ideas page: tracked channels, outliers table, trending table, "Add as topic" (creates a CC-only topic source with Review first on). Test 5/5.
+
+## 2026-11-21 — Task 33: Own-channel Shorts, affiliate links, Pexels for reels, best time + health; dashboard JS hotfix
+- HOTFIX: commit d6d8fc6 (Ideas page) shipped a JS syntax error (a Python placeholder left in index.html) -> live dashboard script did not run for ~20 min. Fixed; from now on every deploy runs `node --check` on the dashboard script.
+- Source mode "My own channel (long videos -> Shorts)": only videos on a connected channel are used; no credit label/block; description links to the full video.
+- Affiliate rules (My channels): keywords -> description line + disclosure; https links only.
+- Pexels key (encrypted) -> reel jobs pass PEXELS_API_KEY + photo topic to ReelGen for real stock photos.
+- Analytics: channel health score (removals/blocks in 90 days, paused, failed clips, average % watched) and best upload hours (IST, views per day by publish hour, needs 8 public videos).
+- Tests 10/10; all dashboard pages load without JS errors (local).

@@ -84,6 +84,54 @@ def _at_or_before(s, dest_id: int, t: datetime):
             .order_by(ChannelStat.at.desc()).first())
 
 
+IST = timedelta(hours=5, minutes=30)
+
+
+def best_hours(s, dest_id: int) -> dict:
+    """Which publish hours (IST) got the most views per day so far (needs a few public videos)."""
+    now = utcnow()
+    rows = s.query(VideoStat).filter(VideoStat.destination_id == dest_id, VideoStat.privacy == "public",
+                                     VideoStat.published_at.isnot(None)).all()
+    by = {}
+    for v in rows:
+        age = max(0.5, (now - v.published_at).total_seconds() / 86400)
+        h = (v.published_at + IST).hour
+        by.setdefault(h, []).append(v.views / age)
+    ranked = sorted(((h, sum(x) / len(x), len(x)) for h, x in by.items()), key=lambda t: -t[1])
+    return {"videos": len(rows), "ranked": [{"hour": h, "views_per_day": round(a, 1), "videos": n} for h, a, n in ranked[:5]],
+            "enough": len(rows) >= 8}
+
+
+def health(s, dest_id: int, last, watch) -> dict:
+    """0-100: problems on YouTube, paused uploads, failed uploads, how much of each video people watch, growth."""
+    from .db import Alert, Clip, Destination
+
+    score, notes = 100, []
+    d = s.get(Destination, dest_id)
+    since = utcnow() - timedelta(days=90)
+    bad = s.query(Alert).join(Clip, Clip.id == Alert.clip_id).filter(Clip.destination_id == dest_id, Alert.created_at >= since,
+                                                                     Alert.kind.in_(["removed", "rejected", "blocked"])).count()
+    if bad:
+        score -= min(45, 15 * bad)
+        notes.append(f"{bad} video(s) removed/blocked in 90 days")
+    if d and d.paused:
+        score -= 15
+        notes.append("uploads are paused")
+    failed = s.query(Clip).filter(Clip.destination_id == dest_id, Clip.status == "failed").count()
+    if failed:
+        score -= min(10, 2 * failed)
+        notes.append(f"{failed} failed clip(s)")
+    vids = (watch or {}).get("videos") or {}
+    if vids:
+        avg = sum(v["avg_percent"] for v in vids.values()) / len(vids)
+        if avg < 40:
+            score -= 10
+            notes.append(f"people watch {avg:.0f}% of a video on average — make the start stronger")
+    if not notes:
+        notes.append("no problems found")
+    return {"score": max(0, score), "notes": notes}
+
+
 def overview() -> dict:
     now = utcnow()
     with SessionLocal() as s:
@@ -109,7 +157,9 @@ def overview() -> dict:
                 "synced_at": (last.at.isoformat() + "Z") if last else None,
                 "daily": [{"day": k, **v} for k, v in sorted(daily.items())],
                 "watch": watch_time(d.id), "watch_status": get_setting(f"watchtime-status:{d.id}"),
+                "best_hours": best_hours(s, d.id),
             })
+            chans[-1]["health"] = health(s, d.id, last, chans[-1]["watch"])
         watch_by_video = {}
         for c in chans:
             watch_by_video.update((c["watch"] or {}).get("videos") or {})
