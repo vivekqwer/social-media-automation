@@ -16,7 +16,9 @@ from .crypto import decrypt, encrypt
 from .db import Destination, SessionLocal, get_setting, set_setting
 
 EMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly"] + EMAIL_SCOPES
+ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"  # watch time, traffic sources, countries
+SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly",
+          ANALYTICS_SCOPE] + EMAIL_SCOPES
 REDIRECT = f"{BASE_URL}/auth/callback"
 
 if IS_LOCAL:
@@ -81,7 +83,7 @@ def _default_dest_id() -> int | None:
         return d.id if d else None
 
 
-def client(dest_id: int | None = None):
+def _creds(dest_id: int | None):
     dest_id = dest_id or _default_dest_id()
     if not dest_id:
         raise RuntimeError("No YouTube channel connected. Use 'Connect my channel' on the dashboard.")
@@ -89,12 +91,28 @@ def client(dest_id: int | None = None):
         d = s.get(Destination, dest_id)
         if not d:
             raise RuntimeError(f"Destination {dest_id} not found")
-        creds = Credentials.from_authorized_user_info(json.loads(decrypt(d.token)), SCOPES)
+        # use the scopes this login actually has (older logins have no Analytics scope; asking for it would fail)
+        creds = Credentials.from_authorized_user_info(json.loads(decrypt(d.token)))
         if not creds.valid and creds.refresh_token:
             creds.refresh(Request())
             d.token = encrypt(creds.to_json())
             s.commit()
-    return build("youtube", "v3", credentials=creds, cache_discovery=False)
+    return creds
+
+
+def client(dest_id: int | None = None):
+    return build("youtube", "v3", credentials=_creds(dest_id), cache_discovery=False)
+
+
+class NeedsReconnect(Exception):
+    """This channel's login was made before watch-time stats were added: connect it once more."""
+
+
+def analytics_client(dest_id: int):
+    creds = _creds(dest_id)
+    if creds.scopes is not None and ANALYTICS_SCOPE not in creds.scopes:
+        raise NeedsReconnect()
+    return build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
 
 
 def upload(dest_id: int | None, path: str, title: str, description: str, tags: list[str], publish_at=None) -> str:

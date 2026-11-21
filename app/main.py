@@ -958,11 +958,12 @@ def analytics():
 
 @app.post("/api/analytics/sync")
 def analytics_sync(live: int = 0):
-    from .stats import overview, recently_synced, sync_all
+    from .stats import overview, recently_synced, sync_all, sync_all_watch_time
 
     if live and (recently_synced(seconds=100) or quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST):
         return {**overview(), "errors": []}  # live mode: at most one YouTube read per ~2 minutes, never the upload budget
     res = sync_all()
+    sync_all_watch_time(max_age_minutes=60)  # watch time changes slowly (YouTube adds it with a 1-3 day delay)
     errors = [v["error"] for v in res.values() if isinstance(v, dict) and v.get("error")]
     return {**overview(), "errors": errors}
 

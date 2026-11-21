@@ -108,11 +108,90 @@ def overview() -> dict:
                 "views_7d": diff(last, week, "views"), "subs_7d": diff(last, week, "subscribers"),
                 "synced_at": (last.at.isoformat() + "Z") if last else None,
                 "daily": [{"day": k, **v} for k, v in sorted(daily.items())],
+                "watch": watch_time(d.id), "watch_status": get_setting(f"watchtime-status:{d.id}"),
             })
+        watch_by_video = {}
+        for c in chans:
+            watch_by_video.update((c["watch"] or {}).get("videos") or {})
         vids = s.query(VideoStat).order_by(VideoStat.published_at.desc()).limit(MAX_VIDEOS).all()
         names = {c["id"]: c["name"] for c in chans}
         videos = [{"video_id": v.video_id, "channel": names.get(v.destination_id), "title": v.title,
                    "published_at": (v.published_at.isoformat() + "Z") if v.published_at else None,
                    "privacy": v.privacy, "views": v.views, "likes": v.likes, "comments": v.comments,
-                   "new_views": (v.views - v.views_prev) if v.views_prev is not None else None} for v in vids]
+                   "new_views": (v.views - v.views_prev) if v.views_prev is not None else None,
+                   "watch": watch_by_video.get(v.video_id)} for v in vids]
     return {"channels": chans, "videos": videos}
+
+
+# ---------- watch time (YouTube Analytics API; YouTube publishes these numbers with a 1-3 day delay) ----------
+import json  # noqa: E402
+
+from .db import get_setting, set_setting  # noqa: E402
+
+TRAFFIC = {"YT_SEARCH": "YouTube search", "SUBSCRIBER": "Subscribers", "RELATED_VIDEO": "Suggested videos",
+           "SHORTS": "Shorts feed", "BROWSE": "Home / browse", "EXT_URL": "Other websites", "NO_LINK_OTHER": "Direct / unknown",
+           "PLAYLIST": "Playlists", "YT_CHANNEL": "Channel page", "NOTIFICATION": "Notifications", "YT_OTHER_PAGE": "Other YouTube",
+           "END_SCREEN": "End screens", "HASHTAGS": "Hashtags", "SOUND_PAGE": "Sound pages", "ANNOTATION": "Cards"}
+
+
+def _rows(r: dict) -> list[dict]:
+    cols = [c["name"] for c in r.get("columnHeaders", [])]
+    return [dict(zip(cols, row)) for row in r.get("rows") or []]
+
+
+def sync_watch_time(dest_id: int) -> dict:
+    ya = youtube.analytics_client(dest_id)
+    today = utcnow().date()
+    start = (today - timedelta(days=28)).isoformat()
+    q = lambda **k: _rows(ya.reports().query(ids="channel==MINE", endDate=today.isoformat(), **k).execute())  # noqa: E731
+    daily = q(startDate=start, dimensions="day", sort="day",
+              metrics="views,estimatedMinutesWatched,averageViewDuration,subscribersGained,subscribersLost")
+    life = q(startDate="2005-02-14", metrics="views,estimatedMinutesWatched")
+    videos = q(startDate=start, dimensions="video", sort="-estimatedMinutesWatched", maxResults=50,
+               metrics="views,estimatedMinutesWatched,averageViewDuration,averageViewPercentage")
+    traffic = q(startDate=start, dimensions="insightTrafficSourceType", sort="-views", metrics="views,estimatedMinutesWatched")
+    countries = q(startDate=start, dimensions="country", sort="-views", maxResults=10, metrics="views,estimatedMinutesWatched")
+    data = {
+        "fetched_at": utcnow().isoformat() + "Z",
+        "lifetime_minutes": int((life[0] if life else {}).get("estimatedMinutesWatched") or 0),
+        "minutes_28d": sum(int(d.get("estimatedMinutesWatched") or 0) for d in daily),
+        "views_28d": sum(int(d.get("views") or 0) for d in daily),
+        "subs_gained_28d": sum(int(d.get("subscribersGained") or 0) for d in daily),
+        "subs_lost_28d": sum(int(d.get("subscribersLost") or 0) for d in daily),
+        "daily": [{"day": d["day"], "minutes": int(d.get("estimatedMinutesWatched") or 0), "views": int(d.get("views") or 0)}
+                  for d in daily],
+        "videos": {v["video"]: {"minutes": int(v.get("estimatedMinutesWatched") or 0), "avg_seconds": int(v.get("averageViewDuration") or 0),
+                                "avg_percent": round(float(v.get("averageViewPercentage") or 0), 1)} for v in videos},
+        "traffic": [{"source": TRAFFIC.get(t["insightTrafficSourceType"], t["insightTrafficSourceType"].replace("_", " ").title()),
+                     "views": int(t.get("views") or 0), "minutes": int(t.get("estimatedMinutesWatched") or 0)} for t in traffic],
+        "countries": [{"country": c["country"], "views": int(c.get("views") or 0), "minutes": int(c.get("estimatedMinutesWatched") or 0)}
+                      for c in countries],
+    }
+    set_setting(f"watchtime:{dest_id}", json.dumps(data))
+    return data
+
+
+def watch_time(dest_id: int) -> dict | None:
+    raw = get_setting(f"watchtime:{dest_id}")
+    return json.loads(raw) if raw else None
+
+
+def sync_all_watch_time(max_age_minutes: int = 0) -> dict:
+    out = {}
+    with SessionLocal() as s:
+        dests = [d.id for d in s.query(Destination).all()]
+    for did in dests:
+        old = watch_time(did)
+        if old and max_age_minutes and datetime.fromisoformat(old["fetched_at"].rstrip("Z")) > utcnow() - timedelta(minutes=max_age_minutes):
+            continue
+        try:
+            sync_watch_time(did)
+            set_setting(f"watchtime-status:{did}", "ok")
+        except youtube.NeedsReconnect:
+            set_setting(f"watchtime-status:{did}", "reconnect")
+        except Exception as e:  # noqa: BLE001
+            m = str(e)
+            set_setting(f"watchtime-status:{did}", "api_off" if "has not been used" in m or "is disabled" in m
+                        else "reconnect" if "insufficient" in m.lower() or "403" in m else "error: " + m[:200])
+            log.warning("watch time: channel %s: %s", did, m[:200])
+    return out

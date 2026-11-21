@@ -161,3 +161,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 
 ## 2026-11-21 — Task 27: Analytics (live channel numbers)
 - app/stats.py + ChannelStat/VideoStat tables: subscribers (incl. hidden flag), total views, video count per channel, and views/likes/comments/privacy for every video (newest 200) via channels.list(mine), uploads playlist, videos.list. Synced every 10 min by the scheduler; while the Analytics page is open it asks for an update every 2 min (server throttles to one read per ~100 s and stops when the upload budget is low). Changes today / this week, 30-day views sparkline, "new views since last update", engagement   (cont.) Changes today / this week, 30-day views sparkline, "new views since last update", engagement percent. 4 months of history kept. Test 4/4.
+
+## 2026-11-21 — Task 28: Watch time (YouTube Analytics API)
+- New OAuth scope yt-analytics.readonly (added to SCOPES). Stored logins keep their own scopes when refreshed (no invalid_scope for older logins); channels connected before this show "Reconnect" on the Analytics page.
+- stats.sync_watch_time: last 28 days per day (views, watch minutes, avg duration, subs gained/lost), lifetime watch time, per-video watch time + average view duration/percent (top 50), traffic sources, top 10 countries. Cached per channel; synced every 3 h and on "Update now" (if older than 1 h). YouTube publishes these 1-3 days late.
+- Analytics page: watch-time card with 28-day sparkline, "Where viewers come from", "Top countries", and Watch time / Avg viewed columns per video. Tests 4/4 (+ earlier analytics 4/4).
+- Needs: YouTube Analytics API enabled in the Google Cloud project, and each channel reconnected once.

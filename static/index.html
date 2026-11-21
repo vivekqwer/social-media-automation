@@ -520,6 +520,20 @@ const delta=n=>n==null?'<span class="mut sm">—</span>':`<span class="sm" style
 function spark(pts,key){if(!pts||pts.length<2)return '';const v=pts.map(p=>p[key]||0),mn=Math.min(...v),mx=Math.max(...v),W=160,H=36;
   const xy=v.map((y,i)=>`${(i*W/(v.length-1)).toFixed(1)},${(H-2-(mx>mn?(y-mn)/(mx-mn):.5)*(H-4)).toFixed(1)}`).join(' ');
   return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="30-day trend"><polyline fill="none" stroke="var(--brand)" stroke-width="2" points="${xy}"/></svg>`}
+const hrs=m=>m==null?'—':(m/60>=10?Math.round(m/60).toLocaleString('en-IN'):(m/60).toFixed(1))+' h';
+const dur=s=>s?Math.floor(s/60)+':'+String(s%60).padStart(2,'0'):'—';
+function watchCard(c){const w=c.watch,st=c.watch_status||'';
+  if(!w){const msg=st==='reconnect'?`Connect <b>${esc(c.name)}</b> once more to allow watch-time stats. <a class="btn sm" href="/auth/login">Reconnect</a>`
+      :st==='api_off'?'The YouTube Analytics API is not switched on in Google Cloud yet.':st.startsWith('error')?esc(st.slice(7,160)):'Loading watch time…';
+    return `<div class="card stat"><div class="l">${esc(c.name)} · watch time<span class="ic">${ico('clock')}</span></div><div class="sm" style="margin-top:8px">${msg}</div></div>`}
+  return `<div class="card stat"><div class="l">${esc(c.name)} · watch time (28 days)<span class="ic">${ico('clock')}</span></div><div class="v">${hrs(w.minutes_28d)}</div>
+    <div class="d">${hrs(w.lifetime_minutes)} all time · subs +${num(w.subs_gained_28d)} / −${num(w.subs_lost_28d)}</div><div>${spark(w.daily,'minutes')}</div></div>`}
+function watchDetails(c){const w=c.watch;if(!w)return '';const bar=(v,mx)=>`<div class="bar" style="width:100%;max-width:none"><i style="width:${mx?Math.round(v*100/mx):0}%"></i></div>`;
+  const tmax=Math.max(1,...w.traffic.map(t=>t.views)),cmax=Math.max(1,...w.countries.map(t=>t.views));
+  return `<div class="grid cols" style="margin-top:16px">
+    <div class="card"><div class="ch"><div><h3>Where viewers come from</h3><p>${esc(c.name)} · last 28 days</p></div></div><div class="cb">${w.traffic.length?w.traffic.map(t=>`<div style="margin-bottom:10px"><div class="row sm" style="justify-content:space-between"><span>${esc(t.source)}</span><span class="mut">${num(t.views)} views · ${hrs(t.minutes)}</span></div>${bar(t.views,tmax)}</div>`).join(''):'<span class="mut sm">No data yet — YouTube adds it 1–3 days after views come in.</span>'}</div></div>
+    <div class="card"><div class="ch"><div><h3>Top countries</h3><p>${esc(c.name)} · last 28 days</p></div></div><div class="cb">${w.countries.length?w.countries.map(t=>`<div style="margin-bottom:10px"><div class="row sm" style="justify-content:space-between"><span>${esc(t.country)}</span><span class="mut">${num(t.views)} views · ${hrs(t.minutes)}</span></div>${bar(t.views,cmax)}</div>`).join(''):'<span class="mut sm">No data yet.</span>'}</div></div>
+  </div><div class="mut sm" style="margin-top:6px">Watch-time numbers are added by YouTube 1–3 days after the views (updated ${when(w.fetched_at)}).</div>`}
 function renderAnalytics(){
   const d=AN;if(!d)return;
   const last=d.channels.map(c=>c.synced_at).filter(Boolean).sort().pop();
@@ -527,14 +541,15 @@ function renderAnalytics(){
   $('#an-chans').innerHTML=d.channels.length?`<div class="grid stats">${d.channels.map(c=>`
     <div class="card stat"><div class="l">${esc(c.name)} · subscribers<span class="ic">${ico('youtube')}</span></div><div class="v">${c.subscribers_hidden?'hidden':num(c.subscribers)}</div><div class="d">${delta(c.subs_24h)} today · ${delta(c.subs_7d)} this week</div></div>
     <div class="card stat"><div class="l">${esc(c.name)} · total views<span class="ic">${ico('chart')}</span></div><div class="v">${num(c.views)}</div><div class="d">${delta(c.views_24h)} today · ${delta(c.views_7d)} this week</div><div>${spark(c.daily,'views')}</div></div>
-    <div class="card stat"><div class="l">${esc(c.name)} · videos<span class="ic">${ico('film')}</span></div><div class="v">${num(c.videos)}</div><div class="d">${c.synced_at?'updated '+when(c.synced_at):'first update in a minute'}</div></div>`).join('')}</div>`
+    <div class="card stat"><div class="l">${esc(c.name)} · videos<span class="ic">${ico('film')}</span></div><div class="v">${num(c.videos)}</div><div class="d">${c.synced_at?'updated '+when(c.synced_at):'first update in a minute'}</div></div>
+    ${watchCard(c)}`).join('')}</div>${d.channels.map(watchDetails).join('')}`
     :empty('youtube','No channel connected','Connect a YouTube channel to see its numbers.');
   const sort=$('#an-sort').value,v=[...d.videos];
   if(sort==='views')v.sort((a,b)=>b.views-a.views);if(sort==='new')v.sort((a,b)=>(b.new_views||0)-(a.new_views||0));
-  $('#an-videos').innerHTML=v.length?`<table class="tbl"><thead><tr><th>Video</th><th>Channel</th><th>Published</th><th style="text-align:right">Views</th><th style="text-align:right">New</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right" title="(likes + comments) / views">Engagement</th></tr></thead><tbody>${v.map(x=>`<tr>
+  $('#an-videos').innerHTML=v.length?`<table class="tbl"><thead><tr><th>Video</th><th>Channel</th><th>Published</th><th style="text-align:right">Views</th><th style="text-align:right">New</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right" title="(likes + comments) / views">Engagement</th><th style="text-align:right" title="last 28 days">Watch time</th><th style="text-align:right" title="average time watched / % of the video">Avg viewed</th></tr></thead><tbody>${v.map(x=>`<tr>
     <td><a href="https://youtu.be/${esc(x.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(x.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(x.title)}${x.privacy&&x.privacy!=='public'?` <span class="badge outline">${esc(x.privacy)}</span>`:''}</span></a></td>
     <td class="mut sm">${esc(x.channel||'')}</td><td class="mut sm">${x.published_at?when(x.published_at):'—'}</td>
-    <td style="text-align:right"><b>${num(x.views)}</b></td><td style="text-align:right">${delta(x.new_views)}</td><td style="text-align:right">${num(x.likes)}</td><td style="text-align:right">${num(x.comments)}</td><td style="text-align:right" class="mut sm">${x.views?((x.likes+x.comments)*100/x.views).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody></table>`
+    <td style="text-align:right"><b>${num(x.views)}</b></td><td style="text-align:right">${delta(x.new_views)}</td><td style="text-align:right">${num(x.likes)}</td><td style="text-align:right">${num(x.comments)}</td><td style="text-align:right" class="mut sm">${x.views?((x.likes+x.comments)*100/x.views).toFixed(1)+'%':'—'}</td><td style="text-align:right">${x.watch?hrs(x.watch.minutes):'—'}</td><td style="text-align:right" class="mut sm">${x.watch?dur(x.watch.avg_seconds)+' · '+x.watch.avg_percent+'%':'—'}</td></tr>`).join('')}</tbody></table>`
     :`<div class="cb">${empty('film','No videos yet','Numbers appear after the first update.')}</div>`;
 }
 async function loadAnalytics(){
