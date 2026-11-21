@@ -158,3 +158,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 ## 2026-11-21 — Task 26: Problems & fixes card
 - Dashboard card lists every problem in plain words with a one-click fix: reconnect channel, resume paused uploads, retry all failed clips (POST /api/fix/retry-failed, rules re-checked), run a source that failed or has not run, helper setup steps; "Everything is working" when clean. Raw bot-check text no longer shown in source status for missing captions. Test 3/3.
 - 2026-11-21: Owner ran install_autostart.bat; Startup entry ClipStudioHelper.vbs present; hidden helper (run_hidden.bat) running and online, logging to worker\helper.log. Assistant cannot add/launch startup items itself (permission classifier) — owner did it.
+
+## 2026-11-21 — Task 27: Analytics (live channel numbers)
+- app/stats.py + ChannelStat/VideoStat tables: subscribers (incl. hidden flag), total views, video count per channel, and views/likes/comments/privacy for every video (newest 200) via channels.list(mine), uploads playlist, videos.list. Synced every 10 min by the scheduler; while the Analytics page is open it asks for an update every 2 min (server throttles to one read per ~100 s and stops when the upload budget is low). Changes today / this week, 30-day views sparkline, "new views since last update", engagement 

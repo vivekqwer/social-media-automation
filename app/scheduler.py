@@ -227,5 +227,9 @@ def start():
     every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")
     sch.add_job(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
+    # live channel numbers (subscribers, views, every video) for the Analytics page
+    from .stats import sync_all
+    sch.add_job(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
+                coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1))
     sch.start()
     return sch

@@ -948,6 +948,25 @@ class ReviewIn(BaseModel):
     review_first: bool
 
 
+# ---------- analytics: live subscribers / views for my channels and videos ----------
+@app.get("/api/analytics")
+def analytics():
+    from .stats import overview
+
+    return overview()
+
+
+@app.post("/api/analytics/sync")
+def analytics_sync(live: int = 0):
+    from .stats import overview, recently_synced, sync_all
+
+    if live and (recently_synced(seconds=100) or quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST):
+        return {**overview(), "errors": []}  # live mode: at most one YouTube read per ~2 minutes, never the upload budget
+    res = sync_all()
+    errors = [v["error"] for v in res.values() if isinstance(v, dict) and v.get("error")]
+    return {**overview(), "errors": errors}
+
+
 # ---------- health: every problem in plain words, with a one-click fix ----------
 @app.get("/api/health")
 def health():

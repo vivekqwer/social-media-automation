@@ -188,6 +188,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="nav on" data-p="dashboard"><i data-ico="dashboard"></i>Dashboard</button>
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
     <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
+    <button class="nav" data-p="analytics"><i data-ico="chart"></i>Analytics</button>
     <button class="nav" data-p="alerts"><i data-ico="bell"></i>Alerts<span class="count" id="b-alerts" style="display:none;background:var(--bad)"></span></button>
     <button class="nav quick" id="nav-quick"><i data-ico="zap"></i>Quick upload</button>
     <div class="grp">Account</div>
@@ -250,6 +251,14 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <section id="p-sources" class="hide">
         <div class="page-h"><div><h1>Sources</h1><div class="desc">Channels the system takes videos from.</div></div><button class="btn" id="open-add"><i data-ico="plus"></i>Add sources</button></div>
         <div class="card"><div class="tw" id="src-list"></div></div>
+      </section>
+
+      <section id="p-analytics" class="hide">
+        <div class="page-h"><div><h1>Analytics</h1><div class="desc" id="an-desc">Live from YouTube — updates every 2 minutes while this page is open.</div></div><button class="btn" id="an-sync"><i data-ico="refresh"></i>Update now</button></div>
+        <div id="an-chans"></div>
+        <div class="card" style="margin-top:16px"><div class="ch"><div><h3>All videos</h3><p>Every video on your channels, newest first. “New” = views since the last update.</p></div>
+          <select id="an-sort" style="width:auto"><option value="date">Newest first</option><option value="views">Most views</option><option value="new">Most new views</option></select></div>
+          <div class="tw" id="an-videos"></div></div>
       </section>
 
       <section id="p-alerts" class="hide">
@@ -462,11 +471,12 @@ const P={
  arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
  zap:'<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
  image:'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+ chart:'<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>',
  bell:'<path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/>'
 };
 const ico=(n,c='')=>`<svg class="ico ${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||''}</svg>`;
 function paintIcons(root=document){$$('[data-ico]',root).forEach(e=>{e.outerHTML=ico(e.dataset.ico)})}
-let DESTS=[],OV=null,TAB='rendered',CUR=null,POLL=null,LOCK=false,VIEW='out',VOICES={};
+let ANPOLL=null,AN=null,DESTS=[],OV=null,TAB='rendered',CUR=null,POLL=null,LOCK=false,VIEW='out',VOICES={};
 
 async function api(path,method='GET',body){
   const o={method,headers:{}};
@@ -483,12 +493,12 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',alerts:'Alerts',settings:'My channels'};
+const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -505,6 +515,36 @@ async function loadOverview(){
   return OV;
 }
 const AKIND={removed:['Deleted','failed'],rejected:['Removed by YouTube','failed'],failed:['Processing failed','failed'],blocked:['Blocked / claimed','queued'],restored:['Available again','uploaded']};
+const num=n=>n==null?'—':Number(n).toLocaleString('en-IN');
+const delta=n=>n==null?'<span class="mut sm">—</span>':`<span class="sm" style="color:${n>0?'var(--ok)':n<0?'var(--bad)':'var(--mfg)'}">${n>0?'+':''}${num(n)}</span>`;
+function spark(pts,key){if(!pts||pts.length<2)return '';const v=pts.map(p=>p[key]||0),mn=Math.min(...v),mx=Math.max(...v),W=160,H=36;
+  const xy=v.map((y,i)=>`${(i*W/(v.length-1)).toFixed(1)},${(H-2-(mx>mn?(y-mn)/(mx-mn):.5)*(H-4)).toFixed(1)}`).join(' ');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="30-day trend"><polyline fill="none" stroke="var(--brand)" stroke-width="2" points="${xy}"/></svg>`}
+function renderAnalytics(){
+  const d=AN;if(!d)return;
+  const last=d.channels.map(c=>c.synced_at).filter(Boolean).sort().pop();
+  $('#an-desc').textContent='Live from YouTube — updates every 2 minutes while this page is open (every 10 minutes in the background)'+(last?' · last update '+when(last):'')+'.';
+  $('#an-chans').innerHTML=d.channels.length?`<div class="grid stats">${d.channels.map(c=>`
+    <div class="card stat"><div class="l">${esc(c.name)} · subscribers<span class="ic">${ico('youtube')}</span></div><div class="v">${c.subscribers_hidden?'hidden':num(c.subscribers)}</div><div class="d">${delta(c.subs_24h)} today · ${delta(c.subs_7d)} this week</div></div>
+    <div class="card stat"><div class="l">${esc(c.name)} · total views<span class="ic">${ico('chart')}</span></div><div class="v">${num(c.views)}</div><div class="d">${delta(c.views_24h)} today · ${delta(c.views_7d)} this week</div><div>${spark(c.daily,'views')}</div></div>
+    <div class="card stat"><div class="l">${esc(c.name)} · videos<span class="ic">${ico('film')}</span></div><div class="v">${num(c.videos)}</div><div class="d">${c.synced_at?'updated '+when(c.synced_at):'first update in a minute'}</div></div>`).join('')}</div>`
+    :empty('youtube','No channel connected','Connect a YouTube channel to see its numbers.');
+  const sort=$('#an-sort').value,v=[...d.videos];
+  if(sort==='views')v.sort((a,b)=>b.views-a.views);if(sort==='new')v.sort((a,b)=>(b.new_views||0)-(a.new_views||0));
+  $('#an-videos').innerHTML=v.length?`<table class="tbl"><thead><tr><th>Video</th><th>Channel</th><th>Published</th><th style="text-align:right">Views</th><th style="text-align:right">New</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right" title="(likes + comments) / views">Engagement</th></tr></thead><tbody>${v.map(x=>`<tr>
+    <td><a href="https://youtu.be/${esc(x.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(x.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(x.title)}${x.privacy&&x.privacy!=='public'?` <span class="badge outline">${esc(x.privacy)}</span>`:''}</span></a></td>
+    <td class="mut sm">${esc(x.channel||'')}</td><td class="mut sm">${x.published_at?when(x.published_at):'—'}</td>
+    <td style="text-align:right"><b>${num(x.views)}</b></td><td style="text-align:right">${delta(x.new_views)}</td><td style="text-align:right">${num(x.likes)}</td><td style="text-align:right">${num(x.comments)}</td><td style="text-align:right" class="mut sm">${x.views?((x.likes+x.comments)*100/x.views).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="cb">${empty('film','No videos yet','Numbers appear after the first update.')}</div>`;
+}
+async function loadAnalytics(){
+  if(!AN){$('#an-chans').innerHTML=skel(1);$('#an-videos').innerHTML='<div class="cb">'+skel(3)+'</div>'}
+  AN=await api('/api/analytics');renderAnalytics();
+  // live mode: while this page is open, ask the server for fresh numbers every 2 minutes
+  clearInterval(ANPOLL);ANPOLL=setInterval(async()=>{if($('#p-analytics').classList.contains('hide'))return clearInterval(ANPOLL);try{AN=await api('/api/analytics/sync?live=1','POST');renderAnalytics()}catch(e){}},120000);
+}
+$('#an-sort').onchange=renderAnalytics;
+$('#an-sync').onclick=()=>once(async()=>{const r=await api('/api/analytics/sync','POST');AN=r;renderAnalytics();toast(r.errors&&r.errors.length?'Some channels could not be read: '+r.errors[0]:'Updated from YouTube',!!(r.errors&&r.errors.length))},$('#an-sync'));
 async function loadAlerts(){
   $('#al-list').innerHTML=skel(2);
   let d;try{d=await api('/api/alerts')}catch(e){return fail(e)}

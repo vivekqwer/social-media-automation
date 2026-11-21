@@ -155,6 +155,35 @@ class Alert(Base):
     created_at = Column(DateTime, default=utcnow)
 
 
+class ChannelStat(Base):
+    """Snapshot of one of my channels (synced from YouTube every 15 minutes; kept for growth charts)."""
+
+    __tablename__ = "channel_stats"
+    id = Column(Integer, primary_key=True)
+    destination_id = Column(Integer, index=True)
+    at = Column(DateTime, default=utcnow, index=True)
+    subscribers = Column(Integer)
+    subscribers_hidden = Column(Boolean, default=False)
+    views = Column(Integer)
+    videos = Column(Integer)
+
+
+class VideoStat(Base):
+    """Latest numbers for each video on my channels (all videos, not only the ones this app uploaded)."""
+
+    __tablename__ = "video_stats"
+    video_id = Column(String(32), primary_key=True)
+    destination_id = Column(Integer, index=True)
+    title = Column(String(300))
+    published_at = Column(DateTime)
+    privacy = Column(String(20))
+    views = Column(Integer, default=0)
+    likes = Column(Integer, default=0)
+    comments = Column(Integer, default=0)
+    views_prev = Column(Integer)  # views at the previous sync (for "new views" right now)
+    updated_at = Column(DateTime, default=utcnow)
+
+
 class Setting(Base):
     __tablename__ = "settings"
     key = Column(String(100), primary_key=True)
