@@ -154,3 +154,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Bug: autopilot job was added with next_run_time=None when not overdue at boot, which APScheduler treats as PAUSED, so sources stopped running after deploys (topic source idle 21 h). Now the tick runs every 15 min and each source runs when its own 6 h interval has passed. Test 2/2.
 - A single Short link (Q46S5BfashM) had been added as a channel source (Add sources dialog) and failed every run; the server now refuses video links as sources with a clear message; the broken source was removed.
 - Owner asked for fully automatic uploads: topic source "street food india" review_first turned OFF (2026-11-21). Clips now queue themselves for 10:00/18:00 IST.
+
+## 2026-11-21 — Task 26: Problems & fixes card
+- Dashboard card lists every problem in plain words with a one-click fix: reconnect channel, resume paused uploads, retry all failed clips (POST /api/fix/retry-failed, rules re-checked), run a source that failed or has not run, helper setup steps; "Everything is working" when clean. Raw bot-check text no longer shown in source status for missing captions. Test 3/3.

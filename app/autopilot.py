@@ -174,7 +174,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
                     c.caption_style = {"on": True, "lang": "auto", "pos": "bottom", "size": "M", "color": "#ffffff"}
                 s.commit()
             except Exception as e:  # noqa: BLE001
-                log.append(f"clip {c.id}: no captions ({str(e)[:70]})")
+                log.append(f"clip {c.id}: no captions{'' if 'confirm you' in str(e) else ' (' + str(e)[:70] + ')'}")
         run_render(c.id)
         s.refresh(c)
         if c.status == "fetching":  # helper PC will fetch the video; render finishes later

@@ -948,6 +948,63 @@ class ReviewIn(BaseModel):
     review_first: bool
 
 
+# ---------- health: every problem in plain words, with a one-click fix ----------
+@app.get("/api/health")
+def health():
+    items, now = [], utcnow()
+    with SessionLocal() as s:
+        dests = s.query(Destination).order_by(Destination.id).all()
+        if not dests:
+            items.append({"level": "bad", "text": "No YouTube channel is connected.", "fix": "connect"})
+        for d in dests:
+            dd = _dest_dict(d)
+            if dd["needs_reconnect"] or (d.paused and "login expired" in (d.paused_reason or "")):
+                items.append({"level": "bad", "text": f"{d.name}: the Google login must be renewed.", "fix": "connect"})
+            elif d.paused:
+                items.append({"level": "bad", "text": f"{d.name}: uploads are paused — {d.paused_reason or ''}",
+                              "fix": "resume", "id": d.id})
+        hp = _helper_state(s)
+        if hp["waiting"] and not hp["online"]:
+            items.append({"level": "bad", "text": f"Helper PC is offline and {hp['waiting']} job(s) are waiting for it.",
+                          "fix": "helper"})
+        elif not hp["approved"]:
+            items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
+                          "fix": "helper"})
+        failed = s.query(Clip).filter(Clip.status == "failed").count()
+        if failed:
+            items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed"})
+        if quota.summary()["uploads_left"] == 0 and s.query(Clip).filter(Clip.status == "queued").count():
+            items.append({"level": "info", "text": "Today's upload budget is used; queued clips go up after the daily "
+                                                  "reset (1:30 PM IST). Nothing to do.", "fix": None})
+        due = now - timedelta(hours=8)
+        for ch in s.query(Channel).filter(Channel.auto.is_(True)).all():
+            if ch.last_status and ch.last_status.startswith("error"):
+                items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” failed last time: "
+                                                      f"{friendly_error(ch.last_status[7:])[:160]}", "fix": "run_source", "id": ch.id})
+            elif ch.last_run and ch.last_run < due:
+                items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” has not run for a while.",
+                              "fix": "run_source", "id": ch.id})
+    return {"ok": not any(i["level"] in ("bad", "warn") for i in items), "items": items}
+
+
+@app.post("/api/fix/retry-failed")
+def retry_failed():
+    """Render every failed clip again (rules are checked again; clips that break a rule stay failed)."""
+    n = 0
+    with SessionLocal() as s:
+        for c in s.query(Clip).filter(Clip.status == "failed").all():
+            p = s.get(Project, c.project_id)
+            if p is None or check_edit(p, c):
+                continue
+            res = s.execute(update(Clip).where(Clip.id == c.id, Clip.status == "failed")
+                            .values(status="rendering", error=None, fetch_tries=0, job_lease=None, fetch_since=None))
+            if res.rowcount:
+                n += 1
+                executor.submit(run_render, c.id)
+        s.commit()
+    return {"retried": n}
+
+
 @app.post("/api/channels/{chid}/review")
 def set_review(chid: int, body: ReviewIn):
     """Switch a source between 'auto upload' and 'review first'."""
