@@ -162,9 +162,46 @@ def analyze(job: dict, headers: dict):
         _tell_failed(pid, "analyze", str(e)[:300], headers)
 
 
+LLM_URL = os.getenv("CLIPSTUDIO_LLM_URL", "http://127.0.0.1:11434")
+LLM_MODEL = os.getenv("CLIPSTUDIO_LLM_MODEL", "qwen2.5:3b")
+
+
+def llm_ready() -> bool:
+    """Is a local AI (Ollama) with the model running on this PC?"""
+    try:
+        tags = httpx.get(f"{LLM_URL}/api/tags", timeout=3).json().get("models", [])
+        return any(m.get("name", "").startswith(LLM_MODEL.split(":")[0]) for m in tags)
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def write_script(job: dict, headers: dict):
+    topic, lang = job["topic"], job.get("lang") or "hi"
+    ask = (f"Write a 30-second YouTube Shorts voice-over script about: {topic}.\n"
+           + ("Write in simple Hinglish (Hindi in Roman letters). " if lang == "hi" else "Write in simple English. ")
+           + "6 to 8 short sentences. Start with a surprising hook question. Give 3 interesting, true, general facts or tips. "
+             "End by asking viewers to comment and follow. No hashtags, no emojis, no scene directions, no quotes. "
+             "Do not mention any real person's private details. Only the sentences.")
+    log(f"local AI: writing a script about “{topic}”")
+    r = httpx.post(f"{LLM_URL}/api/generate", json={"model": LLM_MODEL, "prompt": ask, "stream": False,
+                                                     "options": {"temperature": 0.7, "num_predict": 400}}, timeout=600)
+    r.raise_for_status()
+    text = " ".join(line.strip(" -*0123456789.") for line in r.json().get("response", "").splitlines() if line.strip())
+    if len(text) < 40:
+        raise RuntimeError("the local AI returned too little text")
+    _post(f"{SERVER}/api/worker/script/{job['source_id']}", headers, json={"topic": topic, "script": text[:3000]}, timeout=60)
+    log(f"local AI: script sent ({len(text)} characters)")
+
+
 def handle(job: dict, headers: dict):
     if job["type"] == "analyze":
         return analyze(job, headers)
+    if job["type"] == "script":
+        try:
+            return write_script(job, headers)
+        except Exception as e:  # noqa: BLE001
+            log(f"local AI failed: {str(e)[:150]}")
+            return None
     cid = job["clip_id"]
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         try:
@@ -271,7 +308,7 @@ def main():
     waiting, delay = False, POLL_SECONDS
     while True:
         try:
-            r = httpx.get(f"{SERVER}/api/worker/jobs", headers=headers, timeout=30)
+            r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0"}, timeout=30)
             delay = POLL_SECONDS
             if r.status_code == 403:
                 if not waiting:

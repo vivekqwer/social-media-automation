@@ -335,7 +335,10 @@ class ScheduleIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
-    kind: Literal["channel", "topic", "reel"] = "channel"
+    kind: Literal["channel", "topic", "reel", "trending"] = "channel"
+    interval_hours: int | None = Field(None, ge=1, le=48)
+    auto_scripts: bool = False  # reel source: scripts written by the helper PC's local AI on trending topics
+    language: Literal["hi", "en"] = "hi"
     scripts: list[str] = Field(default_factory=list, max_length=500)
     voice: str = Field("", max_length=60)
     query: str = Field(min_length=1, max_length=300)
@@ -897,7 +900,7 @@ def discard_clip(cid: int):
 # ---------- autopilot channels ----------
 @app.post("/api/channels")
 def add_channel(body: ChannelIn):
-    if body.kind in ("topic", "reel"):  # topics are always CC; reels are my own content
+    if body.kind in ("topic", "reel", "trending"):  # topics are always CC; reels are my own content
         body.mode, body.permission_note = "cc", ""
     if body.mode not in ("cc", "permission", "own"):
         raise HTTPException(400, "Autopilot supports cc, permission or own-channel mode (commentary needs manual edit).")
@@ -906,8 +909,13 @@ def add_channel(body: ChannelIn):
     body.query = body.query.strip()
     if not body.query:
         raise HTTPException(400, "Channel name/URL is empty")
-    if body.kind == "reel":  # my own scripts -> original reels (no copyright risk)
-        if not any(t.strip() for t in body.scripts):
+    if body.kind == "reel" and body.auto_scripts:
+        body.scripts = body.scripts or []
+    elif body.kind == "trending":  # query = YouTube category id ("" = all, "26" = Howto & Style ...)
+        if not re.fullmatch(r"\d{0,3}|all", body.query):
+            raise HTTPException(400, "Pick a trending category")
+    elif body.kind == "reel":  # my own scripts -> original reels (no copyright risk)
+        if not any(t.strip() for t in body.scripts) and not body.auto_scripts:
             raise HTTPException(400, "Add at least one script.")
     elif body.kind == "topic":
         body.mode, body.permission_note = "cc", ""  # topics only ever use Creative Commons videos
@@ -927,14 +935,24 @@ def add_channel(body: ChannelIn):
                 raise HTTPException(400, "Connect your own YouTube channel first (dashboard), then add sources.")
             body.destination_id = first.id
         data = body.model_dump()
+        language = data.pop("language")
         scripts = [{"text": t.strip()[:5000], "used": False} for t in data.pop("scripts") if t.strip()]
         ch = Channel(**data)
+        if body.kind == "trending":
+            ch.query = "" if body.query == "all" else body.query
+            ch.name, ch.interval_hours = "Trending (CC clips): " + (TREND_CATS.get(ch.query) or "all"), body.interval_hours or 3
         if body.kind == "reel":
             ch.scripts, ch.mode, ch.permission_note, ch.resolved_url = scripts, "original", "", "reel"
             ch.name, ch.aspect, ch.voice = "Original reels: " + body.query[:60], "9:16", body.voice or None
+            if body.auto_scripts:
+                ch.name, ch.interval_hours, ch.permission_note = "Trending reels (local AI): " + body.query[:40], 4, language
         s.add(ch)
         s.commit()
         return to_dict(ch)
+
+
+TREND_CATS = {"": "all", "26": "food & how-to", "22": "people & blogs", "24": "entertainment", "23": "comedy",
+              "20": "gaming", "17": "sports", "28": "science & tech"}
 
 
 class ScriptsIn(BaseModel):
@@ -1111,6 +1129,47 @@ def set_pexels(body: KeyIn):
             raise HTTPException(400, "Pexels did not accept this key.")
     set_setting("pexels_key", encrypt(k) if k else "")
     return {"set": bool(k)}
+
+
+# ---------- permission inbox ----------
+class GrantIn(BaseModel):
+    proof: str = Field(max_length=500)
+
+
+@app.get("/api/permissions")
+def perm_list():
+    from . import permissions
+
+    return permissions.listing()
+
+
+@app.post("/api/permissions/refresh")
+def perm_refresh():
+    from . import permissions
+
+    return permissions.refresh_inbox()
+
+
+@app.post("/api/permissions/{cid}/mark/{status}")
+def perm_status(cid: str, status: Literal["asked", "skipped", "new"]):
+    from . import permissions
+
+    try:
+        return permissions.set_status(cid, status)
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
+@app.post("/api/permissions/{cid}/grant")
+def perm_grant(cid: str, body: GrantIn):
+    from . import permissions
+
+    try:
+        return permissions.grant(cid, body.proof)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
 
 
 # ---------- Telegram remote control (optional module) ----------
@@ -1423,8 +1482,37 @@ def worker_jobs(request: Request):
             p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
             jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
                          "captions": bool((p.quick or {}).get("captions", True))})
+        if request.headers.get("x-worker-llm") == "1":
+            for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True), Channel.script_wanted.isnot(None)):
+                w = dict(ch.script_wanted)
+                if w.get("lease") and datetime.fromisoformat(w["lease"]) > now - JOB_LEASE:
+                    continue
+                w["lease"] = now.isoformat()
+                ch.script_wanted = w
+                jobs.append({"type": "script", "source_id": ch.id, "topic": w["topic"], "lang": ch.permission_note or "hi"})
         s.commit()
     return {"jobs": jobs, "version": SERVER_VERSION}
+
+
+class ScriptIn(BaseModel):
+    topic: str = Field(max_length=200)
+    script: str = Field(min_length=20, max_length=5000)
+
+
+@app.post("/api/worker/script/{chid}")
+def worker_script(chid: int, body: ScriptIn, request: Request):
+    """The helper's local AI wrote a reel script: add it and make the reel right away."""
+    _worker_or_401(request)
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        if not ch.script_wanted:
+            raise HTTPException(409, "No script was asked for")
+        ch.scripts = list(ch.scripts or []) + [{"text": body.script.strip(), "used": False, "topic": body.topic}]
+        ch.script_wanted = None
+        ch.last_run = None  # run now
+        s.commit()
+    executor.submit(run_channel, chid)
+    return {"ok": True}
 
 
 def _wants_captions(s, p: Project, c: Clip) -> bool:
@@ -1537,6 +1625,8 @@ def worker_fail(cid: int, body: WorkerFailIn, request: Request):
         if body.kind == "tts":
             c.tts_pending = None
             c.error = "Voice-over failed on the helper PC: " + body.error[:300]
+        elif body.kind == "script":
+            pass
         elif c.status == "fetching":
             c.job_lease = None  # let it be tried again (up to 3 times in all)
             if (c.fetch_tries or 0) >= MAX_JOB_TRIES or "private" in body.error.lower() or "removed" in body.error.lower():

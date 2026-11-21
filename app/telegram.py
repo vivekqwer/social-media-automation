@@ -203,6 +203,20 @@ def _handle_callback(data: str) -> str:
     from . import main
 
     kind, _, cid = (data or "").partition(":")
+    if kind in ("pa", "ps", "py"):
+        from . import permissions
+
+        try:
+            if kind == "pa":
+                permissions.set_status(cid, "asked")
+                return "Marked as asked."
+            if kind == "ps":
+                permissions.set_status(cid, "skipped")
+                return "Skipped."
+            set_setting("tg_pending_allow", cid)
+            return "Great! Now reply with how they said yes (who, how, when) — e.g. 'Instagram DM from @name on 22 Nov'."
+        except KeyError:
+            return "That creator is no longer in the list."
     try:
         if kind == "ap":
             c = main.approve_clip(int(cid), main.ApproveIn())
@@ -239,6 +253,18 @@ def poll():
                     continue
                 if cid != chat_id():
                     continue  # strangers are ignored
+                pending = get_setting("tg_pending_allow")
+                if pending and text and not text.startswith("/"):
+                    from . import permissions
+
+                    try:
+                        c = permissions.grant(pending, text)
+                        set_setting("tg_pending_allow", "")
+                        notify(f"✅ Permission saved for <b>{esc(c['name'])}</b>. Their new videos will now be clipped and "
+                               "uploaded automatically, with credit.")
+                    except (ValueError, KeyError) as e:
+                        notify(f"Not saved: {esc(str(e))}")
+                    continue
                 _handle_text(text)
             elif "callback_query" in u:
                 q = u["callback_query"]

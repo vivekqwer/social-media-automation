@@ -211,3 +211,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - To do by owner (optional): rename the Google OAuth app (Google Cloud → Branding) so the Google sign-in screen also says Raji Studio.
 - Link fields: Chrome ignored autocomplete=off and filled the saved username; fields are now read-only until focused (Chrome never autofills read-only fields).
 - 2026-11-21: Owner renamed the Google OAuth app to "Raji Studio" (Branding page confirmed). Google still shows the domain on the account chooser for unverified apps.
+
+## 2026-11-21 — Task 36: Trending CC clips, permission inbox, AI-script reels
+- Source "Trending": every 3 h takes the next unused trending topic (YouTube chart by category; songs/films/TV skipped; topic from tags or title), searches Creative Commons videos for it and clips/uploads the same day with credit. Category stays in ch.query; used topics in seen_topics. Per-source interval_hours (autopilot tick honours it).
+- Permission inbox (app/permissions.py): every morning up to 5 creators of popular non-CC videos (trending + competitor outliers), with a ready Hinglish+English message and channel link, sent to Telegram with buttons (They said yes / Asked / Skip). "They said yes" needs written proof (dashboard prompt or Telegram reply) and then creates an automatic permission source for that creator. Owner sends the message; refused: auto-emailing creators (no API, spam) and uploading after silence (silence is not permission).
+- Reel source option "Fully automatic": the helper's local AI (Ollama, default qwen2.5:3b at 127.0.0.1:11434) writes a Hinglish/English script on the next trending topic -> /api/worker/script -> ReelGen reel -> upload. Script jobs go only to helpers reporting x-worker-llm: 1; source shows "waiting for the local AI" otherwise.
+- Tests 15/15; all regression suites pass; dashboard JS checked.

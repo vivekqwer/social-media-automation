@@ -93,7 +93,8 @@ class Channel(Base):
 
     __tablename__ = "channels"
     id = Column(Integer, primary_key=True)
-    kind = Column(String(10), default="channel")  # channel | topic (CC search) | reel (my own scripts -> ReelGen)
+    kind = Column(String(10), default="channel")  # channel | topic (CC search) | reel (ReelGen) | trending (CC on trending topics)
+    interval_hours = Column(Integer)  # how often this source runs (empty = AUTOPILOT_INTERVAL_HOURS)
     scripts = Column(JSON, default=list)  # reel sources: [{"text": ..., "used": bool}]
     voice = Column(String(60))  # reel sources: edge-tts voice (empty = from the script's language)
     query = Column(String(300))  # name, @handle or URL as typed by user; keywords for a topic
@@ -113,6 +114,9 @@ class Channel(Base):
     tz_offset = Column(Integer, default=0)  # minutes, JS getTimezoneOffset(): utc = local + offset
     review_first = Column(Boolean, default=False)  # True: clips wait for my approval instead of auto-queueing
     seen = Column(JSON, default=list)
+    seen_topics = Column(JSON, default=list)  # trending sources: topics already used
+    auto_scripts = Column(Boolean, default=False)  # reel source: the helper's local AI writes scripts on trending topics
+    script_wanted = Column(JSON)  # {"topic":..., "since":...} waiting for the helper's local AI
     last_run = Column(DateTime)
     last_status = Column(Text)
     created_at = Column(DateTime, default=utcnow)

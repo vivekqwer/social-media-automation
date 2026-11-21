@@ -218,12 +218,28 @@ def run_channel(channel_id: int):
                 s.commit()
                 return
             if ch.kind == "reel":
+                if ch.auto_scripts and not any(not x.get("used") for x in (ch.scripts or [])) and not ch.script_wanted:
+                    topic = trending_phrase(ch)  # ask the helper's local AI for a script on today's trend
+                    if topic:
+                        ch.script_wanted = {"topic": topic, "since": utcnow().isoformat()}
+                        log.append(f"asked the local AI for a script about “{topic}”")
+                elif ch.script_wanted and ch.script_wanted.get("since", "") < (utcnow() - timedelta(hours=2)).isoformat():
+                    log.append("waiting for the local AI on the helper PC (Ollama with qwen2.5:3b)")
                 _run_reels(s, ch, log)
                 ch.last_status = "; ".join(log) or "no scripts left — add more scripts"
                 ch.last_run = utcnow()
                 s.commit()
                 return
-            topic = ch.kind == "topic"
+            if ch.kind == "trending":  # pick today's trending topic, then search it like a topic (CC only)
+                phrase = trending_phrase(ch)
+                if not phrase:
+                    ch.last_status, ch.last_run = "no new trending topic right now", utcnow()
+                    s.commit()
+                    return
+                ch.resolved_url = "trending"
+                log.append(f"trending topic: “{phrase}”")
+            topic = ch.kind in ("topic", "trending")
+            search_q = phrase if ch.kind == "trending" else ch.query  # trending keeps its category in ch.query
             if not ch.resolved_url:
                 if topic:
                     ch.resolved_url, ch.name = "topic", f"Topic: {ch.query}"
@@ -239,7 +255,7 @@ def run_channel(channel_id: int):
                 return
             seen = set(ch.seen or [])
             if topic:  # Creative Commons videos only, found by YouTube search
-                ids = youtube.api_search_cc(ch.query, seen, ch.videos_per_run * 3)
+                ids = youtube.api_search_cc(search_q, seen, ch.videos_per_run * 3)
                 if not ids:
                     log.append("no new Creative Commons videos found for this topic" if quota.can_search()
                                else "search skipped: today's YouTube quota is kept for uploads")
@@ -272,14 +288,46 @@ INTERVAL = timedelta(hours=int(os.getenv("AUTOPILOT_INTERVAL_HOURS") or "6"))
 
 def autopilot_tick():
     """Run every source whose interval has passed since its last run (called every 15 minutes)."""
-    due = utcnow() - INTERVAL
+    now = utcnow()
     with SessionLocal() as s:
-        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all() if not c.last_run or c.last_run < due]
+        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all()
+               if not c.last_run or c.last_run < now - (timedelta(hours=c.interval_hours) if c.interval_hours else INTERVAL)]
     for i in ids:
         try:
             run_channel(i)
         except Exception:  # noqa: BLE001
             continue
+
+
+STOP = set("""a an the and or of to in on for with from by at is are was were be this that these those my your our his her
+its their i you we they it vs new latest full video official live part episode ep day today 2024 2025 2026 2027 hindi english
+shorts short reels reel viral trending best top most watch must how what why when who ki ka ke ko se me mein hai hain
+aur bhi ek yeh woh""".split())
+
+
+def trend_phrase(title: str, tags: list | None = None) -> str:
+    """Short search phrase (2-4 words) that describes a trending video's topic."""
+    for t in (tags or [])[:5]:
+        words = [w for w in re.findall(r"[\w']+", t.lower()) if w not in STOP and not w.isdigit()]
+        if 2 <= len(words) <= 4:
+            return " ".join(words)
+    words = [w for w in re.findall(r"[\w']+", re.split(r"[|#(\[]", title or "")[0].lower()) if w not in STOP and not w.isdigit()]
+    return " ".join(words[:3]) if len(words) >= 2 else ""
+
+
+def trending_phrase(ch: Channel) -> str:
+    """The best trending topic this source has not used yet (songs, films and TV shows are skipped)."""
+    from .competitors import trending
+
+    used = set((ch.seen_topics or []))
+    for v in trending(ch.query if (ch.query or "").isdigit() else ""):
+        if youtube.RISKY.search(v["title"]):
+            continue
+        ph = trend_phrase(v["title"], v.get("tags"))
+        if ph and ph not in used:
+            ch.seen_topics = list(used | {ph})[-200:]
+            return ph
+    return ""
 
 
 def _script_title(text: str) -> str:

@@ -111,13 +111,14 @@ def trending(category: str = "") -> list[dict]:
         cached = json.loads(raw)
         if datetime.fromisoformat(cached["at"]) > utcnow() - timedelta(hours=6):
             return cached["items"]
-    kw = {"part": "snippet,statistics", "chart": "mostPopular", "regionCode": "IN", "maxResults": 30}
+    kw = {"part": "snippet,statistics,status", "chart": "mostPopular", "regionCode": "IN", "maxResults": 30}
     if category:
         kw["videoCategoryId"] = category
     r = youtube.client().videos().list(**kw).execute()
     quota.spend("read")
     items = [{"video_id": it["id"], "title": it["snippet"].get("title", ""), "channel": it["snippet"].get("channelTitle", ""),
-              "views": int((it.get("statistics") or {}).get("viewCount") or 0), "tags": (it["snippet"].get("tags") or [])[:8]}
+              "views": int((it.get("statistics") or {}).get("viewCount") or 0), "tags": (it["snippet"].get("tags") or [])[:8],
+              "channel_id": it["snippet"].get("channelId", ""), "cc": (it.get("status") or {}).get("license") == "creativeCommon"}
              for it in r.get("items", [])]
     set_setting(key, json.dumps({"at": utcnow().isoformat(), "items": items}))
     return items
