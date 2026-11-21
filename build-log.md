@@ -254,3 +254,6 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 
 ## 2026-11-22 — Task 43: permission mails as "Funny Gunction"
 - Owner did not want the food channel named in mails. Mails no longer name the upload channel: "I run a small channel where I post funny Shorts", signed "Funny Gunction"; the Gmail sender name is the same (From: Funny Gunction <address>). Both editable on My channels → Gmail ("Name at the end of mails", "Your channel posts … Shorts"); saving rewrites unsent mails. The 5 mails already sent are unchanged.
+
+## 2026-11-22 — Task 44: local AI ready; worker jobs 500 fixed
+- qwen2.5:3b downloaded on the helper PC (Ollama). As soon as the helper reported AI ready, /api/worker/jobs returned 500: on Postgres an empty JSON column is stored as JSON 'null' and passes IS NOT NULL, so dict(None) crashed in the script-job loop. Now skips sources without a topic.

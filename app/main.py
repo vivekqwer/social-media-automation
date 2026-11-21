@@ -1825,7 +1825,9 @@ def worker_jobs(request: Request):
                          "captions": bool((p.quick or {}).get("captions", True))})
         if request.headers.get("x-worker-llm") == "1":
             for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True), Channel.script_wanted.isnot(None)):
-                w = dict(ch.script_wanted)
+                w = dict(ch.script_wanted or {})  # Postgres keeps an empty JSON value as 'null', which passes IS NOT NULL
+                if not w.get("topic"):
+                    continue
                 if w.get("lease") and datetime.fromisoformat(w["lease"]) > now - JOB_LEASE:
                     continue
                 w["lease"] = now.isoformat()
