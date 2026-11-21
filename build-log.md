@@ -244,3 +244,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 
 ## 2026-11-22 — Task 41: Ollama install survives slow internet
 - winget failed (0x80072ee2 internet timeout; installer is 1.86 GB). Helper now downloads the official OllamaSetup.exe from GitHub releases itself in resumable pieces (HTTP Range; only github.com / githubusercontent hosts accepted), shows % on the dashboard, keeps going after drops (30 s wait, up to 60 failures), then installs silently (/VERYSILENT) and pulls the model.
+
+## 2026-11-22 — Task 42: "Viral today" board + 5 daily picks
+- app/viral.py: every 2 h the India chart (50 videos, 1 unit) and once a day the most-viewed Shorts of the last 24 h (search 100 units + 1) are saved under the IST date with views, likes, upload time and gain since first seen; 30 days kept; any day can be opened.
+- Each day 5 videos (>= 90 s; never labels/studios/TV, risky titles, already-used videos, declined/skipped creators) are picked: creators who said yes first, then CC, then creators with a public email (found in their channel description). CC/allowed -> clipped at the most-replayed part (helper analysis) and queued at once via the "Viral picks (5 a day)" source (09:00/12:00/15:00/18:00/21:00 IST; never run by the source timer). Others -> creator added to the inbox with a mail naming that video; the owner presses "Send all ready mails"; a plain "yes" by mail clips that exact video automatically (permissions.grant -> viral.on_granted).
+- Each pick shows its step live (Needs you / Waiting / Clipping / Review / Scheduled with time / On YouTube / Failed). Owner can pick any board video by hand. Checklist line "Today's viral picks".
+- Tests 28/28; regressions pass (test_mailnotify subject check fails before this change too; test_trend3 expects the old mail text).

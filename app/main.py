@@ -337,7 +337,7 @@ class ScheduleIn(BaseModel):
 
 
 class ChannelIn(BaseModel):
-    kind: Literal["channel", "topic", "reel", "trending"] = "channel"
+    kind: Literal["channel", "topic", "reel", "trending", "viral"] = "channel"
     interval_hours: int | None = Field(None, ge=1, le=48)
     auto_scripts: bool = False  # reel source: scripts written by the helper PC's local AI on trending topics
     language: Literal["hi", "en"] = "hi"
@@ -1265,6 +1265,44 @@ def perm_revoke(cid: str):
         raise HTTPException(404, "Not in the list")
 
 
+# ---------- viral board + 5 daily picks ----------
+class ViralPickIn(BaseModel):
+    video_id: str = Field(pattern=r"^[A-Za-z0-9_-]{11}$")
+
+
+@app.get("/api/viral")
+def viral_view(day: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$")):
+    from . import viral
+
+    return viral.view(day)
+
+
+@app.post("/api/viral/refresh")
+def viral_refresh():
+    from . import viral
+
+    viral.refresh(force=True)
+    return viral.view()
+
+
+@app.post("/api/viral/pick")
+def viral_pick(body: ViralPickIn):
+    from . import viral
+
+    try:
+        viral.pick_today(extra=body.video_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return viral.view()
+
+
+@app.post("/api/viral/send")
+def viral_send():
+    from . import viral
+
+    return viral.send_ready_mails()
+
+
 @app.post("/api/permissions/find-emails")
 def perm_find_emails():
     from . import permissions
@@ -1473,6 +1511,15 @@ def setup_checklist():
         + (f"{len(ready)} mail(s) ready — check and press Send. " if ready else "")
         + (f"{len(need_mail)} creator(s) have no public email — open their About page (View email address) and paste it, or press Skip."
            if need_mail else ""))
+    try:
+        from . import viral
+
+        vv = viral.view()
+        ready = vv["ready_mails"]
+        add("viral", "Today's viral picks", ready == 0, f"{len(vv['picks'])} of {vv['per_day']} picked today — clipped and uploaded by themselves.",
+            {"go": "viral", "label": "Open Viral"}, blocked=f"{ready} permission mail(s) ready — press “Send all ready mails”" if ready else "")
+    except Exception:  # noqa: BLE001
+        pass
     add("review", "Clips waiting for your approval", review == 0, "Only sources with “Review first” wait for you.",
         {"go": "clips", "label": "Review clips"}, blocked=f"{review} clip(s) ready to review" if review else "")
     add("failed", "No failed clips", failed == 0, "", {"fix": "retry_failed", "label": "Retry all failed"},

@@ -267,6 +267,9 @@ def start():
     from .permissions import check_replies, refresh_inbox
     sch.add_job(lambda: executor.submit(check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
     sch.add_job(lambda: executor.submit(refresh_inbox), "cron", hour=4, minute=30, max_instances=1, coalesce=True)  # 10 AM IST
+    from .viral import refresh as viral_refresh
+    sch.add_job(lambda: executor.submit(viral_refresh), "interval", hours=2, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # viral board + 5 daily picks
     from .competitors import scan_if_due
     sch.add_job(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=8))

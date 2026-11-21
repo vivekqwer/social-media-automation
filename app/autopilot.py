@@ -108,19 +108,20 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
     return slot
 
 
-def _process_video(s, ch: Channel, vid: str, log: list) -> bool:
-    """Returns True if the video yielded clips."""
+def _process_video(s, ch: Channel, vid: str, log: list, mode: str | None = None, note: str | None = None) -> bool:
+    """Returns True if the video yielded clips. mode/note override the source's (viral picks: per video)."""
+    mode = mode or ch.mode
     info = fetch_info(f"https://www.youtube.com/watch?v={vid}")
-    if ch.mode == "own":  # only videos that really are on one of my connected channels
+    if mode == "own":  # only videos that really are on one of my connected channels
         mine = {d.channel_id for d in s.query(Destination).all()}
         if not any(cid and cid in (info.get("channel_url") or "") for cid in mine):
             log.append(f"skip {vid}: not on one of your connected channels")
             return False
-    elif (ch.mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
+    elif (mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
         log.append(f"skip {vid}: not CC")
         return False
-    p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=ch.mode,
-                permission_note=ch.permission_note, channel_ref=ch.id, **info)
+    p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=mode,
+                permission_note=note if note is not None else ch.permission_note, channel_ref=ch.id, **info)
     if not p.heatmap:
         p.heatmap = fetch_heatmap(vid)
     secs = parse_timestamps(fetch_comments(vid), p.duration)
@@ -207,7 +208,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
 def run_channel(channel_id: int):
     with SessionLocal() as s:
         ch = s.get(Channel, channel_id)
-        if not ch:
+        if not ch or ch.kind == "viral":  # viral picks are driven by app/viral.py, never by the source timer
             return
         log = []
         try:
@@ -293,7 +294,7 @@ def autopilot_tick():
     """Run every source whose interval has passed since its last run (called every 15 minutes)."""
     now = utcnow()
     with SessionLocal() as s:
-        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all()
+        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True), Channel.kind != "viral").all()
                if not c.last_run or c.last_run < now - (timedelta(hours=c.interval_hours) if c.interval_hours else INTERVAL)]
     for i in ids:
         try:

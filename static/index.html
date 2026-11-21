@@ -189,6 +189,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
     <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
     <button class="nav" data-p="analytics"><i data-ico="chart"></i>Analytics</button>
+    <button class="nav" data-p="viral"><i data-ico="sparkles"></i>Viral today</button>
     <button class="nav" data-p="ideas"><i data-ico="sparkles"></i>Ideas</button>
     <button class="nav" data-p="alerts"><i data-ico="bell"></i>Alerts<span class="count" id="b-alerts" style="display:none;background:var(--bad)"></span></button>
     <button class="nav quick" id="nav-quick"><i data-ico="zap"></i>Quick upload</button>
@@ -261,6 +262,15 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>All videos</h3><p>Every video on your channels, newest first. “New” = views since the last update.</p></div>
           <select id="an-sort" style="width:auto"><option value="date">Newest first</option><option value="views">Most views</option><option value="new">Most new views</option></select></div>
           <div class="tw" id="an-videos"></div></div>
+      </section>
+
+      <section id="p-viral" class="hide">
+        <div class="page-h"><div><h1>Viral today</h1><div class="desc">India's most-watched videos and Shorts, saved every 2 hours with the date. Every day 5 are picked: Creative Commons and creators who said yes are clipped at the most-replayed part and uploaded by themselves; for the rest a permission mail is ready.</div></div>
+          <div class="row"><select id="vr-day" style="width:auto"></select><button class="btn outline sm" id="vr-refresh">Refresh now</button></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Today's 5 picks</h3><p id="vr-sub">…</p></div><button class="btn sm" id="vr-send">Send all ready mails</button></div>
+          <div class="cb" id="vr-picks"></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Viral videos</h3><p>Updated <span id="vr-upd">—</span>. “Gain” = views since it was first seen today.</p></div></div><div class="tw" id="vr-videos"></div></div>
+        <div class="card"><div class="ch"><div><h3>Viral Shorts</h3><p>Most-viewed Shorts of the last 24 hours (shown for ideas; other people's Shorts are never re-posted).</p></div></div><div class="tw" id="vr-shorts"></div></div>
       </section>
 
       <section id="p-ideas" class="hide">
@@ -532,12 +542,12 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+const TITLES={viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -620,6 +630,42 @@ async function loadIdeas(){
     once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
 }
 $('#id-cat').onchange=()=>once(loadIdeas);
+let VRT=null,VRDAY='';
+const STEPC={done:'uploaded',queued:'uploaded',clip:'queued',review:'queued',mail:'queued',wait:'outline',reply:'queued',no:'outline',failed:'failed'};
+const STEPL={done:'On YouTube',queued:'Scheduled',clip:'Clipping',review:'Review',mail:'Needs you',wait:'Waiting',reply:'Replied',no:'Not used',failed:'Failed'};
+const WHY={cc:'Creative Commons',allowed:'Creator said yes',ask:'Permission needed'};
+const vago=t=>{if(!t)return'—';const m=Math.round((Date.now()-new Date(t))/60000);return m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':new Date(t).toLocaleDateString()};
+const vwhen=t=>new Date(t).toLocaleString([], {weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+async function loadViral(){
+  clearTimeout(VRT);
+  if(!$('#p-viral').classList.contains('hide'))VRT=setTimeout(()=>loadViral().catch(()=>{}),60000);
+  const v=await api('/api/viral'+(VRDAY?'?day='+VRDAY:''));
+  $('#vr-day').innerHTML=(v.days.length?v.days:[v.today]).map(d=>`<option value="${d}" ${d===v.day?'selected':''}>${d===v.today?'Today · ':''}${new Date(d+'T00:00').toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'})}</option>`).join('');
+  $('#vr-upd').textContent=vago(v.updated);
+  $('#vr-sub').textContent=`${v.picks.length} of ${v.per_day} picked on ${v.day}. Steps: pick → permission (if needed) → clip at the most-replayed part → upload.`;
+  $('#vr-send').textContent=v.ready_mails?`Send all ready mails (${v.ready_mails})`:'No mails to send';$('#vr-send').disabled=!v.ready_mails;
+  $('#vr-picks').innerHTML=v.picks.length?v.picks.map(p=>{const s=p.status;return `<div class="item" style="flex-wrap:wrap"><img src="https://i.ytimg.com/vi/${esc(p.video_id)}/mqdefault.jpg" style="width:112px;border-radius:8px" alt="">
+    <div class="tx grow"><b>${esc(p.title)}</b><span class="mut sm" style="display:block">${esc(p.channel)} · ${num(p.views)} views · ${WHY[p.why]||''}${p.by_hand?' · picked by you':''}</span>
+    <span class="sm" style="display:block;margin-top:4px"><span class="badge ${STEPC[s.step]||'outline'}">${STEPL[s.step]||s.step}</span> ${esc(s.at?'Goes up '+vwhen(s.at):s.text)}</span></div>
+    ${s.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://youtube.com/shorts/${esc(s.youtube_id)}">Open</a>`:''}
+    ${s.action==='send'||s.action==='email'||s.action==='decide'?`<button class="btn sm" data-vrgo="1">${s.action==='send'?'See mail':s.action==='email'?'Add email':'Read reply'}</button>`:''}
+    ${s.step==='review'?`<button class="btn sm" data-vrclip="${s.clip_id}">Review</button>`:''}</div>`}).join('')
+    :'<span class="mut sm">Picks appear after the first check of the day (every 2 hours). Press “Refresh now”.</span>';
+  const tbl=(rows,short)=>rows.length?`<table class="tbl"><thead><tr><th>#</th><th>Video</th><th>Channel</th><th>Uploaded</th><th style="text-align:right">Views</th><th style="text-align:right">Gain</th><th style="text-align:right">Likes</th><th>Use</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr>
+    <td class="mut">${i+1}</td><td><div class="row" style="gap:8px;flex-wrap:nowrap"><img src="https://i.ytimg.com/vi/${esc(r.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><a href="https://youtube.com/watch?v=${esc(r.video_id)}" target="_blank" rel="noopener">${esc(r.title.slice(0,80))}</a></div></td>
+    <td>${esc(r.channel)}</td><td class="mut sm">${r.published?new Date(r.published).toLocaleString([], {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</td>
+    <td style="text-align:right">${num(r.views)}</td><td style="text-align:right;color:var(--ok)">${r.gain?'+'+num(r.gain):'—'}</td><td style="text-align:right">${num(r.likes)}</td>
+    <td>${r.cc?'<span class="badge uploaded">CC</span>':r.creator==='granted'?'<span class="badge uploaded">Allowed</span>':r.creator?'<span class="badge outline">'+esc(r.creator)+'</span>':'<span class="badge outline">Ask first</span>'}</td>
+    <td>${r.picked?'<span class="badge queued">Picked</span>':!short&&v.day===v.today&&r.duration>=90?`<button class="btn outline sm" data-vrpick="${esc(r.video_id)}">Pick</button>`:''}</td></tr>`).join('')}</tbody></table>`
+    :'<div class="cb mut sm">Nothing saved for this day yet.</div>';
+  $('#vr-videos').innerHTML=tbl(v.videos,false);$('#vr-shorts').innerHTML=tbl(v.shorts,true);
+  $$('[data-vrgo]').forEach(b=>b.onclick=()=>go('ideas'));
+  $$('[data-vrclip]').forEach(b=>b.onclick=()=>{go('clips');setTimeout(()=>{try{openEditor(+b.dataset.vrclip)}catch(e){}},600)});
+  $$('[data-vrpick]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/viral/pick','POST',{video_id:b.dataset.vrpick});toast('Picked — see Today\'s picks');VRDAY='';loadViral()},b));
+}
+$('#vr-day').onchange=()=>{VRDAY=$('#vr-day').value;loadViral().catch(fail)};
+$('#vr-refresh').onclick=()=>once(async()=>{await api('/api/viral/refresh','POST');VRDAY='';await loadViral();toast('Updated')},$('#vr-refresh'));
+$('#vr-send').onclick=()=>once(async()=>{if(!confirm('Send the ready permission mails from your Gmail now?'))return;const r=await api('/api/viral/send','POST');toast(r.sent+' mail(s) sent'+(r.errors.length?' — '+r.errors.join('; '):''));loadViral()},$('#vr-send'));
 async function loadPerms(){
   const L=await api('/api/permissions');const lab={new:['To ask','queued'],asked:['Asked','outline'],replied:['Replied!','queued'],granted:['Allowed','uploaded'],skipped:['Skipped','outline'],declined:['Said no','outline']};
   $('#pm-list').innerHTML=L.length?L.map(c=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(c.name)}</b> <span class="badge ${lab[c.status][1]}">${lab[c.status][0]}</span><span class="mut sm" style="display:block">${esc((c.video_title||'').slice(0,80))} · ${num(c.views)} views</span>

@@ -130,6 +130,42 @@ def _deobfuscate(t: str) -> str:
     return re.sub(r"\s*[\[(]\s*dot\s*[\])]\s*", ".", t, flags=re.I)
 
 
+def lookup_emails(channel_ids: list[str]) -> dict:
+    """{channel_id: public email} from channel descriptions (1 quota unit per 50 channels)."""
+    from . import quota, youtube
+
+    out = {}
+    for i in range(0, len(channel_ids), 50):
+        batch = channel_ids[i:i + 50]
+        try:
+            r = youtube.client().channels().list(part="snippet,brandingSettings", id=",".join(batch), maxResults=50).execute()
+            quota.spend("read")
+        except Exception as e:  # noqa: BLE001
+            log.warning("email lookup: %s", str(e)[:150])
+            return out
+        for it in r.get("items", []):
+            text = it.get("snippet", {}).get("description", "") + "\n" + it.get("brandingSettings", {}).get("channel", {}).get("description", "")
+            m = [e.strip(".") for e in EMAIL_FIND.findall(_deobfuscate(text)) if not e.lower().endswith((".png", ".jpg", ".gif"))]
+            if m:
+                out[it["id"]] = m[0]
+    return out
+
+
+def add_creator(cid: str, name: str, video_id: str, video_title: str, views: int, email: str = "") -> dict:
+    """Put a creator in the inbox (from the viral picks) with a ready mail about this exact video."""
+    d = _load()
+    c = d.get(cid)
+    if not c:
+        c = d[cid] = {"channel_id": cid, "name": name, "url": f"https://www.youtube.com/channel/{cid}", "video_id": video_id,
+                      "video_title": video_title, "views": views, "status": "new", "added": utcnow().strftime("%Y-%m-%d"),
+                      "email_checked": True}
+        c["subject"], c["message"] = compose(name, video_title, cid)
+    if email and not c.get("email"):
+        c["email"], c["email_from"] = email, "their channel description"
+    _save(d)
+    return c
+
+
 def find_emails(only: str | None = None) -> int:
     """Look for a public business email in each new creator's channel description (official API, 1 unit each)."""
     from . import quota, youtube
@@ -357,4 +393,10 @@ def grant(cid: str, proof: str) -> dict:
         s.commit()
     c.update(status="granted", proof=proof, granted_at=utcnow().isoformat() + "Z", source_id=src_id)
     _save(d)
+    try:  # the viral video we asked about is clipped right away
+        from .viral import on_granted
+
+        on_granted(cid)
+    except Exception as e:  # noqa: BLE001
+        log.warning("viral on_granted: %s", str(e)[:150])
     return c
