@@ -1173,18 +1173,27 @@ async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}ca
 function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
 $('#rm-preset').onchange=rmShow;
 let FC=null;
-const fcFill=(t,title,ch,tags)=>String(t||'').split('{title}').join(title).split('{channel}').join(ch).split('{hashtags}').join(tags).trim();
+// exactly what the server posts: comments.clean() on the words, then comments.fill()
+const fcClean=t=>String(t||'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0009\u000b-\u001f]/g,'').replace(/\n{3,}/g,'\n\n').trim().slice(0,500).trim();
+const fcFill=(t,title,ch,tags)=>fcClean(t).split('{title}').join(title.trim()).split('{channel}').join(ch.trim()).split('{hashtags}').join(tags.trim())
+  .split('\n').map(x=>x.replace(/[ \t]{2,}/g,' ').trimEnd()).join('\n').replace(/\n{3,}/g,'\n\n').trim().slice(0,1000);
+const fcMsg=on=>on?'Saved — videos uploaded from now on get this comment':'Saved — no comments are posted while this is off';
+function fcBadge(on){const b=$('#fc-badge');b.className='badge '+(on?'uploaded':'outline');b.textContent=on?'On':'Off'}
 async function loadComment(){let r;try{r=await api('/api/settings/comment')}catch(e){return}FC=r;
   $('#fc-on').checked=!!r.on;$('#fc-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own comment…</option>';
   $('#fc-preset').value=r.preset;$('#fc-custom').value=r.custom||'';fcShow();
-  const b=$('#fc-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
+  fcBadge(r.on);
   $('#fc-chs').innerHTML=r.channels.map(c=>c.can_comment?`<div>✔ <b>${esc(c.name)}</b> can post comments</div>`
     :`<div class="alert" style="margin-top:6px">${ico('alert')}<span><b>${esc(c.name)}</b>: reconnect the channel once to allow comments (it was connected before comments were added). Uploads are not affected.</span><a class="btn sm" href="/auth/login">Reconnect</a></div>`).join('')}
 function fcShow(){const own=$('#fc-preset').value==='custom';$('#fc-custom-wrap').classList.toggle('hide',!own);
   const t=own?$('#fc-custom').value:((FC&&FC.presets.find(p=>p.key===$('#fc-preset').value))||{}).text;
   $('#fc-prev').textContent=fcFill(t,'Street food in Delhi',(FC&&FC.example_channel)||'My channel','#streetfood #delhi')||'—'}
 $('#fc-preset').onchange=fcShow;$('#fc-custom').oninput=fcShow;
-$('#fc-save').onclick=()=>once(async()=>{await api('/api/settings/comment','POST',{on:$('#fc-on').checked,preset:$('#fc-preset').value,custom:$('#fc-custom').value});toast('Saved — videos uploaded from now on get this comment');loadComment()},$('#fc-save'));
+$('#fc-save').onclick=()=>once(async()=>{await api('/api/settings/comment','POST',{on:$('#fc-on').checked,preset:$('#fc-preset').value,custom:$('#fc-custom').value});toast(fcMsg($('#fc-on').checked));loadComment()},$('#fc-save'));
+// the switch saves by itself (the words keep their last saved choice until Save is pressed)
+$('#fc-on').onchange=async()=>{const el=$('#fc-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
+  LOCK=true;el.disabled=true;try{const r=await api('/api/settings/comment','POST',{on,preset:FC?FC.preset:'ask',custom:FC?FC.custom:''});
+    if(FC){FC.on=r.on}fcBadge(r.on);el.checked=r.on;toast(fcMsg(r.on))}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
 function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   $('#e-fc-on').checked=c.comment_on!==false;$('#e-fc-text').value=c.comment_text||'';
   $('#e-fc-on').disabled=$('#e-fc-text').disabled=done;$('#e-fc-save').classList.toggle('hide',done);
@@ -1195,8 +1204,11 @@ function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   else if(st.startsWith('waiting')&&c.comment_account_on===false)n='Held: first comments are switched off for your account (My channels → First comment). It is posted if you switch them on again within 14 days.';
   else if(st.startsWith('waiting'))n=st.length>8?'Waiting: '+esc(st.slice(8).trim())+'.':'Waiting — posted within about 10 minutes after the video is public.';
   else if(st==='posting')n='Posting now…';
+  else if(c.comment_account_on===false)n='No comment: first comments are switched off for your account (My channels → First comment).';
+  else if(c.status==='uploaded'&&!st)n='This video was uploaded before first comments existed. Press Save comment to post one now.';
   else if(st==='off'&&c.status==='uploaded')n='No comment for this video. Switch it on and press Save comment to post one now.';
-  else n=c.comment_account_on===false?'First comments are switched off for your account (My channels → First comment).':'Posted after the upload, as soon as the video is public:';
+  else if(c.comment_on===false)n='No comment for this video: its switch is off. Switch it on and press Save comment to get one after the upload.';
+  else n=c.comment_preview?'Posted after the upload, as soon as the video is public:':'Posted after the upload, as soon as the video is public.';
   if(!done&&c.comment_preview&&c.comment_on!==false&&c.comment_account_on!==false)n+=`<div style="color:var(--fg);white-space:pre-wrap;margin-top:4px">“${esc(c.comment_preview)}”</div>`;
   if(!done&&c.comment_can===false&&st!=='no permission')n+='<div>This channel must be reconnected once to allow comments (My channels).</div>';
   $('#e-fc-note').innerHTML=n}

@@ -207,8 +207,29 @@ HELP = [
      "Try again after a minute. If it keeps happening, press “Copy details” below and send them to the person who looks after the system."),
 ]
 
+# HELP lines about a feature the Super Admin can switch off for an account: hidden while it is off
+HELP_FEATURE = {
+    "The first comment is not pinned / was not posted": "uploads.comment",
+    "An AI reel is bad": "ai.reels",
+    "AI reels are off-topic or strange": "ai.reels",
+    "I want to upload my own video file": "clips.own_video",
+    "A creator answered my mail": "permissions.manage",
+    "Mails are not sent": "gmail.send",
+}
 
-SECRET_RE = re.compile(r"[A-Za-z0-9_\-\.]{24,}|[\w.+-]+@[\w-]+\.[\w.-]+|\[parameters: .*", re.S)
+
+def help_items() -> list[dict]:
+    """HELP for the account being served, without the lines of features switched off for it."""
+    try:
+        from . import acl
+
+        on = acl.feature
+    except Exception:  # noqa: BLE001
+        on = lambda _k: True  # noqa: E731
+    return [{"q": q, "auto": a, "do": d} for q, a, d in HELP if q not in HELP_FEATURE or on(HELP_FEATURE[q])]
+
+
+SECRET_RE =re.compile(r"[A-Za-z0-9_\-\.]{24,}|[\w.+-]+@[\w-]+\.[\w.-]+|\[parameters: .*", re.S)
 
 
 def scrub(text: str) -> str:
