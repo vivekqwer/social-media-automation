@@ -655,6 +655,7 @@ class ClipUpdate(BaseModel):
     reframe: bool | None = None
     fit: Literal["full", "wide", "fill"] | None = None
     voice_fit: Literal["", "speed"] | None = None
+    frame_title: bool | None = None
 
 
 class TtsIn(BaseModel):
@@ -822,7 +823,7 @@ def _render_sig(c: Clip) -> tuple:
             st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
             r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False,
-            c.reframe is not False, c.fit or "full", c.voice_fit or "")
+            c.reframe is not False, c.fit or "full", c.voice_fit or "", c.aspect != "16:9" and c.frame_title is not False)
 
 
 @app.put("/api/clips/{cid}")
@@ -1333,7 +1334,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
-            "credit_on", "fit", "voice_fit", "reframe", "short_cover")}, status="draft")
+            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title")}, status="draft")
         s.add(new)
         s.commit()
         old_dir, new_dir = DATA_DIR / "clips" / str(c.id), DATA_DIR / "clips" / str(new.id)
@@ -1616,6 +1617,23 @@ def set_affiliate(body: AffIn):
 
 class KeyIn(BaseModel):
     key: str = Field("", max_length=200)
+
+
+class FaceSizeIn(BaseModel):
+    size: Literal["S", "M", "L"]
+
+
+@app.get("/api/settings/face-size")
+def face_size_get():
+    return {"size": get_setting("thumb_face_size") or "S"}
+
+
+@app.post("/api/settings/face-size")
+def face_size_set(body: FaceSizeIn):
+    """How big the face is on thumbnails. Thumbnails of clips that are not uploaded yet are made again."""
+    set_setting("thumb_face_size", body.size)
+    executor.submit(_rethumb, None)
+    return {"size": body.size}
 
 
 @app.get("/api/settings/pexels")

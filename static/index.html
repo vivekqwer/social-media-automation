@@ -337,7 +337,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Your face for thumbnails</h3><p>Upload one clear photo (face + shoulders). The background is removed automatically and your face is put on every thumbnail. Channels you connect later use it too — or give a channel its own face above.</p></div></div>
               <div class="cb row" style="flex-wrap:nowrap;align-items:center"><div id="face-prev" style="width:96px;height:96px;border-radius:12px;background:var(--muted) center/contain no-repeat;flex:none"></div>
                 <div style="display:flex;flex-direction:column;gap:8px"><label class="btn sm"><i data-ico="image"></i><span id="face-lbl">Upload face photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-face="0" hidden></label>
-                <button class="btn ghost sm hide" id="face-del">Remove</button><span class="mut sm" id="face-note"></span></div></div></div>
+                <button class="btn ghost sm hide" id="face-del">Remove</button><span class="mut sm" id="face-note"></span>
+                <label class="row sm" style="gap:8px">Size on thumbnails<select id="face-size" style="width:auto"><option value="S">Small</option><option value="M">Medium</option><option value="L">Large</option></select></label></div></div></div>
             <div class="card"><div class="ch"><div><h3>How it works</h3></div></div><div class="cb">
               <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
                 <li>Add a source channel (or paste one video).</li>
@@ -389,6 +390,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       </div>
       <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
       <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
+      <label class="row sm" id="e-ftitle-row" style="gap:8px;margin-top:6px" title="YouTube shows its own frame of a Short, not your thumbnail. With this on, the title and your small face are at the top of every frame, so that frame always carries them."><span class="switch"><input type="checkbox" id="e-ftitle" checked><i></i></span>Title and my face at the top of the whole Short (so YouTube's picture of it shows them)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="Shorts: the crop follows the person instead of the centre"><span class="switch"><input type="checkbox" id="e-reframe" checked><i></i></span>Smart reframe (Shorts follow the person on screen)</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
@@ -944,7 +946,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
+  loadFace();loadFaceSize();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -962,6 +964,8 @@ async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');
   if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
 }
+async function loadFaceSize(){try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+$('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
   const mi=await api('/api/settings/mail');
   $('#gm-box').innerHTML=g.email?`<div class="row"><span>Sending as <b>${esc(g.email)}</b></span><button class="btn ghost sm" id="gm-del">Disconnect</button></div>
@@ -1090,6 +1094,7 @@ function fill(c){
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
   $('#e-rewrite').classList.toggle('hide',!(AISRC.has(c.source_id)&&!['uploaded','uploading'].includes(c.status)));
   $('#e-refetch').parentElement.classList.toggle('hide',!!c.own_upload);
+  $('#e-ftitle').checked=c.frame_title!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
   $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
@@ -1161,7 +1166,7 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}

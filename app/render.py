@@ -31,7 +31,8 @@ def _ass_time(t: float) -> str:
     return f"{int(t // 3600)}:{int(t % 3600 // 60):02d}:{t % 60:05.2f}"
 
 
-def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: list | None = None, credit: str = ""):
+def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: list | None = None, credit: str = "",
+              banner: dict | None = None):
     size = {"S": 0.034, "M": 0.044, "L": 0.056}.get((style or {}).get("size"), 0.044)
     fs = int(H * size)
     m = COLOR_RE.match((style or {}).get("color") or "#ffffff")
@@ -56,6 +57,11 @@ def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: lis
         csz = max(18, int(H * 0.022))
         ctext = ass_text(credit).replace("\\N", " ")
         lines.append(f"Dialogue: 2,0:00:00.00,9:59:59.00,Default,,0,0,0,,{{\\an7\\pos({int(W * 0.03)},{int(H * 0.025)})\\fs{csz}\\bord2\\shad0\\c&HFFFFFF&\\1a&H30&}}{ctext}")
+    if banner and banner.get("lines"):  # the title on every frame: first line white, second yellow
+        parts = [ass_text(x).replace("\\N", " ") for x in banner["lines"]]
+        text = parts[0] + ("\\N{\\c&H00D7FF&}" + parts[1] if len(parts) > 1 else "")
+        lines.append(f"Dialogue: 3,0:00:00.00,9:59:59.00,Default,,0,0,0,,{{\\an4\\pos({banner['x']},{banner['cy']})\\fn{banner['font']}"
+                     f"\\fs{banner['fs']}\\b1\\bord6\\shad3\\q2\\c&HFFFFFF&}}{text}")
     for o in overlays or []:  # text overlays that need font fallback (Hindi + English in one line)
         text = ass_text(o.get("text", ""))
         if not text:
@@ -135,7 +141,7 @@ def layout(clip: Clip, W: int, H: int, src_size: tuple | None) -> str:
 
 def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
                  credit: str = "", subject: float | None = None, src_size: tuple | None = None,
-                 voice_dur: float = 0.0) -> str:
+                 voice_dur: float = 0.0, banner: dict | None = None) -> str:
     mode = layout(clip, W, H, src_size)
     sx = f"max(0,min(iw-ow,{subject}*iw-ow/2))" if subject is not None else "(iw-ow)/2"
     if mode == "pad":
@@ -151,6 +157,8 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
                 f"[bgs]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=6:2,"
                 f"scale={W}:{H},eq=brightness=-0.12:saturation=1.1[bg];"
                 f"[fgs]{fg}scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[base];")
+    if banner:  # the band (dark fade + face badge) lies over the picture for the whole clip; input number banner["idx"]
+        head += f"[base][{banner['idx']}:v]overlay=0:{banner['y']}:format=auto[base2];"
     chain = ["setsar=1"]
     fx = clip.effects or []
     if "punch_in" in fx:
@@ -178,11 +186,11 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
             chain.append(_drawtext(i, o, W, workdir))
     st = clip.caption_style or {}
     cues = clip.captions if (st.get("on") and clip.captions) else []
-    if cues or ass_ovs or credit:
-        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit)
+    if cues or ass_ovs or credit or (banner and banner.get("lines")):
+        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit, banner)
         chain.append(f"ass=captions.ass:fontsdir='{_esc(FONTS_DIR)}'")
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
-    fc = head + f"[base]{','.join(chain)}[v];"
+    fc = head + f"[{'base2' if banner else 'base'}]{','.join(chain)}[v];"
     same = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"  # both tracks in one format before mixing
     if has_audio:
         fc += f"[0:a]volume={vol},{same},apad[a0];"  # pad: a short source audio track must not cut the clip short
@@ -261,11 +269,22 @@ def render_clip(project: Project, clip: Clip) -> Path:
     if has_voice:
         fmt = {".mp3": "mp3", ".wav": "wav", ".m4a": "mov", ".aac": "aac", ".ogg": "ogg"}.get(Path(clip.voice_path).suffix.lower())
         cmd += (["-f", fmt] if fmt else []) + ["-i", str(clip.voice_path)]
+    banner = None
+    if clip.aspect != "16:9" and getattr(clip, "frame_title", None) is not False:
+        try:
+            from .branding import make_banner
+
+            banner = make_banner(clip, project, W, H, workdir)
+        except Exception:  # noqa: BLE001  (a missing photo or font must never stop the clip from being made)
+            banner = None
+    if banner:
+        banner["idx"] = 2 if has_voice else 1
+        cmd += ["-loop", "1", "-i", banner["path"]]
     cmd += [
         "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
                                          f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else "",
                                          _subject(clip, src, project, layout(clip, W, H, size)), size,
-                                         stream_seconds(Path(clip.voice_path), "a:0") if has_voice else 0.0),
+                                         stream_seconds(Path(clip.voice_path), "a:0") if has_voice else 0.0, banner),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "body.tmp.mp4",

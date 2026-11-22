@@ -300,3 +300,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Review agent (16 findings, all addressed): server image did not contain worker/ (download would have failed live) → Dockerfile copies it; Gmail e-mail check used the server's client id; password reset now always runs in the owner's copy; Start helper robust against the Store alias, failed installs, missing winget; yt-dlp[default]; updater hardening; pairing box no longer wiped by the page refresh; owner's API key owner-only; CRLF for every .bat.
 - Verified by running: the downloaded ZIP unpacked into an empty folder attached to the customer's account, was approved with its pairing code and came online (local server). Not run: Python/packages install inside "Start helper", a real Google OAuth round trip with a customer's own project.
 - Tests: onboarding 41, review 22; all other suites pass.
+
+## 2026-11-22 — Task 51: title + small face on every frame of a Short; smaller face on thumbnails
+- Found live: YouTube accepts the custom thumbnail ("Thumbnail set on YouTube") but the channel's Shorts tab and the feed show a frame of the video that YouTube picks itself — the API cannot choose it.
+- app/branding.py: a slim band at the top of every Short/square clip for its whole length — soft dark fade + small round face badge (PNG overlay) and the short title in big display letters (Anton / Noto Sans Devanagari; first line white, second yellow) drawn by the subtitle renderer. On by default (Clip.frame_title), per clip switch in the editor (Trim & look); never on 16:9 videos.
+- Thumbnails: face size setting per account (Small 0.55 / Medium 0.78 / Large 1.0 of the old size; default Small), My channels → "Size on thumbnails"; the words get the room the smaller face leaves. Changing it remakes thumbnails of clips not uploaded yet.
+- Tests 11/11 (real ffmpeg renders); all other suites pass.

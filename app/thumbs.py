@@ -128,7 +128,9 @@ def make_thumbnail(clip, project) -> Path:
     _frame(src, W, H, workdir / "thumb_frame.png", variant)
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
 
-    face = None
+    from .branding import face_scale
+
+    face, fscale = None, face_scale()
     fp = face_for(clip.destination_id)
     if fp and clip.thumb_face is not False:
         face = Image.open(fp).convert("RGBA")
@@ -136,17 +138,18 @@ def make_thumbnail(clip, project) -> Path:
     if portrait:  # Shorts: keep everything inside the centre 4:5 area, clear of the top bar and bottom title
         base.alpha_composite(_gradient(W, H, False, 0.55, 200))
         if face:
-            s = min(H * 0.54 / face.height, W * 0.9 / face.width)
+            s = min(H * 0.54 / face.height, W * 0.9 / face.width) * fscale
             face = face.resize((int(face.width * s), int(face.height * s)), Image.LANCZOS)
             _paste_face(base, face, (W - face.width) // 2, H - face.height, int(W * 0.012))
-            box = (W * 0.07, H * 0.16, W * 0.93, H * 0.46)
+            # the words get all the room the (now smaller) face leaves
+            box = (W * 0.07, H * 0.16, W * 0.93, max(H * 0.46, min(H * 0.62, H - face.height - H * 0.05)))
         else:
             box = (W * 0.07, H * 0.24, W * 0.93, H * 0.62)
         anchor = 5
     else:  # 16:9: face on the right, text on the left (duration stamp sits bottom-right)
         base.alpha_composite(_gradient(W, H, True, 0.72, 215))
         if face:
-            s = min(H * 0.97 / face.height, W * 0.46 / face.width)
+            s = min(H * 0.97 / face.height, W * 0.46 / face.width) * fscale
             face = face.resize((int(face.width * s), int(face.height * s)), Image.LANCZOS)
             fx = W - face.width - int(W * 0.015)
             _paste_face(base, face, fx, H - face.height, int(H * 0.012))
