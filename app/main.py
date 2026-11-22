@@ -1941,6 +1941,15 @@ def _is_super(request: Request) -> bool:
     return (getattr(request.state, "who", None) or {}).get("role", "super") == "super"
 
 
+def _backup_rate(kind: str, sup: bool):
+    from . import backup
+
+    if not sup and not backup.allow(kind):
+        n = backup.RATE[kind]
+        raise HTTPException(429, f"Too many {'checks of backup files' if kind == 'check' else 'restores'} in the last hour "
+                                 f"(at most {n}). Try again later.")
+
+
 def _pending_upload() -> Path:
     from .backup import folder
 
@@ -1988,10 +1997,12 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 
     from . import backup
 
-    blob = file.file.read(backup.MAX_UPLOAD + 1)
+    sup = _is_super(request)
+    _backup_rate("check", sup)
+    blob = file.file.read((backup.MAX_UPLOAD if sup else backup.MAX_UPLOAD_USER) + 1)
     try:
-        data = backup.unpack(blob)
-        out = backup.preview(data, _is_super(request))
+        data = backup.unpack(blob, sup)
+        out = backup.preview(data, sup)
     except backup.BackupError as e:
         raise HTTPException(400, str(e))
     p = _pending_upload()
@@ -2005,8 +2016,10 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 def backup_check_kept(name: str, request: Request):
     from . import backup
 
+    sup = _is_super(request)
+    _backup_rate("check", sup)
     try:
-        out = backup.preview(backup.unpack(backup.path_of(name).read_bytes()), _is_super(request))
+        out = backup.preview(backup.unpack(backup.path_of(name).read_bytes(), sup), sup)
     except backup.BackupError as e:
         raise HTTPException(400, str(e))
     out["ref"] = name
@@ -2023,6 +2036,8 @@ def backup_restore(body: RestoreIn, request: Request):
 
     if body.confirm.strip() != "RESTORE":
         raise HTTPException(400, "Type RESTORE (in capital letters) to confirm.")
+    sup = _is_super(request)
+    _backup_rate("restore", sup)
     try:
         if body.ref == "upload":
             p = _pending_upload()
@@ -2033,10 +2048,11 @@ def backup_restore(body: RestoreIn, request: Request):
                 raise backup.BackupError("Another file was chosen in the meantime. Choose the file again and check it.")
         else:
             blob = backup.path_of(body.ref).read_bytes()
-        data = backup.unpack(blob)
-        if data.get("tenant") != tenant.current() and _is_super(request) and not body.other_account:
-            raise backup.BackupError("This backup was made for another account. Tick “Yes, put another account's backup here” to go on.")
-        out = backup.restore(data, _is_super(request))
+        data = backup.unpack(blob, sup)
+        if (data.get("tenant") != tenant.current() or not backup.signed(data)) and sup and not body.other_account:
+            raise backup.BackupError("This backup was made for another account or not by this server. "
+                                     "Tick “Yes, put this backup here anyway” to go on.")
+        out = backup.restore(data, sup)
     except backup.BackupError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001

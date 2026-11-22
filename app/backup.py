@@ -12,11 +12,14 @@ tables (accounts, activity) are not in Base.metadata, so they are never part of 
 """
 import base64
 import gzip
+import hashlib
+import hmac
 import io
 import json
 import logging
 import os
 import re
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -33,8 +36,12 @@ KEEP_AUTO = 7  # automatic daily backups kept per account
 KEEP_SAFETY = 3  # safety backups made just before a restore
 MAX_AUTO = 50 * 1024 * 1024  # an automatic backup bigger than this is not saved (an alert says so)
 MAX_TOTAL = 150 * 1024 * 1024  # all backups of one account together
-MAX_UPLOAD = 100 * 1024 * 1024  # a file sent for restore
-MAX_UNPACKED = 300 * 1024 * 1024  # what it may grow to when unpacked (gzip bomb protection)
+MAX_UPLOAD = 100 * 1024 * 1024  # a file sent for restore (Super Admin)
+MAX_UNPACKED = 300 * 1024 * 1024  # what it may grow to when unpacked (gzip bomb protection; Super Admin)
+MAX_UPLOAD_USER = 20 * 1024 * 1024  # the same for customers: one upload must never be able to take the server down
+MAX_UNPACKED_USER = 50 * 1024 * 1024
+RATE = {"check": 6, "restore": 3}  # per customer account and hour
+NOT_YOURS = "This backup was not made by this server for your account. Ask the person who runs the system to restore it."
 MAX_ROWS = 500_000  # per table
 MAX_FACE = 3_000_000
 NAME_RE = re.compile(r"^(auto|safety)-\d{8}-\d{6}\.json\.gz$")
@@ -42,7 +49,7 @@ FACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
 # settings that belong to the server, not to the data: never taken from a file, the current value stays
 # (passwords and sign-ins, Super Admin decisions, daily allowance counters)
 PROTECTED = {"admin_pw", "admin_emails", "session_gen", "reset_state", "oauth_state", "self_test", "shared_google",
-             "onboarding", "acl_plans", "pay_info"}
+             "onboarding", "acl_plans", "pay_info", "razorpay", "plan_prices"}
 PROTECTED_PREFIX = ("quota", "gmail_sent:", "gmail_owner:")
 
 
@@ -73,6 +80,56 @@ def brand(tid: int | None = None) -> str:
         return ""
 
 
+def _sign_key() -> bytes:
+    """Never leaves the server: derived from the key that also encrypts the channel logins (DATA_DIR/.token_key or
+    TOKEN_ENCRYPTION_KEY), not from anything a backup could carry or a restore could overwrite."""
+    from .crypto import _key
+
+    return hashlib.sha256(b"raji-backup-signature|" + _key()).digest()
+
+
+def _mac(data: dict) -> str:
+    body = json.dumps({k: v for k, v in data.items() if k != "signature"}, sort_keys=True, separators=(",", ":"),
+                      default=str, ensure_ascii=True).encode()
+    msg = f"{data.get('format')}|{data.get('version')}|{data.get('tenant')}|{hashlib.sha256(body).hexdigest()}"
+    return hmac.new(_sign_key(), msg.encode(), hashlib.sha256).hexdigest()
+
+
+def sign(data: dict) -> dict:
+    data.pop("signature", None)
+    data["signature"] = {"alg": "hmac-sha256", "mac": _mac(data)}
+    return data
+
+
+def signed(data: dict) -> bool:
+    """Made by THIS server and not changed since (format, version, account number and every row)."""
+    s = data.get("signature")
+    if not isinstance(s, dict) or not isinstance(s.get("mac"), str):
+        return False
+    try:
+        return hmac.compare_digest(s["mac"], _mac(data))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+_hits: dict[tuple[int, str], list[float]] = {}
+_hits_lock = threading.Lock()
+
+
+def allow(kind: str, tid: int | None = None) -> bool:
+    """Customers: at most RATE[kind] checks / restores an hour per account."""
+    tid = tenant.current() if tid is None else int(tid)
+    now = time.time()
+    with _hits_lock:
+        seen = [x for x in _hits.get((tid, kind), []) if now - x < 3600]
+        if len(seen) >= RATE[kind]:
+            _hits[(tid, kind)] = seen
+            return False
+        seen.append(now)
+        _hits[(tid, kind)] = seen
+        return True
+
+
 def _value(v):
     return v.isoformat() if hasattr(v, "isoformat") else v
 
@@ -91,7 +148,7 @@ def make() -> dict:
     if faces.exists():
         data["faces"] = {f.name: base64.b64encode(f.read_bytes()).decode() for f in sorted(faces.glob("*.png"))
                          if f.stat().st_size < MAX_FACE and FACE_RE.match(f.name)}
-    return data
+    return sign(data)
 
 
 def pack(data: dict) -> bytes:
@@ -186,20 +243,37 @@ def safety() -> str:
 
 
 # ---------------------------------------------------------------- reading a file sent for restore
-def unpack(blob: bytes) -> dict:
+def unpack(blob: bytes, is_super: bool = True) -> dict:
+    cap, cap_raw = (MAX_UPLOAD, MAX_UNPACKED) if is_super else (MAX_UPLOAD_USER, MAX_UNPACKED_USER)
     if not blob:
         raise BackupError("The file is empty.")
-    if len(blob) > MAX_UPLOAD:
+    if len(blob) > cap:
+        if not is_super and len(blob) <= MAX_UPLOAD:
+            raise BackupError(f"This backup is larger than {cap // (1024 * 1024)} MB, too big to restore from your dashboard. "
+                              "Ask the person who runs the system (the Super Admin) to restore it for you.")
         raise BackupError("The file is larger than 100 MB. A backup of Raji Studio is normally a few MB — is this the right file?")
     raw = blob
     if blob[:2] == b"\x1f\x8b":
+        buf = bytearray()
         try:
             with gzip.GzipFile(fileobj=io.BytesIO(blob)) as g:
-                raw = g.read(MAX_UNPACKED + 1)
+                while True:  # never more than the cap in memory, whatever the file claims
+                    part = g.read(min(1024 * 1024, cap_raw + 1 - len(buf)))
+                    if not part:
+                        break
+                    buf += part
+                    if len(buf) > cap_raw:
+                        break
         except (OSError, EOFError) as e:
             raise BackupError("The file is damaged (it could not be unpacked).") from e
-        if len(raw) > MAX_UNPACKED:
+        if len(buf) > cap_raw:
+            if not is_super:
+                raise BackupError(f"The file unpacks to more than {cap_raw // (1024 * 1024)} MB, too big to restore from your dashboard. "
+                                  "Ask the person who runs the system (the Super Admin) to restore it for you.")
             raise BackupError("The file unpacks to more than 300 MB. That is not a Raji Studio backup.")
+        raw = bytes(buf)
+    elif len(blob) > cap_raw:
+        raise BackupError("The file is too large to be a Raji Studio backup.")
     if raw.lstrip()[:1] != b"{":
         raise BackupError("This is not a Raji Studio backup file. Choose the .json.gz file you downloaded.")
     try:
@@ -254,20 +328,21 @@ def preview(data: dict, is_super: bool) -> dict:
     other = sorted(set(data["tables"]) - known - set(SKIP))
     if other:
         out["warnings"].append("Parts this version does not know are skipped: " + ", ".join(other[:10]) + ".")
+    out["signed"] = signed(data)
+    if not is_super and not (out["signed"] and owner_of == tid):
+        raise BackupError(NOT_YOURS)
+    if not out["signed"]:
+        out["warnings"].append("This file was not made by this server, or it was changed after it was made (or it comes from an "
+                               "older version). Restore it only if you trust where it came from.")
     if owner_of is None:
-        if not is_super:
-            raise BackupError("This file does not say which account it belongs to (it was made by an older version). "
-                              "Ask the Super Admin to restore it for you.")
         out["warnings"].append("This file does not say which account it was made for (older version). Make sure it is the right one.")
     elif owner_of != tid:
-        if not is_super:
-            raise BackupError("This backup belongs to another account. You can only restore backups of your own account.")
         out["warnings"].append(f"WARNING: this backup was made for another account (copy #{owner_of}"
                                f"{', “' + data.get('brand') + '”' if data.get('brand') else ''}), but you are restoring it into "
                                f"copy #{tid}{' (your own system)' if tid == tenant.OWNER else ''}. Everything in copy #{tid} will be replaced.")
     if not is_super:
         _limits(data)
-    out["notes"] = ["Videos are not in a backup. On the same server they are still there. On a new server, make the waiting clips again "
+    out["notes"] = (["Your helper PCs stay as they are now (approve new ones in My channels)."] if not is_super else []) + ["Videos are not in a backup. On the same server they are still there. On a new server, make the waiting clips again "
                     "(Clips → Make all waiting clips again) before they are uploaded.",
                     "Channel logins in a backup only work on this same server. After restoring on a new server, press Reconnect on each channel."]
     return out
@@ -390,6 +465,9 @@ def restore(data: dict, is_super: bool) -> dict:
             keep = [dict(r) for r in conn.execute(settings.select()).mappings() if _protected(r["key"])]
             if data.get("tenant") == tid:
                 kept_uploaded = _keep_uploaded(conn, prepared.get("clips") or [])
+            if not is_super:  # a file must never be able to add an approved helper (helper approval is a switch)
+                wk = next(t for t in tables() if t.name == "workers")
+                prepared["workers"] = [dict(r) for r in conn.execute(wk.select()).mappings()]
             for t in reversed(tables()):
                 conn.execute(t.delete())
             for t in tables():
