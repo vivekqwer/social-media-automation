@@ -8,7 +8,7 @@ import json
 import logging
 import re
 
-from .db import Channel, Destination, SessionLocal, get_setting, set_setting, utcnow
+from .db import Channel, Destination, SessionLocal, get_setting, set_setting, utcnow, main_destination
 
 log = logging.getLogger(__name__)
 KEY = "creators"
@@ -383,7 +383,7 @@ def grant(cid: str, proof: str) -> dict:
         raise KeyError(cid)
     c = d[cid]
     with SessionLocal() as s:
-        dest = s.query(Destination).order_by(Destination.id).first()
+        dest = main_destination(s)
         if not dest:
             raise ValueError("Connect your YouTube channel first.")
         existing = s.query(Channel).filter(Channel.resolved_url == c["url"]).first()

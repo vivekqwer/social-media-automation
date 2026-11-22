@@ -213,6 +213,17 @@ def run_channel(channel_id: int):
         log = []
         try:
             dest = s.get(Destination, ch.destination_id) if ch.destination_id else None
+            if not dest:  # its channel was disconnected (or never set): use the main channel, or wait for one
+                from .db import main_destination
+
+                dest = main_destination(s)
+                if not dest:
+                    ch.last_status = "waiting: connect a YouTube channel (My channels) — this source then starts by itself"
+                    ch.last_run = utcnow()
+                    s.commit()
+                    return
+                ch.destination_id = dest.id
+                s.commit()
             if dest and dest.paused:
                 ch.last_status = f"waiting: uploads to {dest.name} are paused (press Resume on the dashboard)"
                 ch.last_run = utcnow()
@@ -294,8 +305,8 @@ def autopilot_tick():
     """Run every source whose interval has passed since its last run (called every 15 minutes)."""
     now = utcnow()
     with SessionLocal() as s:
-        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True), Channel.kind != "viral").all()
-               if not c.last_run or c.last_run < now - (timedelta(hours=c.interval_hours) if c.interval_hours else INTERVAL)]
+        ids = [c.id for c in s.query(Channel).filter(Channel.auto.is_(True)).all() if c.kind != "viral"
+               and (not c.last_run or c.last_run < now - (timedelta(hours=c.interval_hours) if c.interval_hours else INTERVAL))]
     for i in ids:
         try:
             run_channel(i)

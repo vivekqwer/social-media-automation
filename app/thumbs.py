@@ -119,6 +119,10 @@ def make_thumbnail(clip, project) -> Path:
     workdir = Path(clip.output_path).parent
     src = workdir / "body.mp4" if (workdir / "body.mp4").exists() else Path(clip.output_path)  # without the Shorts cover
     portrait = clip.aspect == "9:16"
+    if clip.aspect != "16:9" and (getattr(clip, "fit", None) or "full") != "fill" and project.mode != "original":
+        raw = workdir / "src" / f"src_{int(clip.start or 0)}_{int(clip.end or 0) + 1}.mp4"  # this clip's own section
+        if raw.exists():
+            src = raw  # the picture fills the thumbnail instead of sitting between blurred bars
     W, H = (1080, 1920) if portrait else (1280, 720)
     variant = int(getattr(clip, "thumb_variant", 0) or 0)
     _frame(src, W, H, workdir / "thumb_frame.png", variant)

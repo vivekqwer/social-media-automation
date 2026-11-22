@@ -129,7 +129,10 @@ def cleanup_disk():
                 shutil.rmtree(d, ignore_errors=True)
             continue
         src = d / "src"
+        mine = src / "upload.mp4"  # my own uploaded file: the only copy, so it stays far longer than a download
         if c.status == "uploaded" and c.attempted_at and c.attempted_at < now - timedelta(days=3):
+            if mine.exists() and c.attempted_at > now - timedelta(days=30):
+                continue
             shutil.rmtree(src, ignore_errors=True)  # the video is on YouTube; keep out.mp4 + thumbnail only
             (d / "body.mp4").unlink(missing_ok=True)
             continue
@@ -137,7 +140,7 @@ def cleanup_disk():
         if src.exists():
             for f in src.iterdir():
                 stale = (now.timestamp() - f.stat().st_mtime) / 3600 > 24
-                if f.name != keep and (stale or not f.name.endswith(".part")):
+                if f.name not in (keep, "upload.mp4") and (stale or not f.name.endswith(".part")):
                     if f.name.endswith(".part") and not stale:
                         continue
                     f.unlink(missing_ok=True)  # an old trim, a partial download or a whole-video leftover
@@ -150,6 +153,9 @@ def process_queue():
     if _quota_blocked_until and now < _quota_blocked_until:
         return
     with SessionLocal() as s:
+        from .db import adopt_orphans
+
+        adopt_orphans(s)  # a clip whose channel was disconnected goes to the main channel instead of failing
         since = _pacific_midnight(now)
         used = s.query(Clip).filter(Clip.attempted_at >= since).count()
         paused = {d.id for d in s.query(Destination).filter(Destination.paused.is_(True))}

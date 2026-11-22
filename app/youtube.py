@@ -13,7 +13,7 @@ from googleapiclient.http import MediaFileUpload
 from .config import BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_LOCAL
 from . import auth, quota
 from .crypto import decrypt, encrypt
-from .db import Destination, SessionLocal, get_setting, set_setting
+from .db import Destination, SessionLocal, get_setting, set_setting, main_destination
 
 EMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"  # watch time, traffic sources, countries
@@ -79,7 +79,7 @@ def handle_callback(code: str, state: str) -> int:
 
 def _default_dest_id() -> int | None:
     with SessionLocal() as s:
-        d = s.query(Destination).order_by(Destination.id).first()
+        d = main_destination(s)
         return d.id if d else None
 
 

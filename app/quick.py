@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 
 from . import workers
 from .captions import fetch_cues, parse_json3
-from .db import Clip, Destination, Project, SessionLocal, utcnow
+from .db import Clip, Destination, Project, SessionLocal, utcnow, main_destination
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .metadata import auto_metadata
 from .render import run_render
@@ -34,7 +34,7 @@ def quick_run(pid: int):
         q = dict(p.quick)
         try:
             dest = (s.get(Destination, q["destination_id"]) if q.get("destination_id") else None) \
-                or s.query(Destination).order_by(Destination.id).first()
+                or main_destination(s)
             if not dest:
                 raise ValueError("Connect your YouTube channel first (My channels).")
             fmt = q.get("format", "shorts")

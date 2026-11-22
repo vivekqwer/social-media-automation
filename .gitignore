@@ -12,3 +12,4 @@ models/
 worker/helper.log
 worker/helper.old.log
 backups/
+.claude/

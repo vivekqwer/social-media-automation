@@ -9,7 +9,7 @@ from sqlalchemy import update
 
 from .db import Clip, Project, SessionLocal, utcnow
 from . import workers
-from .ingest import download_section, friendly_error, is_bot_block
+from .ingest import download_section, friendly_error, is_bot_block, stream_seconds, video_size
 from .policy import check_edit
 
 DIMS = {"16:9": (1280, 720), "9:16": (1080, 1920), "1:1": (1080, 1080)}
@@ -116,15 +116,42 @@ def _has_audio(path) -> bool:
     return "Audio:" in r.stderr
 
 
-def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
-                 credit: str = "", subject: float | None = None) -> str:
+def layout(clip: Clip, W: int, H: int, src_size: tuple | None) -> str:
+    """How the source picture goes into the frame.
+
+    pad  = 16:9 upload: the whole picture, black bars only if the source is not 16:9
+    full = Shorts/square from a wide video: the WHOLE picture across the screen on a blurred copy of itself (nothing cut)
+    wide = same, but zoomed to a 4:3 window (bigger picture, the far left/right edges are cut)
+    fill = fills the screen; the sides of a wide video are cut (smart reframe follows the person)"""
     if clip.aspect == "16:9":
-        chain = [f"scale={W}:{H}:force_original_aspect_ratio=decrease", f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2"]
-    elif subject is not None:  # smart reframe: keep the person in the picture instead of the centre
-        chain = [f"scale={W}:{H}:force_original_aspect_ratio=increase",
-                 f"crop={W}:{H}:x='max(0,min(iw-ow,{subject}*iw-ow/2))':y='(ih-oh)/2'"]
+        return "pad"
+    fit = getattr(clip, "fit", None) or "full"
+    if fit == "fill" or not src_size or not src_size[1]:
+        return "fill"
+    if src_size[0] / src_size[1] <= (W / H) * 1.15:  # the source already has (about) the frame's shape
+        return "fill"
+    return fit if fit in ("full", "wide") else "full"
+
+
+def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
+                 credit: str = "", subject: float | None = None, src_size: tuple | None = None,
+                 voice_dur: float = 0.0) -> str:
+    mode = layout(clip, W, H, src_size)
+    sx = f"max(0,min(iw-ow,{subject}*iw-ow/2))" if subject is not None else "(iw-ow)/2"
+    if mode == "pad":
+        head = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2[base];"
+    elif mode == "fill":  # smart reframe: keep the person in the picture instead of the centre
+        head = f"[0:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}:x='{sx}':y='(ih-oh)/2'[base];"
     else:
-        chain = [f"scale={W}:{H}:force_original_aspect_ratio=increase", f"crop={W}:{H}"]
+        fg = ""
+        if mode == "wide" and src_size[0] / src_size[1] > 4 / 3 + 0.05:
+            fg = f"crop=trunc(ih*4/3/2)*2:ih:x='{sx}':y=0,"
+        bw, bh = W // 4 // 2 * 2, H // 4 // 2 * 2  # the background is blurred small, then enlarged: fast and soft
+        head = (f"[0:v]split=2[bgs][fgs];"
+                f"[bgs]scale={bw}:{bh}:force_original_aspect_ratio=increase,crop={bw}:{bh},boxblur=6:2,"
+                f"scale={W}:{H},eq=brightness=-0.12:saturation=1.1[bg];"
+                f"[fgs]{fg}scale={W}:-2[fg];[bg][fg]overlay=(W-w)/2:(H-h)/2[base];")
+    chain = ["setsar=1"]
     fx = clip.effects or []
     if "punch_in" in fx:
         chain += ["scale=trunc(iw*1.15/2)*2:trunc(ih*1.15/2)*2", f"crop={W}:{H}"]
@@ -138,7 +165,10 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
     if "fade" in fx:
         chain += ["fade=t=in:st=0:d=0.4", f"fade=t=out:st={max(dur - 0.4, 0):.2f}:d=0.4"]
     ass_ovs = []
-    for i, o in enumerate(clip.overlays or []):
+    k = H / DIMS[clip.aspect][1] if clip.aspect in DIMS else 1.0  # Full HD 16:9: sizes were chosen for 720p
+    overlays = [{**o, "size": int((o.get("size") or 56) * k)} for o in (clip.overlays or [])] if abs(k - 1) > 0.01 \
+        else (clip.overlays or [])
+    for i, o in enumerate(overlays):
         txt = str(o.get("text", "")).strip()
         if not txt:
             continue
@@ -152,26 +182,55 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
         build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit)
         chain.append(f"ass=captions.ass:fontsdir='{_esc(FONTS_DIR)}'")
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
-    fc = f"[0:v]{','.join(chain)}[v];"
+    fc = head + f"[base]{','.join(chain)}[v];"
+    same = "aresample=44100,aformat=sample_fmts=fltp:channel_layouts=stereo"  # both tracks in one format before mixing
     if has_audio:
-        fc += f"[0:a]volume={vol},apad[a0];"  # pad: a short source audio track must not cut the clip short
+        fc += f"[0:a]volume={vol},{same},apad[a0];"  # pad: a short source audio track must not cut the clip short
     else:
         fc += f"anullsrc=r=44100:cl=stereo,atrim=duration={dur:.2f}[a0];"
     if has_voice:
         ms = int(max(0.0, float(clip.voice_offset or 0)) * 1000)
-        fc += f"[1:a]adelay={ms}|{ms}[a1];"
-        fc += "[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
+        tempo = ""
+        if getattr(clip, "voice_fit", None) == "speed" and voice_dur > 0.5:
+            f = voice_tempo(voice_dur, dur, ms / 1000)
+            if abs(f - 1) > 0.01:
+                tempo = f"atempo={f:.4f},"  # the voice ends exactly with the clip (pitch stays the same)
+        fc += f"[1:a]{tempo}{same},adelay={ms}|{ms}"
+        if has_audio and vol > 0:  # the original sound goes quieter by itself while the voice speaks
+            fc += (",asplit=2[a1][a1q];[a1q]apad[a1k];"  # padded: the filter stops when its key input ends
+                   "[a0][a1k]sidechaincompress=threshold=0.03:ratio=6:attack=20:release=400[a0d];"
+                   "[a0d][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]")
+        else:
+            fc += "[a1];[a0][a1]amix=inputs=2:duration=first:dropout_transition=0,volume=2[a]"
     else:
         fc += "[a0]anull[a]"
     return fc
+
+
+TEMPO_MIN, TEMPO_MAX = 0.75, 1.4  # beyond this a voice sounds wrong
+
+
+def voice_tempo(voice_dur: float, clip_dur: float, offset: float = 0.0) -> float:
+    """Speed factor that makes the voice end with the clip (kept within what still sounds natural)."""
+    room = max(1.0, clip_dur - offset)
+    return max(TEMPO_MIN, min(TEMPO_MAX, voice_dur / room))
+
+
+def own_source(clip_id: int) -> Path | None:
+    """The whole-video file of an original clip: my upload (kept) or the helper's reel."""
+    src = DATA_DIR / "clips" / str(clip_id) / "src"
+    for name in ("upload.mp4", "reel.mp4"):
+        if (src / name).exists():
+            return src / name
+    return None
 
 
 class NeedsHelper(RuntimeError):
     """The helper PC must make this (e.g. a ReelGen reel) before it can be rendered."""
 
 
-def _subject(clip: Clip, src: Path, project: Project) -> float | None:
-    if clip.aspect == "16:9" or clip.reframe is False or project.mode == "original":
+def _subject(clip: Clip, src: Path, project: Project, mode: str = "fill") -> float | None:
+    if mode not in ("fill", "wide") or clip.reframe is False or project.mode == "original":
         return None
     from .reframe import subject_x
 
@@ -181,9 +240,11 @@ def _subject(clip: Clip, src: Path, project: Project) -> float | None:
 def render_clip(project: Project, clip: Clip) -> Path:
     workdir = DATA_DIR / "clips" / str(clip.id)
     workdir.mkdir(parents=True, exist_ok=True)
-    if project.mode == "original":  # my own reel, made by ReelGen on the helper PC
-        src = workdir / "src" / "reel.mp4"
-        if not src.exists():
+    if project.mode == "original":  # my own uploaded video, or a reel made by ReelGen on the helper PC
+        src = own_source(clip.id)
+        if src is None:
+            if (project.license or "").endswith("(my own video)"):
+                raise RuntimeError("The uploaded video file is no longer on the server. Upload the video again (Clips → Upload my video).")
             raise NeedsHelper("The helper PC makes this reel from your script.")
     else:
         src = download_section(project.video_id, clip.start, clip.end, workdir / "src")
@@ -191,14 +252,19 @@ def render_clip(project: Project, clip: Clip) -> Path:
     dur = clip.end - clip.start
     has_voice = bool(clip.voice_path) and Path(clip.voice_path).exists()
     has_audio = _has_audio(src)
-    lead = max(0.0, clip.start - int(clip.start))  # section is downloaded from floor(start)
+    size = video_size(src)
+    if clip.aspect == "16:9" and size and min(size) >= 1000:
+        W, H = 1920, 1080  # a Full HD source stays Full HD as a normal video
+    # a downloaded section starts at floor(start); my own file is the whole video
+    lead = float(clip.start or 0) if project.mode == "original" else max(0.0, clip.start - int(clip.start))
     cmd = [ffmpeg_bin(), "-y", "-ss", f"{lead:.2f}", "-f", "mov", "-i", str(src)]  # mp4 only (no playlists)
     if has_voice:
         cmd += ["-i", str(clip.voice_path)]
     cmd += [
         "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
                                          f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else "",
-                                         _subject(clip, src, project)),
+                                         _subject(clip, src, project, layout(clip, W, H, size)), size,
+                                         stream_seconds(Path(clip.voice_path), "a:0") if has_voice else 0.0),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "body.tmp.mp4",

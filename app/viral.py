@@ -13,7 +13,7 @@ import re
 from datetime import datetime, timedelta
 
 from . import quota, youtube
-from .db import Channel, Clip, Destination, Project, SessionLocal, get_setting, set_setting, utcnow
+from .db import Channel, Clip, Destination, Project, SessionLocal, get_setting, set_setting, utcnow, main_destination
 
 log = logging.getLogger(__name__)
 PER_DAY = 5
@@ -122,7 +122,7 @@ def _source(s) -> Channel:
     """The settings every viral clip uses (editable on the Sources page; it never runs on its own)."""
     ch = s.query(Channel).filter(Channel.kind == "viral").first()
     if not ch:
-        dest = s.query(Destination).order_by(Destination.id).first()
+        dest = main_destination(s)
         ch = Channel(kind="viral", name="Viral picks (5 a day)", query="viral picks", mode="permission", auto=False,
                      videos_per_run=0, clips_per_video=1, clip_len=35, aspect="9:16", gap_hours=2,
                      destination_id=dest.id if dest else None, captions=True, review_first=False,

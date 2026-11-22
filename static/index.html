@@ -195,6 +195,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="nav quick" id="nav-quick"><i data-ico="zap"></i>Quick upload</button>
     <div class="grp">Account</div>
     <button class="nav" data-p="settings"><i data-ico="youtube"></i>My channels</button>
+    <button class="nav" data-p="guide"><i data-ico="check"></i>Setup guide</button>
     <div class="user"><div class="avatar" id="av">A</div><div class="t"><b id="un">admin</b><span id="uf">Owner</span></div><button class="btn ghost icon" id="logout" title="Log out"><i data-ico="logout"></i></button></div>
   </aside>
   <div class="scrim" id="sb-scrim" style="z-index:25"></div>
@@ -246,6 +247,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 
       <section id="p-clips" class="hide">
         <div class="page-h"><div><h1>Clips</h1><div class="desc">Review, edit, approve. Anything you don't touch uploads on schedule.</div></div>
+          <button class="btn outline" id="up-video"><i data-ico="plus"></i>Upload my video</button><input type="file" id="up-file" accept="video/mp4,video/quicktime,.mp4,.mov,.m4v" class="hide">
           <button class="btn" id="new-clip"><i data-ico="scissors"></i>New clip from video link</button></div>
         <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
         <div id="clip-grid" class="clips"></div>
@@ -288,6 +290,14 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="page-h"><div><h1>Alerts</h1><div class="desc" id="al-desc">Your uploaded videos are checked on YouTube every 2 hours: deleted, removed for copyright, rejected or blocked.</div></div><button class="btn" id="al-check"><i data-ico="refresh"></i>Check now</button></div>
         <div class="alert" style="margin-bottom:16px"><i data-ico="alert"></i><span class="sm">YouTube's API shows what happened to a video (removed, rejected with a reason, blocked in countries), but not strikes or the claimant's name — use “Open in YouTube Studio” on an alert for that.</span></div>
         <div id="al-list"></div>
+      </section>
+
+      <section id="p-guide" class="hide">
+        <div class="page-h"><div><h1>Setup guide</h1><div class="desc">Everything needed to run Raji Studio, step by step, from this dashboard. No coding. Follow the steps from top to bottom; a green tick means it is done.</div></div><button class="btn outline sm" id="gd-refresh">Check again</button></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Steps</h3><p id="gd-sub">…</p></div><span class="badge" id="gd-badge">…</span></div><div class="cb" id="gd-steps"></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Problems right now</h3><p>Found automatically. Each one has a button or says what to do.</p></div></div><div class="cb" id="gd-problems"></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>If something goes wrong</h3><p>What the system does by itself, and what you do. Press a line to open it.</p></div></div><div class="cb" id="gd-help"></div></div>
+        <div class="card"><div class="ch"><div><h3>Details for support</h3><p>Unexpected server problems are saved here. If something keeps failing, press Copy details and send them to the person who looks after the system.</p></div><div class="row"><button class="btn outline sm" id="gd-copy">Copy details</button><button class="btn ghost sm" id="gd-clear">Clear</button></div></div><div class="cb" id="gd-errors"></div></div>
       </section>
 
       <section id="p-settings" class="hide">
@@ -354,6 +364,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <label class="f">Start (s)<input id="e-s" type="number" step="0.1" style="width:110px"></label>
         <label class="f">End (s)<input id="e-e" type="number" step="0.1" style="width:110px"></label>
         <label class="f">Upload as<select id="e-asp"><option value="9:16">Shorts (9:16)</option><option value="16:9">Video (16:9)</option><option value="1:1">Square (1:1)</option></select></label>
+        <label class="f" id="e-fit-wrap">Picture<select id="e-fit"><option value="full">Whole video — nothing cut</option><option value="wide">Bigger picture — edges cut a little</option><option value="fill">Fill the screen — sides cut</option></select></label>
         <label class="f">Original volume<input id="e-vol" type="number" step="0.1" min="0" max="3" style="width:120px"></label>
       </div>
       <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
@@ -373,6 +384,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <label class="row sm" style="gap:8px">Delay (s)<input id="e-voff" type="number" step="0.1" min="0" value="0" style="width:80px"></label>
         <button class="btn outline" id="e-tts"><i data-ico="mic"></i>Generate voice</button></div>
       <div class="row"><input type="file" id="e-vfile" accept="audio/*" style="height:auto;padding:6px 10px"><span class="mut sm" id="e-vstate"></span></div>
+      <div id="e-sync" style="margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:10px"></div>
     </div>
 
     <div class="panel" data-t="caps">
@@ -542,12 +554,12 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+const TITLES={guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -557,7 +569,7 @@ $('#top-add').onclick=()=>openAdd();$('#top-new').onclick=()=>openNewModal();
 
 async function loadOverview(){
   OV=await api('/api/overview');DESTS=OV.destinations;
-  const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}${d.paused?' (uploads paused)':''}${d.needs_reconnect?' (reconnect needed)':''}</option>`).join(''):'<option value="">Connect a channel first</option>';
+  const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}${d.is_main&&DESTS.length>1?' (main)':''}${d.paused?' (uploads paused)':''}${d.needs_reconnect?' (reconnect needed)':''}</option>`).join(''):'<option value="">Connect a channel first</option>';
   ['#h-dest','#s-dest','#q-dest','#e-dest'].forEach(sel=>{const el=$(sel),v=el.value;el.innerHTML=opts;if(DESTS.some(d=>String(d.id)===v))el.value=v});
   const rv=OV.counts.rendered;const b=$('#b-review');b.style.display=rv?'':'none';b.textContent=rv;
   const na=OV.alerts_unseen||0;const ba=$('#b-alerts');ba.style.display=na?'':'none';ba.textContent=na;
@@ -728,35 +740,43 @@ function clipMini(c,actions){
 }
 function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
 
-const FIXBTN={connect:['Reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper']};
-async function loadHealth(){
-  let h;try{h=await api('/api/health')}catch(e){return}
-  $('#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
-    const btn=!b?'':b[1]?`<a class="btn sm" href="${b[1]}">${b[0]}</a>`:`<button class="btn sm" data-hfix="${i}">${b[0]}</button>`;
+const FIXBTN={connect:['Connect / reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper'],
+  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide']};
+async function loadHealth(h0,target){
+  let h=h0;if(!h){try{h=await api('/api/health')}catch(e){return}}
+  $(target||'#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
+    const btn=!b?'':b[1]?`<a class="btn sm" href="${b[1]}" ${b[1].startsWith('http')?'target="_blank" rel="noopener"':''}>${b[0]}</a>`:`<button class="btn sm" data-hfix="${i}">${b[0]}</button>`;
     return `<div class="item"><span class="badge ${it.level==='bad'?'failed':it.level==='warn'?'queued':'outline'}">${it.level==='bad'?'Fix now':it.level==='warn'?'Check':'Info'}</span><div class="tx grow"><span>${esc(it.text)}</span></div>${btn}</div>`}).join('')
     :`<div class="row" style="gap:10px">${ico('check')}<b>Everything is working.</b><span class="mut sm">Uploads, thumbnails, sources and the helper are fine.</span></div>`;
-  $$('[data-hfix]').forEach(b=>b.onclick=()=>once(async()=>{const it=h.items[+b.dataset.hfix];
+  $$('[data-hfix]',$(target||'#hl-list')).forEach(b=>b.onclick=()=>once(async()=>{const it=h.items[+b.dataset.hfix];
+    if(it.fix==='add_source'){openAdd();return}if(it.fix==='sources'){go('sources');return}if(it.fix==='guide'){go('guide');return}
+    if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return}
     if(it.fix==='resume'){await api(`/api/destinations/${it.id}/resume`,'POST');toast('Uploads resumed')}
     else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
     else if(it.fix==='run_source'){await api(`/api/channels/${it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
     else if(it.fix==='helper'){alert('The helper PC downloads videos from your home internet (YouTube blocks the server).'+String.fromCharCode(10,10)+'One time only: open the folder D:'+String.fromCharCode(92)+'social medi engin'+String.fromCharCode(92)+'worker and double-click install_autostart.bat.'+String.fromCharCode(10)+'After that it starts by itself whenever your PC is on.');return}
-    loadDash()}));
+    if(target)loadGuide();else loadDash()}));
 }
 const SUHELP={helper:'The helper PC is your own computer. It starts by itself when you sign in to Windows (worker\\install_autostart.bat was run once). If it is offline: turn the PC on and make sure the internet works.',
   ollama:'The local AI (Ollama) writes reel scripts for free on your PC. It is being installed for you. If you ever need to install it again: get it from ollama.com, then run:  ollama pull qwen2.5:3b'};
 async function loadSetup(){
   let d;try{d=await api('/api/setup')}catch(e){return}
   const b=$('#su-badge');b.className='badge '+(d.done===d.total?'uploaded':'queued');b.textContent=`${d.done} / ${d.total} done`;
-  const row=it=>{const a=it.action||{};const btn=it.done?'':a.href?`<a class="btn sm" href="${a.href}">${esc(a.label)}</a>`:`<button class="btn sm" data-su="${it.key}">${esc(a.label||'Open')}</button>`;
-    return `<div class="item"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}
-      <span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${btn}</div>`};
+  const row=it=>`<div class="item"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}
+      <span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${(it.how||[]).length?`<button class="btn ghost sm" data-how="${it.key}">How?</button>`:''}${suBtn(it)}</div>`;
   const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
   const up=(d.upcoming||[]).map(c=>`<div class="item"><span style="font-size:18px">📅</span><div class="tx grow"><b>${esc(c.title||'Clip #'+c.id)}</b><span class="mut sm" style="display:block">${c.status==='uploading'?'Uploading now':c.at?'Goes up '+new Date(c.at).toLocaleString([], {weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'Next free slot'}</span></div></div>`).join('');
   $('#su-list').innerHTML=must.map(row).join('')+'<div class="mut sm" style="margin:12px 0 4px">Optional extras</div>'+opt.map(row).join('')
     +(up?'<div class="mut sm" style="margin:12px 0 4px">Next uploads (automatic)</div>'+up:'');
   clearTimeout(window._suT);if(d.items.some(i=>i.key==='ai'&&!i.done&&i.blocked))window._suT=setTimeout(()=>{if(location.hash===''||$('#setup').offsetParent)loadSetup()},20000);
-  $$('[data-su]').forEach(btn=>btn.onclick=()=>{const it=d.items.find(i=>i.key===btn.dataset.su),a=it.action||{};
-    if(a.go)go(a.go);else if(a.help)alert(SUHELP[a.help]);else if(a.fix==='setup_ai')once(async()=>{const r=await api('/api/ai/setup','POST');toast(r.status);loadSetup()});else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
+  $$('[data-how]',$('#su-list')).forEach(b=>b.onclick=()=>{window.GUIDEOPEN=b.dataset.how;go('guide')});
+  wireSu(d,$('#su-list'),loadSetup);
+}
+const suBtn=it=>{const a=it.action||{};return it.done?'':a.href?`<a class="btn sm" href="${a.href}">${esc(a.label)}</a>`:a.url?`<a class="btn sm" href="${a.url}" target="_blank" rel="noopener">${esc(a.label)}</a>`:`<button class="btn sm" data-su="${it.key}">${esc(a.label||'Open')}</button>`};
+function wireSu(d,root,again){
+  $$('[data-su]',root).forEach(btn=>btn.onclick=()=>{const it=d.items.find(i=>i.key===btn.dataset.su),a=it.action||{};
+    if(a.open==='add_source'){openAdd();return}const loadSetup=again;
+    if(a.go)go(a.go);else if(a.help){window.GUIDEOPEN=a.help==='ollama'?'ai':a.help;go('guide')}else if(a.fix==='setup_ai')once(async()=>{const r=await api('/api/ai/setup','POST');toast(r.status);loadSetup()});else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
 }
 $('#hl-refresh').onclick=()=>once(loadHealth,$('#hl-refresh'));
 async function loadDash(){
@@ -834,7 +854,7 @@ async function loadSources(){
   $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
     <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
     <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}${c.kind==='trending'?'<span class="badge queued">Trending</span>':''}${c.auto_scripts?'<span class="badge queued">AI scripts</span>':''}${c.kind==='reel'?`<span class="badge uploaded">Original</span><span class="badge outline">${(c.scripts||[]).filter(x=>!x.used).length} scripts left</span>`:`<span class="badge outline">${c.mode==='cc'?'CC only':c.mode==='own'?'My own videos':'Permission'}</span>`}${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
-    <td>${esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
+    <td>${DESTS.length>1?`<select class="sm" data-sdest="${c.id}" style="width:auto" title="Which channel this source uploads to">${DESTS.map(d=>`<option value="${d.id}" ${d.id===c.destination_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>`:esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
     <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
     <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
     <td><div class="row" style="justify-content:flex-end;gap:6px">${c.auto_scripts?`<select class="sm" data-lang="${c.id}" style="width:auto" title="Language of the AI scripts"><option value="en" ${c.permission_note==='en'?'selected':''}>English</option><option value="hi" ${c.permission_note!=='en'?'selected':''}>Hinglish</option></select>`:''}${c.kind==='reel'?`<button class="btn outline sm" data-scripts="${c.id}">${ico('plus')}Scripts</button>`:''}<button class="btn sm" data-run="${c.id}" title="Run now">${ico('play')}Run</button><button class="btn outline sm icon" data-tog="${c.id}" title="${c.auto?'Pause':'Resume'}">${ico(c.auto?'pause':'refresh')}</button><button class="btn bad sm icon" data-del="${c.id}" title="Remove">${ico('trash')}</button></div></td></tr>`).join('')+'</tbody></table>':'<div class="cb">'+empty('rss','No sources yet','Add a channel and the system takes over.','<button class="btn" onclick="openAdd()">'+ico('plus')+'Add sources</button>')+'</div>';
@@ -842,14 +862,31 @@ async function loadSources(){
   $$('[data-run]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.run}/run`,'POST');toast('Started — clips appear in Clips as they finish')}));
   $$('[data-tog]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.tog}/toggle`,'POST');loadSources()}));
   $$('[data-del]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this source?')){await api(`/api/channels/${b.dataset.del}`,'DELETE');loadSources()}}));
+  $$('[data-sdest]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.sdest}/destination`,'POST',{destination_id:+b.value});toast('This source now uploads to '+b.options[b.selectedIndex].text+' (its waiting clips moved too)')}));
   $$('[data-lang]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.lang}/language`,'POST',{language:b.value});toast(b.value==='en'?'AI scripts in English (Indian voice) — the small local AI writes English much better':'AI scripts in Hinglish')}));
   $$('[data-autoup]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.autoup}/review`,'POST',{review_first:!b.checked});toast(b.checked?'New clips will upload automatically':'New clips will wait for your approval')}));
 }
 
 async function loadDests(){
   await loadOverview();loadCookies();loadWorkers();
-  $('#dest-list').innerHTML=DESTS.length?DESTS.map(d=>`<div class="item"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx"><b>${esc(d.name)}</b><span class="mut sm">Connected ${when(d.created_at)} · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div><label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label>${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}<button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div>`).join(''):empty('youtube','No channel connected','Connect your YouTube channel to enable uploads.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>');
-  $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Disconnect this channel?')){await api('/api/destinations/'+b.dataset.dd,'DELETE');loadDests()}}));
+  const DL=await api('/api/destinations');const mainD=DL.find(d=>d.is_main);
+  const just=window.JUSTCONNECTED&&DL.find(d=>d.id===window.JUSTCONNECTED);
+  const banner=just&&DL.length>1?`<div class="alert" style="margin-bottom:10px"><span><b>${esc(just.name)}</b> is connected. What should it do?</span><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-take="${just.id}">Move everything here (switch channel)</button><button class="btn outline sm" id="dl-keep">Keep both — I choose per source</button></div></div>`:'';
+  $('#dest-list').innerHTML=banner+(DL.length?DL.map(d=>`<div class="item" style="flex-wrap:wrap"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx grow"><b>${esc(d.name)}</b> ${d.is_main?'<span class="badge uploaded">Main</span>':''}<span class="mut sm" style="display:block">${d.sources} source${d.sources===1?'':'s'} · ${d.pending} clip${d.pending===1?'':'s'} waiting · ${d.uploaded} uploaded · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div>
+    ${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}
+    <div class="row" style="flex-basis:100%;flex-wrap:wrap;gap:6px;margin-top:6px">${!d.is_main?`<button class="btn outline sm" data-main="${d.id}">Make main</button>`:''}${DL.length>1?`<button class="btn outline sm" data-take="${d.id}">Move everything here</button>`:''}<label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label><button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div></div>`).join('')
+    +`<details class="sm" style="margin-top:10px"><summary style="cursor:pointer">How do I add or change a channel?</summary><ol class="mut" style="margin:8px 0 0;padding-left:18px;line-height:1.8"><li><b>Add another channel:</b> press “Connect a YouTube channel” and choose the other channel in Google's window. This one stays connected.</li><li><b>Use both:</b> in Sources choose the channel for each source. The <b>Main</b> channel gets everything new.</li><li><b>Switch to the new channel:</b> press “Move everything here” on it — all sources and waiting clips move.</li><li><b>Remove the old channel:</b> press Disconnect on it. Videos already on YouTube are never touched.</li></ol></details>`
+    :empty('youtube','No channel connected','Connect your YouTube channel to enable uploads. Sources and clips that are waiting attach to it by themselves.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>'));
+  if($('#dl-keep'))$('#dl-keep').onclick=()=>{window.JUSTCONNECTED=null;loadDests();toast('Both channels stay. Sources → choose the channel for each source')};
+  $$('[data-main]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/destinations/${b.dataset.main}/main`,'POST');toast('Main channel changed — new sources and uploads go there');loadDests()},b));
+  $$('[data-take]').forEach(b=>b.onclick=()=>once(async()=>{const d=DL.find(x=>x.id===+b.dataset.take),n=DL.filter(x=>x.id!==d.id).reduce((t,x)=>t+x.sources+x.pending,0);
+    if(!confirm(`Move all sources and waiting clips (${n}) to “${d.name}” and make it the main channel?\n\nVideos already on YouTube stay where they are.`))return;
+    const r=await api(`/api/destinations/${d.id}/take-over`,'POST',{});window.JUSTCONNECTED=null;toast(`Moved ${r.sources} source(s) and ${r.clips} clip(s) to ${d.name}`);loadDests()},b));
+  $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{const d=DL.find(x=>x.id===+b.dataset.dd),others=DL.filter(x=>x.id!==d.id),work=d.sources+d.pending;let q='';
+    if(!work){if(!confirm(`Disconnect “${d.name}”? Videos already on YouTube are not touched.`))return}
+    else if(others.length){const t=others.find(x=>x.is_main)||others[0];if(!confirm(`“${d.name}” has ${d.sources} source(s) and ${d.pending} waiting clip(s).\n\nMove them to “${t.name}” and disconnect “${d.name}”?`))return;q='?move_to='+t.id}
+    else{if(!confirm(`“${d.name}” is your only channel.\n\nIts ${d.sources} source(s) and ${d.pending} clip(s) are kept and wait until you connect a channel again — then they carry on by themselves.\n\nDisconnect?`))return;q='?force=true'}
+    const r=await api('/api/destinations/'+d.id+q,'DELETE');toast(r.waiting?'Disconnected — connect a channel and everything carries on':'Disconnected'+(r.sources||r.clips?` — ${r.sources} source(s), ${r.clips} clip(s) moved`:''));loadDests()}));
   $$('[data-face]').forEach(inp=>inp.onchange=()=>once(async()=>{const f=inp.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
@@ -998,6 +1035,7 @@ function fill(c){
   CUR=c;$('#e-title').textContent=c.title||c.source_title||('Clip #'+c.id);
   $('#e-src').innerHTML=`${esc(c.source_channel||'')} · ${esc(c.mode||'')}`;
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
+  $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
   $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.tts_pending?'Helper PC is making the voice…':(c.voice_path?'Voice attached ✔':'');
@@ -1045,13 +1083,30 @@ function addCue(c){
   $('.c-del',d).onclick=()=>d.remove();$('#e-cues').appendChild(d);
 }
 $('#e-cgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/captions`,'POST',{lang:$('#e-clang').value});fill(await api('/api/clips/'+c.id));etab('caps');toast('Captions added — check the text, then Save & re-render')},$('#e-cgen'));
+async function loadSync(){
+  const box=$('#e-sync');if(!box||!CUR)return;const id=CUR.id;let s;
+  try{s=await api(`/api/clips/${id}/sync`)}catch(e){box.innerHTML='';return}
+  if(!sameClip(id))return;
+  if(!s.has_voice){box.innerHTML='<b>Sound sync</b><div class="mut sm">Generate a voice or upload your audio — then one press makes the sound and the video end together.</div>';return}
+  const st=s.in_sync?`<span style="color:var(--ok)">✔ In sync — the voice and the clip end together${s.voice_fit==='speed'?' (voice speed ×'+s.speed+')':''}.</span>`
+    :s.gap>0?`<span style="color:var(--warn,#b45309)">The clip runs <b>${s.gap.toFixed(1)} s</b> longer than the voice (no voice at the end).</span>`
+    :`<span style="color:var(--bad)">The voice is <b>${(-s.gap).toFixed(1)} s</b> longer than the clip — its end is cut off.</span>`;
+  box.innerHTML=`<b>Sound sync</b><div class="sm" style="margin:4px 0 8px">Voice <b>${s.voice.toFixed(1)} s</b> · Clip <b>${s.clip.toFixed(1)} s</b>${s.offset?` · starts after ${s.offset} s`:''}<br>${st}</div>
+    <div class="row" style="flex-wrap:wrap">${s.can_match_clip?'<button class="btn sm" data-sync="clip">Make the clip as long as the voice</button>':''}
+    ${s.speed_ok?`<button class="btn outline sm" data-sync="speed">Fit the voice's speed to the clip (×${s.speed})</button>`:'<span class="mut sm">The lengths are too different to fix with speed — change the clip length or the script.</span>'}
+    ${s.voice_fit==='speed'?'<button class="btn ghost sm" data-sync="none">Normal voice speed</button>':''}
+    <button class="btn ghost sm" id="e-mute">${+$('#e-vol').value===0?'Original sound is off':'Turn the original sound off (voice only)'}</button></div>
+    <div class="mut sm" style="margin-top:6px">With both sounds on, the original goes quieter by itself while the voice speaks.</div>`;
+  $$('[data-sync]',box).forEach(b=>b.onclick=()=>once(async()=>{await save();await api(`/api/clips/${id}/sync`,'POST',{mode:b.dataset.sync});const c2=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c2);etab('voice');toast('Done — press Save & re-render to make the new video')},b));
+  $('#e-mute').onclick=()=>{$('#e-vol').value=0;toast('Original sound off — press Save & re-render');loadSync()};
+}
 function collect(){
   return{start:+$('#e-s').value,end:+$('#e-e').value,aspect:$('#e-asp').value,orig_volume:+$('#e-vol').value,voice_offset:+$('#e-voff').value,
     effects:$$('#e-fx input:checked').map(x=>x.value),
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
@@ -1102,6 +1157,17 @@ function openQuick(){
 $$('#q-fmt .opt').forEach(b=>b.onclick=()=>{QF=b.dataset.v;qSet('q-fmt',QF);const w=$('#q-len .opt[data-v=whole]');w.disabled=QF!=='video';if(QF!=='video'){QL='auto';qSet('q-len','auto')}});
 $$('#q-len .opt').forEach(b=>b.onclick=()=>{if(b.disabled)return;QL=b.dataset.v;qSet('q-len',QL)});
 $('#q-asap').onchange=()=>{$('#q-when').disabled=$('#q-asap').checked};
+$('#up-video').onclick=()=>$('#up-file').click();
+$('#up-file').onchange=()=>{const f=$('#up-file').files[0];$('#up-file').value='';if(!f)return;
+  if(f.size>300*1024*1024){toast('This video is larger than 300 MB — make it smaller first',true);return}
+  const fd=new FormData();fd.append('file',f);fd.append('title',f.name.replace(/\.[^.]+$/,''));
+  const x=new XMLHttpRequest(),b=$('#up-video'),old=b.innerHTML;b.disabled=true;
+  x.upload.onprogress=e=>{if(e.lengthComputable)b.textContent='Uploading '+Math.round(e.loaded*100/e.total)+'%'};
+  x.onload=()=>{b.disabled=false;b.innerHTML=old;let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+    if(x.status===200){toast(`Video added (${j.seconds} s, ${j.aspect==='16:9'?'full video':'Short'}) — it is being prepared; open it in Clips to add sound, text and captions`);go('clips')}
+    else toast(j.detail||'Upload failed',true)};
+  x.onerror=()=>{b.disabled=false;b.innerHTML=old;toast('Network problem during the upload — try again',true)};
+  x.open('POST','/api/upload-video');x.send(fd)};
 $('#nav-quick').onclick=openQuick;$('#top-quick').onclick=openQuick;
 $('#q-close').onclick=$('#q-cancel').onclick=$('#q-done').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);refreshAfter()};
 async function qStart(){
@@ -1140,8 +1206,38 @@ async function qPoll(){
 ['m-add','m-new'].forEach(id=>$('#'+id).addEventListener('mousedown',e=>{if(e.target.id===id)$('#'+id).classList.remove('on')}));
 document.addEventListener('keydown',e=>{if(e.key==='Escape'){['m-add','m-new','m-quick'].forEach(id=>$('#'+id).classList.remove('on'));clearInterval(QPOLL);if(CUR)closeEditor()}});
 
+async function loadGuide(){
+  const g=await api('/api/guide'),d=g.setup;
+  const b=$('#gd-badge');b.className='badge '+(d.done===d.total?'uploaded':'queued');b.textContent=`${d.done} / ${d.total} done`;
+  $('#gd-sub').textContent=d.done===d.total?'Every needed step is done. The optional ones add extras.':'Do the steps with ⏳ or ⚠️ — the rest is already working.';
+  const step=(it,n)=>{const open=window.GUIDEOPEN===it.key||(!it.done&&!it.optional);
+    return `<details id="gd-${it.key}" ${open?'open':''} style="border-bottom:1px solid var(--border);padding:10px 0"><summary style="cursor:pointer;list-style:none"><div class="item" style="border:0;padding:0"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${n}. ${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}<span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${suBtn(it)}</div></summary>
+      ${(it.how||[]).length?`<ol class="sm" style="margin:8px 0 4px 34px;padding-left:18px;line-height:1.75">${it.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>`:''}</details>`};
+  const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
+  $('#gd-steps').innerHTML=must.map((it,i)=>step(it,i+1)).join('')+'<div class="mut sm" style="margin:14px 0 2px">Optional extras</div>'+opt.map((it,i)=>step(it,must.length+i+1)).join('');
+  wireSu(d,$('#gd-steps'),loadGuide);
+  if(window.GUIDEOPEN){const el=$('#gd-'+window.GUIDEOPEN);if(el)el.scrollIntoView({block:'center'});window.GUIDEOPEN=null}
+  loadHealth(g.problems,'#gd-problems');
+  $('#gd-help').innerHTML=g.help.map(h=>`<details style="border-bottom:1px solid var(--border);padding:8px 0"><summary style="cursor:pointer"><b>${esc(h.q)}</b></summary><div class="sm" style="margin:6px 0 2px 16px;line-height:1.7"><div><span class="mut">The system:</span> ${esc(h.auto)}</div><div><span class="mut">You:</span> ${esc(h.do)}</div></div></details>`).join('');
+  window.GDERR=g;
+  $('#gd-errors').innerHTML=g.errors.length?g.errors.slice(0,12).map(e=>`<div class="item"><div class="tx grow"><b>${esc(e.type)}</b>${e.count>1?' <span class="badge outline">×'+e.count+'</span>':''} <span class="mut sm">${new Date(e.at).toLocaleString()} · ${esc(e.where)}${e.line?' · '+esc(e.line):''}</span><span class="mut sm" style="display:block">${esc(e.text)}</span></div></div>`).join('')
+    :'<span class="mut sm">No unexpected problems recorded. Version '+esc(g.version||'local')+'.</span>';
+}
+$('#e-asp').addEventListener('change',()=>$('#e-fit-wrap').classList.toggle('hide',$('#e-asp').value==='16:9'));
+$('#gd-refresh').onclick=()=>once(async()=>{await loadGuide();toast('Checked')},$('#gd-refresh'));
+$('#gd-copy').onclick=async()=>{const g=window.GDERR||{errors:[],setup:{items:[]},problems:{items:[]}};
+  const t=['Raji Studio — details for support','Version: '+(g.version||'?'),'Time: '+new Date().toString(),'','Steps not done:',...g.setup.items.filter(i=>!i.done&&!i.optional).map(i=>'- '+i.title+': '+(i.blocked||i.why)),'','Problems:',...g.problems.items.map(i=>'- ['+i.level+'] '+i.text),'','Recent server problems:',...g.errors.slice(0,15).map(e=>`- ${e.at} ${e.type} @ ${e.where} ${e.line}: ${e.text}`)].join('\n');
+  try{await navigator.clipboard.writeText(t);toast('Copied — paste it into a message')}catch(e){prompt('Copy this text:',t)}};
+$('#gd-clear').onclick=()=>once(async()=>{await api('/api/guide/errors/clear','POST');loadGuide()});
+
 paintIcons();
-go('dashboard');
+(()=>{const q=new URLSearchParams(location.search);if(!q.has('connected')&&!q.has('connect_error')&&!q.has('gmail')&&!q.has('gmail_error'))return go('dashboard');
+  history.replaceState(null,'',location.pathname);
+  if(q.has('connect_error')){go('guide');window.GUIDEOPEN='youtube';setTimeout(()=>toast('The channel was not connected: '+q.get('connect_error')+' — see step “YouTube channel connected” for what to do',true),400);return}
+  if(q.has('gmail_error')){window.GUIDEOPEN='gmail';go('guide');setTimeout(()=>toast('Gmail was not connected: '+q.get('gmail_error')+' — see step “Gmail connected”',true),400);return}
+  if(q.has('gmail')){go('settings');setTimeout(()=>toast('Gmail connected'),400);return}
+  window.JUSTCONNECTED=q.get('new')==='1'?+q.get('connected'):null;go('settings');
+  setTimeout(()=>toast(q.get('new')==='1'?'Channel connected':'Channel reconnected — its login is fresh again'),400)})();
 setInterval(()=>{if(!$('#p-dashboard').classList.contains('hide')&&!CUR)loadDash().catch(()=>{})},30000);
 </script>
 </body>

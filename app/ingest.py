@@ -150,6 +150,18 @@ def _download_whole_and_cut(url: str, cached: Path, s: int, e: int, out_dir: Pat
             leftover.unlink(missing_ok=True)
 
 
+def video_size(path: Path) -> tuple[int, int] | None:
+    """(width, height) as it is shown (phone videos stored sideways are turned). None if there is no picture."""
+    r = subprocess.run([ffmpeg_bin(), "-hide_banner", "-i", str(path)], capture_output=True, text=True)
+    m = re.search(r"Video:.*?[, ](\d{2,5})x(\d{2,5})[, \[]", r.stderr)
+    if not m:
+        return None
+    w, h = int(m.group(1)), int(m.group(2))
+    if re.search(r"rotation of -?(90|270)", r.stderr) or re.search(r"rotate\s*:\s*(90|270)", r.stderr):
+        w, h = h, w
+    return w, h
+
+
 def stream_seconds(path: Path, sel: str) -> float:
     """How many seconds of one stream (e.g. 'a:0', 'v:0') are actually in the file. 0 if absent."""
     r = subprocess.run([ffmpeg_bin(), "-hide_banner", "-i", str(path), "-map", "0:" + sel, "-c", "copy", "-f", "null", "-"],

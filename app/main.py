@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -27,7 +27,7 @@ from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .monitor import check_uploads
 from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, get_setting, migrate,
-                 set_setting, to_dict, utcnow)
+                 Setting, adopt_orphans, main_destination, set_setting, to_dict, utcnow)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
 from .jobs import executor
@@ -52,6 +52,9 @@ SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC upda
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 VOICE_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".aac"}
+VIDEO_EXT = {".mp4", ".mov", ".m4v"}
+MAX_VIDEO_BYTES = 300 * 1024 * 1024
+MAX_SHORT_SECONDS = 180
 MAX_VOICE_BYTES = 25 * 1024 * 1024
 
 
@@ -72,6 +75,16 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Raji Studio", lifespan=lifespan)
+
+
+@app.exception_handler(Exception)
+async def unexpected_error(request: Request, exc: Exception):
+    from .guide import record_error
+
+    record_error(f"{request.method} {request.url.path}", exc)
+    return JSONResponse({"detail": "Something went wrong on the server. Try again in a minute. If it keeps happening, open "
+                                   f"Setup guide → “If something goes wrong” and press Copy details. ({type(exc).__name__})"},
+                        status_code=500)
 
 
 @app.exception_handler(RequestValidationError)
@@ -122,7 +135,10 @@ async def auth_gate(request: Request, call_next):
             if not found[1]:
                 return JSONResponse({"detail": "Waiting for approval in the dashboard"}, status_code=403)
         return _secure(await call_next(request))
-    if size > 50 * 1024 * 1024:  # the largest dashboard upload is a 25 MB voice file
+    if path == "/api/upload-video" and request.method == "POST":
+        if size > MAX_VIDEO_BYTES + 1024 * 1024:
+            return JSONResponse({"detail": "Video too large (max 300 MB)"}, status_code=413)
+    elif size > 50 * 1024 * 1024:  # the largest other dashboard upload is a 25 MB voice file
         return JSONResponse({"detail": "File too large"}, status_code=413)
     if path in PUBLIC_PATHS:
         return _secure(await call_next(request))
@@ -320,6 +336,8 @@ class ClipUpdate(BaseModel):
     credit_on: bool | None = None
     short_cover: bool | None = None
     reframe: bool | None = None
+    fit: Literal["full", "wide", "fill"] | None = None
+    voice_fit: Literal["", "speed"] | None = None
 
 
 class TtsIn(BaseModel):
@@ -468,7 +486,7 @@ def _render_sig(c: Clip) -> tuple:
             st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
             r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False,
-            c.reframe is not False)
+            c.reframe is not False, c.fit or "full", c.voice_fit or "")
 
 
 @app.put("/api/clips/{cid}")
@@ -514,6 +532,116 @@ def make_tts(cid: int, body: TtsIn):
         return to_dict(c)
 
 
+# ---------- sound sync: the voice-over and the clip end together ----------
+class SyncIn(BaseModel):
+    mode: Literal["clip", "speed", "none"]
+
+
+def _sync_info(c: Clip, p: Project) -> dict:
+    from .ingest import stream_seconds
+    from .render import TEMPO_MAX, TEMPO_MIN, voice_tempo
+
+    has = bool(c.voice_path) and Path(c.voice_path).exists()
+    voice = round(stream_seconds(Path(c.voice_path), "a:0"), 2) if has else 0.0
+    clip_len, off = round((c.end or 0) - (c.start or 0), 2), float(c.voice_offset or 0)
+    if p.mode == "original":
+        from .render import own_source
+
+        src = own_source(c.id)
+        longest = round(stream_seconds(src, "v:0") - float(c.start or 0), 2) if src else clip_len
+    else:
+        longest = float(p.duration or 0) - float(c.start or 0) if p.duration else clip_len  # length unknown: keep the clip
+    longest = max(longest, 2.0)
+    if c.aspect == "9:16":
+        longest = min(longest, MAX_SHORT_SECONDS)
+    gap = round(clip_len - off - voice, 2)  # > 0: the clip goes on after the voice ends; < 0: the voice is cut off
+    need = voice / max(1.0, clip_len - off) if has else 1.0
+    return {"has_voice": has, "voice": voice, "clip": clip_len, "offset": off, "gap": gap if has else 0.0,
+            "in_sync": has and (abs(gap) <= 0.4 or (c.voice_fit == "speed" and TEMPO_MIN <= need <= TEMPO_MAX)),
+            "voice_fit": c.voice_fit or "", "speed": round(voice_tempo(voice, clip_len, off), 3) if has else 1.0,
+            "speed_ok": TEMPO_MIN <= need <= TEMPO_MAX, "longest_clip": round(max(0.0, longest), 2),
+            "can_match_clip": has and off + voice + 0.25 <= longest + 0.5}
+
+
+@app.get("/api/clips/{cid}/sync")
+def clip_sync(cid: int):
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        return _sync_info(c, _get(s, Project, c.project_id))
+
+
+@app.post("/api/clips/{cid}/sync")
+def clip_sync_set(cid: int, body: SyncIn):
+    """One press: make the clip exactly as long as the voice, or fit the voice's speed to the clip."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = _get(s, Project, c.project_id)
+        if c.status in ("rendering", "fetching", "uploading", "uploaded"):
+            raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
+        info = _sync_info(c, p)
+        if body.mode != "none" and not info["has_voice"]:
+            raise HTTPException(400, "Add a voice-over first (generate it or upload an audio file).")
+        before = _render_sig(c)
+        if body.mode == "clip":
+            c.end = round((c.start or 0) + min(info["offset"] + info["voice"] + 0.25, info["longest_clip"]), 2)
+            c.voice_fit = ""
+        elif body.mode == "speed":
+            if not info["speed_ok"]:
+                raise HTTPException(400, "The voice and the clip are too different in length to fix with speed "
+                                         "(it would sound wrong). Make the clip as long as the voice instead.")
+            c.voice_fit = "speed"
+        else:
+            c.voice_fit = ""
+        if _render_sig(c) != before and c.status in ("rendered", "queued", "failed"):
+            c.status = "draft"
+        s.commit()
+        return {"sync": _sync_info(c, p), "clip": to_dict(c)}
+
+
+# ---------- my own video file (no YouTube link): becomes a clip with every editing tool ----------
+@app.post("/api/upload-video")
+def upload_video(file: UploadFile = File(...), title: str = Form("")):
+    from .ingest import stream_seconds, video_size
+
+    ext = Path(file.filename or "video.mp4").suffix.lower()
+    if ext not in VIDEO_EXT:
+        raise HTTPException(400, "Upload an MP4 or MOV video file.")
+    name = re.sub(r"\s+", " ", (title or Path(file.filename or "My video").stem).replace("_", " ")).strip()[:150] or "My video"
+    with SessionLocal() as s:
+        dest = main_destination(s)
+        p = Project(url="", video_id=None, title=name, channel=dest.name if dest else "", channel_url="",
+                    license="Original content (my own video)", description="", tags=[], duration=0, heatmap=[], moments=[],
+                    mode="original")
+        s.add(p)
+        s.commit()
+        c = Clip(project_id=p.id, start=0, end=2, aspect="9:16", effects=[], overlays=[], credit_on=False,
+                 destination_id=dest.id if dest else None, status="draft")
+        s.add(c)
+        s.commit()
+        src = DATA_DIR / "clips" / str(c.id) / "src" / "upload.mp4"
+        try:
+            _save_upload(file, src, MAX_VIDEO_BYTES)
+            size, dur = video_size(src), stream_seconds(src, "v:0")
+            if not size or dur < 2:
+                raise HTTPException(400, "This file has no usable video (it must be at least 2 seconds long).")
+        except Exception as e:  # noqa: BLE001  (bad file, full disk, ...): leave no half-made clip behind
+            shutil.rmtree(src.parent.parent, ignore_errors=True)
+            s.delete(c)
+            s.delete(p)
+            s.commit()
+            if isinstance(e, HTTPException):
+                raise
+            raise HTTPException(400, "The video could not be saved or read. Check that it plays on your computer and try again.")
+        wide = size[0] > size[1] * 1.15
+        # a wide or long video is uploaded as a normal video (whole picture); a tall, short one as a Short
+        c.aspect = "16:9" if wide or dur > MAX_SHORT_SECONDS else "9:16"
+        c.end, p.duration = round(dur, 2), int(dur)
+        s.commit()
+        cid = c.id
+    executor.submit(run_render, cid)
+    return {"clip_id": cid, "seconds": round(dur, 1), "aspect": c.aspect, "width": size[0], "height": size[1]}
+
+
 @app.post("/api/clips/{cid}/captions")
 def make_captions(cid: int, body: CaptionsIn):
     """Pull the video's own YouTube captions for this clip's time range (editable afterwards)."""
@@ -522,6 +650,9 @@ def make_captions(cid: int, body: CaptionsIn):
         if c.status in ("rendering", "fetching", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
+        if not p.video_id:  # my own video / reel: there are no YouTube subtitles to fetch
+            raise HTTPException(400, "This is your own video, so YouTube has no subtitles for it. "
+                                     "Type the captions with “Add line”, or leave captions off.")
         try:
             cues = fetch_cues(p.video_id, c.start, c.end, body.lang)
         except Exception as e:  # noqa: BLE001
@@ -591,6 +722,9 @@ def refetch_source(cid: int):
         c = _get(s, Clip, cid)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
+        if (DATA_DIR / "clips" / str(cid) / "src" / "upload.mp4").exists():
+            raise HTTPException(400, "This is your own uploaded video — there is nothing to download again. "
+                                     "To replace it, upload the new file with “Upload my video”.")
         shutil.rmtree(DATA_DIR / "clips" / str(cid) / "src", ignore_errors=True)
         _claim_for_render(s, cid)
     executor.submit(run_render, cid)
@@ -642,7 +776,7 @@ def schedule(cid: int, body: ScheduleIn):
             _get(s, Destination, body.destination_id)
             c.destination_id = body.destination_id
         if not c.destination_id or not s.get(Destination, c.destination_id):
-            first = s.query(Destination).order_by(Destination.id).first()
+            first = main_destination(s)
             if not first:
                 raise HTTPException(400, "Connect your YouTube channel first (dashboard).")
             c.destination_id = first.id
@@ -681,6 +815,32 @@ def _dest_dict(d: Destination) -> dict:
         out["needs_reconnect"] = True  # stored login unreadable (e.g. key changed): press Connect again
     out["face"] = "own" if faces.face_path(d.id).exists() else ("default" if faces.DEFAULT_FACE.exists() else None)
     return out
+
+
+def _dests_main_first(s) -> list:
+    main = main_destination(s)
+    rows = [{**_dest_dict(d), "is_main": bool(main and main.id == d.id)} for d in s.query(Destination).order_by(Destination.id)]
+    return sorted(rows, key=lambda d: not d["is_main"])
+
+
+def _dest_full(s, d: Destination) -> dict:
+    """A channel with what depends on it (for My channels)."""
+    out = _dest_dict(d)
+    main = main_destination(s)
+    out["is_main"] = bool(main and main.id == d.id)
+    out["sources"] = s.query(Channel).filter(Channel.destination_id == d.id).count()
+    out["pending"] = s.query(Clip).filter(Clip.destination_id == d.id, Clip.status.notin_(["uploaded", "uploading"])).count()
+    out["uploaded"] = s.query(Clip).filter(Clip.destination_id == d.id, Clip.status == "uploaded").count()
+    return out
+
+
+def _move_work(s, from_ids: list[int], to_id: int) -> dict:
+    """Sources and not-yet-uploaded clips of some channels go to another channel (uploaded videos stay where they are)."""
+    n_src = s.query(Channel).filter(Channel.destination_id.in_(from_ids)).update({"destination_id": to_id}, synchronize_session=False)
+    n_clip = s.query(Clip).filter(Clip.destination_id.in_(from_ids), Clip.status.notin_(["uploaded", "uploading"])) \
+        .update({"destination_id": to_id}, synchronize_session=False)
+    s.commit()
+    return {"sources": n_src, "clips": n_clip}
 
 
 def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
@@ -726,7 +886,7 @@ def overview():
             "counts": counts,
             "sources": s.query(Channel).count(),
             "videos_analyzed": s.query(Project).count(),
-            "destinations": [_dest_dict(d) for d in s.query(Destination).order_by(Destination.id)],
+            "destinations": _dests_main_first(s),
             "upcoming": _cards(s, upcoming),
             "recent": _cards(s, recent),
             "failed": _cards(s, failed),
@@ -833,7 +993,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
-            "credit_on")}, status="draft")
+            "credit_on", "fit", "voice_fit", "reframe", "short_cover")}, status="draft")
         s.add(new)
         s.commit()
         old_dir, new_dir = DATA_DIR / "clips" / str(c.id), DATA_DIR / "clips" / str(new.id)
@@ -870,7 +1030,7 @@ def approve_clip(cid: int, body: ApproveIn):
             _get(s, Destination, body.destination_id)
             c.destination_id = body.destination_id
         if not c.destination_id or not s.get(Destination, c.destination_id):
-            first = s.query(Destination).order_by(Destination.id).first()
+            first = main_destination(s)
             if not first:
                 raise HTTPException(400, "Connect your YouTube channel first.")
             c.destination_id = first.id
@@ -932,7 +1092,7 @@ def add_channel(body: ChannelIn):
         if body.destination_id:
             _get(s, Destination, body.destination_id)
         else:
-            first = s.query(Destination).order_by(Destination.id).first()
+            first = main_destination(s)
             if not first:
                 raise HTTPException(400, "Connect your own YouTube channel first (dashboard), then add sources.")
             body.destination_id = first.id
@@ -1501,7 +1661,14 @@ def setup_checklist():
                       "blocked": blocked})
 
     with SessionLocal() as s:
+        adopt_orphans(s)
         dests = s.query(Destination).all()
+        main = main_destination(s)
+        main_name = main.name if main else ""
+        n_sources = s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count()
+        thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
+        thumbs_ok = s.query(Clip).filter(Clip.status == "uploaded", Clip.thumb_path.isnot(None),
+                                         Clip.thumb_pending.isnot(True)).count()
         hp = _helper_state(s)
         llm = s.query(Worker).filter(Worker.approved.is_(True), Worker.llm.is_(True)).count() > 0
         ai_st = next((w.ai_status for w in s.query(Worker).filter(Worker.approved.is_(True)).order_by(Worker.last_seen.desc())
@@ -1514,11 +1681,22 @@ def setup_checklist():
         ai_src = s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True)).count()
     add("youtube", "YouTube channel connected", dests and not any(_dest_dict(d)["needs_reconnect"] for d in dests),
         "Uploads go to your channel.", {"href": "/auth/login", "label": "Connect / reconnect"})
+    if len(dests) > 1:
+        add("main", "Main channel chosen", True, f"{len(dests)} channels connected. Main: {main_name} — new sources, quick uploads, "
+            "your own videos and viral picks go there.", {"go": "settings", "label": "My channels"})
+    add("verify", "Channel phone-verified (custom thumbnails)", thumbs_wait == 0 and thumbs_ok > 0,
+        "YouTube needs a verified phone number before it accepts custom thumbnails. Do it once now; this line turns "
+        "green when YouTube has accepted the first thumbnail." if not thumbs_ok else "YouTube accepts your thumbnails.",
+        {"url": "https://www.youtube.com/verify", "label": "Open youtube.com/verify"},
+        blocked=f"{thumbs_wait} thumbnail(s) were refused by YouTube — verify the channel's phone number; they are then sent again by themselves"
+        if thumbs_wait else "")
     add("face", "Your face photo", faces.DEFAULT_FACE.exists(), "Put on every thumbnail.", {"go": "settings", "label": "Upload photo"})
     add("helper", "Helper PC online", hp["online"], "Downloads videos, makes reels and captions from your home internet.",
         {"help": "helper", "label": "How to start it"}, blocked="" if hp["online"] else f"{hp['waiting']} job(s) are waiting for it")
     add("gmail", "Gmail connected", gmail.connected_email(), "Alerts to your inbox and permission mails to creators.",
         {"href": "/auth/gmail", "label": "Connect Gmail"})
+    add("source", "At least one source", n_sources > 0, "A source is where clips come from; it runs by itself.",
+        {"open": "add_source", "label": "Add source"}, blocked="" if n_sources else "No source yet — nothing will be made until you add one")
     perms = []
     try:
         from .permissions import listing
@@ -1557,8 +1735,40 @@ def setup_checklist():
         {"go": "settings", "label": "Add key"}, optional=True)
     add("meta", "Instagram + Facebook", meta.status()["connected"], "Every Short is also posted as a Reel on Instagram and Facebook.",
         {"go": "settings", "label": "Connect"}, optional=True)
+    from .guide import HOW
+
+    for i in items:
+        i["how"] = HOW.get(i["key"], [])
     must = [i for i in items if not i["optional"]]
     return {"items": items, "done": sum(i["done"] for i in must), "total": len(must), "upcoming": upcoming}
+
+
+@app.get("/api/guide")
+def guide_page():
+    """Everything a new admin needs on one page: the steps (with how-to), today's problems, and what to do when something goes wrong."""
+    from . import guide
+
+    def safe(fn, name, empty):  # this page must open even when a part of the system is broken
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            guide.record_error("Setup guide: " + name, e)
+            return empty
+
+    setup = safe(setup_checklist, "steps", {"items": [], "done": 0, "total": 0, "upcoming": []})
+    problems = safe(health, "problems", {"ok": False, "items": [{
+        "level": "bad", "text": "The system could not check itself just now. Try “Check again” in a minute; "
+                                "if it stays, press Copy details below.", "fix": None}]})
+    return {"setup": setup, "problems": problems, "help": [{"q": q, "auto": a, "do": d} for q, a, d in guide.HELP],
+            "errors": guide.recent_errors(), "version": SERVER_VERSION[:7]}
+
+
+@app.post("/api/guide/errors/clear")
+def guide_errors_clear():
+    from . import guide
+
+    guide.clear_errors()
+    return {"ok": True}
 
 
 # ---------- health: every problem in plain words, with a one-click fix ----------
@@ -1586,6 +1796,33 @@ def health():
         failed = s.query(Clip).filter(Clip.status == "failed").count()
         if failed:
             items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed"})
+        thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
+        if thumbs_wait:
+            items.append({"level": "warn", "text": f"{thumbs_wait} thumbnail(s) were refused by YouTube. Verify the channel's phone "
+                                                  "number at youtube.com/verify — they are then sent again by themselves.",
+                          "fix": "verify"})
+        if dests and not s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count():
+            items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source"})
+        for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto.is_(True)).all():
+            if not ch.auto_scripts and not any(not x.get("used") for x in (ch.scripts or [])):
+                items.append({"level": "info", "text": f"Reel source “{ch.name}” has no scripts left — add scripts (Sources → Scripts).",
+                              "fix": "sources"})
+        try:
+            from . import gmail
+            from .permissions import listing
+
+            if not gmail.connected_email() and any(c["status"] in ("new", "asked") for c in listing()):
+                items.append({"level": "warn", "text": "Gmail is not connected, so permission mails cannot be sent and replies are not read.",
+                              "fix": "gmail"})
+        except Exception:  # noqa: BLE001
+            pass
+        from .guide import recent_errors
+
+        fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()]
+        n_err = sum(int(e.get("count") or 1) for e in fresh)
+        if n_err >= 3:
+            items.append({"level": "warn", "text": f"{n_err} unexpected server problems in the last 6 hours "
+                                                  f"(latest: {fresh[0]['type']} in {fresh[0]['where']}).", "fix": "guide"})
         if quota.summary()["uploads_left"] == 0 and s.query(Clip).filter(Clip.status == "queued").count():
             items.append({"level": "info", "text": "Today's upload budget is used; queued clips go up after the daily "
                                                   "reset (1:30 PM IST). Nothing to do.", "fix": None})
@@ -1686,15 +1923,23 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         try:
             gmail.handle_callback(code, state)
         except Exception as e:  # noqa: BLE001
-            raise HTTPException(400, f"Gmail connection failed: {str(e)[:200]}")
+            return RedirectResponse("/?gmail_error=" + quote(str(e)[:200]), status_code=302)
         return RedirectResponse("/?gmail=ok", status_code=302)
     if error or not code or not state:
         return RedirectResponse("/", status_code=302)
+    with SessionLocal() as s:
+        before = {d.id for d in s.query(Destination.id)}
     try:
-        youtube.handle_callback(code, state)
+        did = youtube.handle_callback(code, state)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(400, f"OAuth failed: {str(e)[:200]}")
-    return RedirectResponse("/")
+        return RedirectResponse("/?connect_error=" + quote(str(e)[:200]), status_code=302)
+    with SessionLocal() as s:
+        d = s.get(Destination, did)
+        if d and d.paused and "login expired" in (d.paused_reason or ""):
+            d.paused, d.paused_reason = False, None
+            s.commit()
+        adopt_orphans(s)
+    return RedirectResponse(f"/?connected={did}&new={0 if did in before else 1}", status_code=302)
 
 
 def _cookie_status() -> dict:
@@ -1810,6 +2055,10 @@ def worker_jobs(request: Request):
                 continue
             c.job_lease, c.fetch_tries = now, (c.fetch_tries or 0) + 1
             p = s.get(Project, c.project_id)
+            if p.mode == "original" and (p.license or "").endswith("(my own video)"):
+                c.status, c.job_lease = "failed", None  # an uploaded file cannot be made again by the helper
+                c.error = "The uploaded video file is no longer on the server. Upload the video again (Clips → Upload my video)."
+                continue
             if p.mode == "original":  # ReelGen makes the whole reel from my script on the helper PC
                 ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
                 job = {"type": "reel", "clip_id": c.id, "script": p.description or "", "voice": (ch.voice if ch else "") or ""}
@@ -2272,23 +2521,89 @@ def yt_status():
 @app.get("/api/destinations")
 def list_destinations():
     with SessionLocal() as s:
-        return [_dest_dict(d) for d in s.query(Destination).order_by(Destination.id)]
+        adopt_orphans(s)
+        return [_dest_full(s, d) for d in s.query(Destination).order_by(Destination.id)]
+
+
+@app.post("/api/destinations/{did}/main")
+def destination_main(did: int):
+    """New sources, quick uploads, viral picks and my own videos go to this channel from now on."""
+    with SessionLocal() as s:
+        d = _get(s, Destination, did)
+        set_setting("main_dest", str(d.id))
+        s.query(Channel).filter(Channel.kind == "viral").update({"destination_id": d.id}, synchronize_session=False)
+        s.commit()  # viral picks follow the main channel
+        return _dest_full(s, d)
+
+
+class TakeOverIn(BaseModel):
+    from_id: int | None = None  # empty = from every other channel
+
+
+@app.post("/api/destinations/{did}/take-over")
+def destination_take_over(did: int, body: TakeOverIn):
+    """Switch channels in one press: every source and every clip that is not uploaded yet moves here; it becomes the main channel."""
+    with SessionLocal() as s:
+        d = _get(s, Destination, did)
+        if body.from_id is not None:
+            _get(s, Destination, body.from_id)
+        others = [x.id for x in s.query(Destination.id) if x.id != did and (body.from_id is None or x.id == body.from_id)]
+        moved = _move_work(s, others, did) if others else {"sources": 0, "clips": 0}
+        set_setting("main_dest", str(d.id))
+        return {**moved, "channel": _dest_full(s, d)}
 
 
 @app.delete("/api/destinations/{did}")
-def delete_destination(did: int):
+def delete_destination(did: int, move_to: int | None = None, force: bool = False):
+    """Disconnect a channel. Its sources and waiting clips move to `move_to`; with `force` (no other channel) they are
+    kept and wait until a channel is connected again. Videos already on YouTube are never touched."""
     with SessionLocal() as s:
-        if s.query(Channel).filter(Channel.destination_id == did).count():
-            raise HTTPException(409, "Some source channels still upload to this channel; remove/reassign them first.")
-        busy = s.query(Clip).filter(Clip.destination_id == did, (Clip.status.in_(["queued", "uploading"]) |
-                                    (Clip.status.in_(["fetching", "rendering", "draft"]) & Clip.autoqueue.is_(True)))).count()
-        if busy:
-            raise HTTPException(409, f"{busy} clip(s) are queued or on their way to this channel. Open them and press "
-                                     "'Back to review' (or Discard), then disconnect.")
-        s.query(Clip).filter(Clip.destination_id == did, Clip.status != "uploaded").update({"destination_id": None})
-        s.delete(_get(s, Destination, did))
+        d = _get(s, Destination, did)
+        if s.query(Clip).filter(Clip.destination_id == did, Clip.status == "uploading").count():
+            raise HTTPException(409, "A video is being uploaded to this channel right now — try again in a few minutes.")
+        n_src = s.query(Channel).filter(Channel.destination_id == did).count()
+        n_clip = s.query(Clip).filter(Clip.destination_id == did, Clip.status.notin_(["uploaded", "uploading"])).count()
+        moved = {"sources": 0, "clips": 0}
+        if move_to is not None:
+            if move_to == did:
+                raise HTTPException(400, "Choose a different channel to move the work to.")
+            _get(s, Destination, move_to)
+            moved = _move_work(s, [did], move_to)
+        elif (n_src or n_clip) and not force:
+            others = s.query(Destination).filter(Destination.id != did).count()
+            raise HTTPException(409, f"{n_src} source(s) and {n_clip} clip(s) use this channel. "
+                                + ("Choose the channel they should move to." if others else
+                                   "Connect the new channel first, or disconnect anyway — they then wait for a new channel."))
+        else:  # nothing else to move to: keep the work, it is adopted by the next channel that is connected
+            s.query(Channel).filter(Channel.destination_id == did).update({"destination_id": None}, synchronize_session=False)
+            s.query(Clip).filter(Clip.destination_id == did, Clip.status.notin_(["uploaded", "uploading"])) \
+                .update({"destination_id": None}, synchronize_session=False)
+        main = s.get(Setting, "main_dest")
+        if main and main.value == str(did):
+            main.value = str(move_to) if move_to is not None else ""
+        s.delete(d)
         s.commit()
-        return {"deleted": True}
+        adopt_orphans(s)
+        return {"deleted": True, **moved, "waiting": move_to is None and bool(n_src or n_clip)}
+
+
+class SourceDestIn(BaseModel):
+    destination_id: int
+
+
+@app.post("/api/channels/{chid}/destination")
+def channel_destination(chid: int, body: SourceDestIn):
+    """Which of my channels this source uploads to (its clips that are not uploaded yet move too)."""
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        _get(s, Destination, body.destination_id)
+        ch.destination_id = body.destination_id
+        pids = [p.id for p in s.query(Project.id).filter(Project.channel_ref == chid)]
+        if pids:
+            s.query(Clip).filter(Clip.project_id.in_(pids), Clip.status.notin_(["uploaded", "uploading"])) \
+                .update({"destination_id": body.destination_id}, synchronize_session=False)
+        s.commit()
+        return to_dict(ch)
 
 
 @app.get("/api/stats")

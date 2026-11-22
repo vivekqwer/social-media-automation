@@ -72,6 +72,8 @@ class Clip(Base):
     thumb_pending = Column(Boolean, default=False)  # YouTube refused it; retried automatically until it works
     short_cover = Column(Boolean, default=True)  # Shorts: show the thumbnail in the first moment of the video
     reframe = Column(Boolean, default=True)  # Shorts: crop follows the person instead of the centre
+    fit = Column(String(8))  # Shorts/square from a wide video: full (whole picture, blurred background; default) | wide | fill
+    voice_fit = Column(String(8))  # speed = the voice-over is sped up/slowed down to end exactly with the clip
     meta_done = Column(Boolean, default=False)  # also posted to Instagram / Facebook
     meta_result = Column(JSON)
     thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low
@@ -210,6 +212,30 @@ def to_dict(obj) -> dict:
             continue  # never expose OAuth tokens
         out[c.name] = (v.isoformat() + "Z") if isinstance(v, datetime) else v
     return out
+
+
+def main_destination(s):
+    """The channel new work goes to unless a source says otherwise (chosen in My channels; else the first connected)."""
+    row = s.get(Setting, "main_dest")
+    d = s.get(Destination, int(row.value)) if row and (row.value or "").isdigit() else None
+    return d or s.query(Destination).order_by(Destination.id).first()
+
+
+def adopt_orphans(s) -> dict:
+    """Sources and not-yet-uploaded clips whose channel is missing (never set, or disconnected) go to the main channel.
+    Called after a channel is connected/removed and before uploads, so nothing stays stuck."""
+    main = main_destination(s)
+    if not main:
+        return {"sources": 0, "clips": 0}
+    ids = [d.id for d in s.query(Destination.id)]
+    src = s.query(Channel).filter((Channel.destination_id.is_(None)) | (Channel.destination_id.notin_(ids))).all()
+    clips = s.query(Clip).filter(Clip.status.notin_(["uploaded", "uploading"]),
+                                 (Clip.destination_id.is_(None)) | (Clip.destination_id.notin_(ids))).all()
+    for x in src + clips:
+        x.destination_id = main.id
+    if src or clips:
+        s.commit()
+    return {"sources": len(src), "clips": len(clips)}
 
 
 def get_setting(key: str):
