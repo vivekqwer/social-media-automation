@@ -118,7 +118,7 @@ def _alert_items(s) -> list:
                 acts.append({"do": "open_clip", "id": c.id, "label": "Open clip"})
                 if kind in ("removed", "failed") and c.status == "uploaded" and state not in NO_REUPLOAD and not state.startswith("blocked"):
                     acts.append({"do": "again", "id": c.id, "ys": kind, "label": "Upload again"})
-                if kind in ("removed", "rejected", "blocked") and c.status == "uploaded" and kind != "restored":
+                if kind in ("removed", "rejected") and c.status == "uploaded":
                     acts.append({"do": "remove", "id": c.id, "label": "Remove"})
         seen = bool(a.seen)
         if not seen:

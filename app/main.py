@@ -34,7 +34,7 @@ from .jobs import executor
 from .keywords import suggest
 from .metadata import auto_metadata
 from .metadata import build as build_meta
-from .metadata import freshen_clip, mark_hand_edit, propose as propose_meta
+from .metadata import mark_hand_edit, propose as propose_meta
 from .policy import check_edit
 from .quick import quick_run
 from .render import apply_short_cover, run_render
@@ -193,6 +193,8 @@ async def auth_gate(request: Request, call_next):
             else:
                 resp = await call_next(request)
             acl.log_request(who, request.method, real, resp.status_code)
+            if request.method != "GET":  # something changed: the Alerts number is counted afresh on the next poll
+                _badge_cache.pop(who["tenant"], None)
             return _secure(resp)
     if path.startswith("/api/"):
         return JSONResponse({"detail": "Not logged in"}, status_code=401)
@@ -460,6 +462,10 @@ def account_helper_code():
 
 # ---------- Super Admin: users, limits, payments ----------
 def _usage(tid: int) -> dict:
+    from .db import tenant_exists
+
+    if not tenant_exists(tid):  # deleted (or not made yet): looking at it must not create an empty copy again
+        return {"error": "No data (deleted or not set up)."}
     try:
         with tenant.use(tid):
             with SessionLocal() as s:
@@ -1275,6 +1281,21 @@ def clip_keywords_preview(cid: int, body: ClipKeywordsIn):
     return propose_meta(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic, fresh=True)
 
 
+_kw_calls: dict[int, list[float]] = {}  # customer -> times of their recent research requests
+
+
+def _kw_rate_limited(tid: int, per_hour: int = 40) -> bool:
+    import time as _t
+
+    now = _t.time()
+    recent = [x for x in _kw_calls.get(tid, []) if now - x < 3600]
+    if tid != tenant.OWNER and len(recent) >= per_hour:
+        _kw_calls[tid] = recent
+        return True
+    _kw_calls[tid] = recent + [now]
+    return False
+
+
 @app.get("/api/keywords")
 def keywords(q: str = Query("", max_length=200)):
     """Keyword research for a topic: the phrases people type into YouTube search, most typed first, in groups.
@@ -1284,6 +1305,8 @@ def keywords(q: str = Query("", max_length=200)):
     q = " ".join(q.split())
     if len(q) < 2:
         raise HTTPException(400, "Type a topic first, for example: street food india")
+    if _kw_rate_limited(tenant.current()):
+        raise HTTPException(429, "That is a lot of research in a short time. Please wait a few minutes and try again.")
     r = research(q)
     if r["net"] == "offline":
         raise HTTPException(502, "YouTube's search suggestions could not be reached just now. Please try again in a few minutes.")
@@ -1299,7 +1322,6 @@ def voices():
 
 @app.post("/api/clips/{cid}/schedule")
 def schedule(cid: int, body: ScheduleIn):
-    freshen_clip(cid)  # keywords older than a day are researched again before it goes up (never a hand-edited clip)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
@@ -1423,13 +1445,14 @@ def overview():
     badge = _alerts_badge()  # before the session below is opened: it reads (and may tidy) on its own
     with SessionLocal() as s:
         statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
-        counts = {k: s.query(Clip).filter(Clip.status == k).count() for k in statuses}
+        counts = {k: s.query(Clip).filter(Clip.status == k, Clip.removed_at.is_(None)).count() for k in statuses}
         upcoming = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(8).all()
         recent = s.query(Clip).filter(Clip.status == "uploaded", Clip.removed_at.is_(None)).order_by(Clip.id.desc()).limit(6).all()
         failed = s.query(Clip).filter(Clip.status == "failed").order_by(Clip.id.desc()).limit(5).all()
         review = s.query(Clip).filter(Clip.status == "rendered").order_by(Clip.id.desc()).limit(6).all()
         return {
             "counts": counts,
+            "disk": _disk_info(),
             "sources": s.query(Channel).count(),
             "videos_analyzed": s.query(Project).count(),
             "destinations": _dests_main_first(s),
@@ -1448,11 +1471,33 @@ def overview():
         }
 
 
-def _alerts_badge() -> int | None:
+def _disk_info() -> dict | None:
+    """Free space on the data volume (shared by all copies), so a big batch of clips never fills it up."""
     try:
-        return _alerts_board(record=False)["badge"]  # polled every 30 s: the Alerts page itself writes problems down
-    except Exception:  # noqa: BLE001  (the dashboard must open even if the alert list cannot be made)
+        from .config import BASE_DATA_DIR
+
+        u = shutil.disk_usage(BASE_DATA_DIR)
+        return {"total_gb": round(u.total / 1e9, 1), "free_gb": round(u.free / 1e9, 1), "used_pct": round(100 * u.used / u.total)}
+    except OSError:
         return None
+
+
+_badge_cache: dict[int, tuple[float, int | None]] = {}  # customer -> (when counted, number)
+
+
+def _alerts_badge() -> int | None:
+    import time as _t
+
+    tid = tenant.current()
+    hit = _badge_cache.get(tid)
+    if hit and _t.time() - hit[0] < 60:  # the dashboard asks every 30 s; the full count is heavy
+        return hit[1]
+    try:
+        n = _alerts_board(record=False)["badge"]  # the Alerts page itself writes problems down
+    except Exception:  # noqa: BLE001  (the dashboard must open even if the alert list cannot be made)
+        n = None
+    _badge_cache[tid] = (_t.time(), n)
+    return n
 
 
 def _uploads_today(s) -> dict:
@@ -1566,7 +1611,7 @@ class ReuploadIn(BaseModel):
 NO_REUPLOAD = ("rejected:copyright", "rejected:claim", "rejected:trademark", "rejected:legal")
 
 
-GONE_STATES = ("removed", "deleted", "rejected", "blocked", "private")
+GONE_STATES = ("removed", "deleted", "rejected", "private")  # "blocked:<n>" = blocked in some countries, still live
 
 
 def _gone(c: Clip) -> bool:
@@ -1644,7 +1689,6 @@ def reupload_clip(cid: int, body: ReuploadIn):
 @app.post("/api/clips/{cid}/approve")
 def approve_clip(cid: int, body: ApproveIn):
     """Review-first flow: queue a rendered clip for upload (next free slot unless a time is given)."""
-    freshen_clip(cid)  # keywords older than a day are researched again before it goes up (never a hand-edited clip)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)

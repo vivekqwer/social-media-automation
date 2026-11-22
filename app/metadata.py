@@ -318,7 +318,8 @@ def freshen_clip(clip_id: int, force: bool = False) -> bool:
             if not force and not needs_refresh(clip):
                 return False
             status = clip.status
-        meta = propose(clip_id)
+            extras = [i["k"] for i in ((clip.kw or {}).get("items") or []) if "extra" in (i.get("src") or [])]
+        meta = propose(clip_id, extras) if extras else propose(clip_id)
         if meta["kw"]["net"] == "offline":
             return False
         with SessionLocal() as s:  # only if nothing happened meanwhile (an upload starting, an edit by hand)

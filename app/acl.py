@@ -246,7 +246,7 @@ ROUTES = [
     ("GET", "/api/clips/{cid}/video", SIGNED, None),
     ("GET", "/api/clips/{cid}/thumbnail", SIGNED, None),
     ("GET", "/api/queue", SIGNED, None),
-    ("GET", "/api/keywords", SIGNED, None),
+    ("GET", "/api/keywords", "page.ideas", None),
     ("POST", "/api/keywords/clip/{cid}", "clips.edit", None),  # a preview only: nothing is saved
     ("POST", "/api/clips/{cid}/remove", "clips.discard", "Removed a deleted video from the dashboard"),
     ("POST", "/api/clips/{cid}/restore", "clips.discard", "Showed a removed video again"),
@@ -833,24 +833,24 @@ def health_items() -> list[dict]:
         return []
     out, tail = [], " Ask the person who gave you access."
     if st["controls"].get("uploads_paused"):
-        out.append({"level": "bad", "text": "Uploads are paused by the administrator. Your clips stay queued; nothing is lost." + tail, "fix": None})
+        out.append({"key": "acl_uploads_paused", "level": "bad", "text": "Uploads are paused by the administrator. Your clips stay queued; nothing is lost." + tail, "fix": None})
     elif not st["perms"].get("uploads.youtube", True):
-        out.append({"level": "bad", "text": "Uploading to YouTube is switched off for your account. Your clips stay queued." + tail, "fix": None})
+        out.append({"key": "acl_uploads_off", "level": "bad", "text": "Uploading to YouTube is switched off for your account. Your clips stay queued." + tail, "fix": None})
     if st["controls"].get("sources_stopped"):
-        out.append({"level": "bad", "text": "All sources are stopped by the administrator. No new clips are made until they are started again." + tail, "fix": None})
+        out.append({"key": "acl_sources_stopped", "level": "bad", "text": "All sources are stopped by the administrator. No new clips are made until they are started again." + tail, "fix": None})
     if not st["perms"].get("uploads.auto", True):
-        out.append({"level": "info", "text": "Automatic upload is switched off for your account: every new clip waits in Clips → Ready to review until you approve it.", "fix": None})
+        out.append({"key": "acl_auto_off", "level": "info", "text": "Automatic upload is switched off for your account: every new clip waits in Clips → Ready to review until you approve it.", "fix": None})
     lim = st["limits"]
     if lim.get("uploads_per_day") is not None and uploads_today() >= lim["uploads_per_day"]:
-        out.append({"level": "info", "text": f"Today's limit of {lim['uploads_per_day']} upload(s) for your account is reached. "
+        out.append({"key": "acl_uploads_limit", "level": "info", "text": f"Today's limit of {lim['uploads_per_day']} upload(s) for your account is reached. "
                                              "The rest go up tomorrow by themselves.", "fix": None})
     if lim.get("clips_per_day") is not None and clips_today() >= lim["clips_per_day"]:
-        out.append({"level": "info", "text": f"Today's limit of {lim['clips_per_day']} new clip(s) for your account is reached. "
+        out.append({"key": "acl_clips_limit", "level": "info", "text": f"Today's limit of {lim['clips_per_day']} new clip(s) for your account is reached. "
                                              "Sources carry on tomorrow by themselves.", "fix": None})
     if lim.get("storage_mb") is not None:
         used = storage_bytes() / (1024 * 1024)
         if used >= lim["storage_mb"]:
-            out.append({"level": "bad", "text": f"Your storage is full ({used:.0f} MB of {lim['storage_mb']} MB). No new clips are made. "
+            out.append({"key": "acl_storage", "level": "bad", "text": f"Your storage is full ({used:.0f} MB of {lim['storage_mb']} MB). No new clips are made. "
                                                 "Discard clips you no longer need, or ask for more space. Nothing is deleted by itself.", "fix": None})
     return out
 
@@ -1037,6 +1037,10 @@ def usage(tid: int | None) -> dict:
     if not tid:
         return {}
     try:
+        from .db import tenant_exists
+
+        if not tenant_exists(tid):  # a deleted copy is not opened (opening would create it again)
+            return {"channels": 0, "channel_list": [], "sources": 0, "clips_per_day": 0, "uploads_per_day": 0, "storage_mb": 0}
         with tenant.use(tid):
             from .db import Destination, SessionLocal
 

@@ -826,7 +826,7 @@ function alCard(a,n){const x=a.details||{},fresh=!a.seen&&a.level!=='info';
   const acts=(a.actions||[]).map((b,i)=>{
     if(b.do==='link')return /^https:\/\/studio\.youtube\.com\//.test(b.href||'')?`<a class="btn outline sm" target="_blank" rel="noopener" href="${esc(b.href)}">${ico('youtube')}${esc(b.label)}</a>`:'';
     if(b.do==='fix'){const f=FIXBTN[b.fix];if(!f)return'';return f[1]?`<a class="btn sm" href="${esc(f[1])}" ${f[1].startsWith('http')?'target="_blank" rel="noopener"':''}>${esc(f[0])}</a>`:`<button class="btn sm" data-alact="${n}:${i}">${esc(f[0])}</button>`}
-    return `<button class="btn ${b.do==='dismiss'?'ghost':'outline'} sm" data-alact="${n}:${i}">${b.do==='again'||b.do==='retry_clip'?ico('refresh'):''}${esc(b.label||'Open')}</button>`}).join('');
+    return `<button class="btn ${b.do==='dismiss'?'ghost':'outline'} sm" data-alact="${n}:${i}" data-alact-do="${esc(b.do||'')}">${b.do==='again'||b.do==='retry_clip'?ico('refresh'):''}${esc(b.label||'Open')}</button>`}).join('');
   const grid=a.kind!=='now'&&a.details?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
         ${row('Your channel',esc(x.my_channel||''))}
         ${row('Video on YouTube',x.youtube_id?`<a href="https://youtu.be/${esc(x.youtube_id)}" target="_blank" rel="noopener">youtu.be/${esc(x.youtube_id)}</a>`:'')}
@@ -1469,9 +1469,9 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'sources.edit':'[data-sedit],[data-tog],[data-scripts]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
-  'clips.create':'#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
-  'clips.edit':'#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-del,#e-rewrite',
-  'clips.rerender':'#re-all,#e-render,#e-refetch','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
+  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
+  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',

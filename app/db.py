@@ -35,6 +35,20 @@ def engine_for(tenant_id: int | None = None):
     return eng
 
 
+def tenant_exists(tenant_id: int) -> bool:
+    """Is there a private copy for this customer at all? (Never creates one.)"""
+    tid = int(tenant_id)
+    if tid == tenant.OWNER or tid in _ready:
+        return True
+    if IS_SQLITE:
+        return (tenant.root(tid) / "app.db").exists() if (tenant._base_dir / "tenants" / str(tid)).exists() else False
+    from sqlalchemy import text
+
+    with engine.connect() as conn:
+        return conn.execute(text("SELECT 1 FROM information_schema.schemata WHERE schema_name = :s"),
+                            {"s": tenant.schema(tid)}).first() is not None
+
+
 def ensure_tenant(tenant_id: int):
     """Create (or bring up to date) a customer's private tables. Safe to call again and again."""
     tid = int(tenant_id)
