@@ -404,3 +404,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Seen right after the deploy: the browser showed its remembered copy of the dashboard (the page had an ETag but no Cache-Control), so the new cards were missing until a forced reload.
 - app/main.py `_Pages` (StaticFiles): every HTML page is sent with `Cache-Control: no-cache` — the browser asks each time and gets a short "not changed" (304) when nothing changed.
 - Test: test_pages_cache.py 3/3.
+
+## 2026-11-22 — Task 65: the whole 200-clip batch is made at once (owner's request)
+- Found: all sources said "paused: 62 clips already queued" — autopilot stopped at 30 waiting clips per channel, so the batch could only grow as uploads went out.
+- app/autopilot.py: `queue_cap()` = account setting "queue_cap" (10–300, usual 30); sources also wait while the disk has less than 0.7 GB free. app/learn.py uses the same number. Routes: GET /api/settings/queue-cap, POST /api/admin/queue-cap (Super Admin only). No dashboard control yet.
+- Test: test_queue_cap.py 10/10; test_acl_routes 19, test_acl 65, test_security 18, test_learn 68, test_channels 18.
