@@ -16,6 +16,7 @@ from . import quota, youtube
 from .db import Channel, Clip, Destination, Project, SessionLocal, get_setting, set_setting, utcnow, main_destination
 
 log = logging.getLogger(__name__)
+from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
 PER_DAY = 5
 KEEP_DAYS = 30
 MIN_SECONDS = 90  # clips are cut from real videos; other people's Shorts are shown but never re-posted
@@ -82,6 +83,7 @@ def refresh(force: bool = False) -> dict:
         rows = _chart()
     except Exception as e:  # noqa: BLE001
         log.warning("viral chart: %s", str(e)[:150])
+        _note("Viral today: reading YouTube's trending list", e)
         rows = []
     shorts_due = not board.get("shorts_at") or (force and datetime.fromisoformat(board["shorts_at"][:-1]) < utcnow() - timedelta(hours=6))
     if shorts_due and quota.can_search():
@@ -90,6 +92,7 @@ def refresh(force: bool = False) -> dict:
             board["shorts_at"] = now
         except Exception as e:  # noqa: BLE001
             log.warning("viral shorts: %s", str(e)[:150])
+            _note("Viral today: searching for viral Shorts", e)
     for rank, r in enumerate(rows, 1):
         bucket = board["shorts" if r["short"] else "videos"]
         old = bucket.get(r["video_id"])

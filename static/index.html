@@ -291,7 +291,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 
       <section id="p-alerts" class="hide">
         <div class="page-h"><div><h1>Alerts</h1><div class="desc" id="al-desc">Your uploaded videos are checked on YouTube every 2 hours: deleted, removed for copyright, rejected or blocked.</div></div><button class="btn" id="al-check"><i data-ico="refresh"></i>Check now</button></div>
-        <div class="alert" style="margin-bottom:16px"><i data-ico="alert"></i><span class="sm">YouTube's API shows what happened to a video (removed, rejected with a reason, blocked in countries), but not strikes or the claimant's name — use “Open in YouTube Studio” on an alert for that.</span></div>
+        <div class="row" style="justify-content:space-between;margin-bottom:12px;gap:10px"><div class="tabs" id="al-tabs"></div><div class="row"><button class="btn outline sm hide" id="al-retry"><i data-ico="refresh"></i>Retry all failed</button><button class="btn outline sm" id="al-seen">Mark all as seen</button></div></div>
+        <div class="mut sm" id="al-hint" style="margin-bottom:12px"></div>
         <div id="al-list"></div>
       </section>
 
@@ -339,6 +340,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
                 <div style="display:flex;flex-direction:column;gap:8px"><label class="btn sm"><i data-ico="image"></i><span id="face-lbl">Upload face photo</span><input type="file" accept="image/jpeg,image/png,image/webp" data-face="0" hidden></label>
                 <button class="btn ghost sm hide" id="face-del">Remove</button><span class="mut sm" id="face-note"></span>
                 <label class="row sm" style="gap:8px">Size on thumbnails<select id="face-size" style="width:auto"><option value="S">Small</option><option value="M">Medium</option><option value="L">Large</option></select></label></div></div></div>
+            <div class="card"><div class="ch"><div><h3>Like &amp; subscribe reminder</h3><p>A small line that appears once, for about 3 seconds near the end of every new video (Shorts and normal videos). No sound, no blinking. Clips shorter than 8 seconds get none.</p></div><span class="badge" id="rm-badge">…</span></div>
+              <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="rm-on" checked><i></i></span>Show it on my videos</label>
+                <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Words<select id="rm-preset"></select></label><label class="f grow hide" id="rm-custom-wrap">Your own words (up to 40 letters, no emoji)<input id="rm-custom" maxlength="40" placeholder="Like and subscribe for more"></label><button class="btn" id="rm-save">Save</button></div>
+                <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
             <div class="card"><div class="ch"><div><h3>How it works</h3></div></div><div class="cb">
               <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
                 <li>Add a source channel (or paste one video).</li>
@@ -391,6 +396,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <div class="row"><button class="btn outline sm" id="e-refetch"><i data-ico="refresh"></i>Re-download video</button><span class="mut sm">Use if the picture or sound looks wrong.</span></div>
       <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
       <label class="row sm" id="e-ftitle-row" style="gap:8px;margin-top:6px" title="YouTube shows its own frame of a Short, not your thumbnail. With this on, the title and your small face are at the top of every frame, so that frame always carries them."><span class="switch"><input type="checkbox" id="e-ftitle" checked><i></i></span>Title and my face at the top of the whole Short (so YouTube's picture of it shows them)</label>
+      <label class="row sm" style="gap:8px;margin-top:6px" title="One short line in a small pill, shown once near the end. No sound. The words are chosen in My channels."><span class="switch"><input type="checkbox" id="e-cta" checked><i></i></span>Small “Like and subscribe” line near the end (about 3 seconds)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="Shorts: the crop follows the person instead of the centre"><span class="switch"><input type="checkbox" id="e-reframe" checked><i></i></span>Smart reframe (Shorts follow the person on screen)</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
@@ -616,10 +622,9 @@ async function loadOverview(){
   const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}${d.is_main&&DESTS.length>1?' (main)':''}${d.paused?' (uploads paused)':''}${d.needs_reconnect?' (reconnect needed)':''}</option>`).join(''):'<option value="">Connect a channel first</option>';
   ['#h-dest','#s-dest','#q-dest','#e-dest'].forEach(sel=>{const el=$(sel),v=el.value;el.innerHTML=opts;if(DESTS.some(d=>String(d.id)===v))el.value=v});
   const rv=OV.counts.rendered;const b=$('#b-review');b.style.display=rv?'':'none';b.textContent=rv;
-  const na=OV.alerts_unseen||0;const ba=$('#b-alerts');ba.style.display=na?'':'none';ba.textContent=na;
+  const na=OV.alerts_badge??OV.alerts_unseen??0;const ba=$('#b-alerts');ba.style.display=na?'':'none';ba.textContent=na;
   return OV;
 }
-const AKIND={removed:['Deleted','failed'],rejected:['Removed by YouTube','failed'],failed:['Processing failed','failed'],blocked:['Blocked / claimed','queued'],restored:['Available again','uploaded']};
 const num=n=>n==null?'—':Number(n).toLocaleString('en-IN');
 const delta=n=>n==null?'<span class="mut sm">—</span>':`<span class="sm" style="color:${n>0?'var(--ok)':n<0?'var(--bad)':'var(--mfg)'}">${n>0?'+':''}${num(n)}</span>`;
 function spark(pts,key){if(!pts||pts.length<2)return '';const v=pts.map(p=>p[key]||0),mn=Math.min(...v),mx=Math.max(...v),W=160,H=36;
@@ -754,30 +759,75 @@ $('#pm-emails').onclick=()=>once(async()=>{const r=await api('/api/permissions/f
 $('#pm-find').onclick=()=>once(async()=>{const r=await api('/api/permissions/refresh','POST');toast(r.length?r.length+' new creator(s) found':'No new creators right now');loadPerms()},$('#pm-find'));
 $('#id-add').onclick=()=>once(async()=>{const q=$('#id-q').value.trim();if(!q)throw new Error('Type a channel link or @handle');await api('/api/ideas/competitors','POST',{query:q});$('#id-q').value='';toast('Tracking — press Check now or wait for the daily check');loadIdeas()},$('#id-add'));
 $('#id-scan').onclick=()=>once(async()=>{await api('/api/ideas/scan','POST');toast('Checked');loadIdeas()},$('#id-scan'));
-async function loadAlerts(){
-  $('#al-list').innerHTML=skel(2);
-  let d;try{d=await api('/api/alerts')}catch(e){return fail(e)}
-  $('#al-desc').textContent=`Watching ${d.watching} uploaded video${d.watching===1?'':'s'} on YouTube every 2 hours`+(d.last_check?` · last check ${when(d.last_check)}`:'')+'.';
-  $('#al-list').innerHTML=d.alerts.length?d.alerts.map(a=>{const x=a.details||{},[lab,cls]=AKIND[a.kind]||[a.kind,'outline'];
-    const row=(k,v)=>v?`<div><span class="mut sm">${k}</span><div>${v}</div></div>`:'';
-    return `<div class="card" style="margin-bottom:12px${a.seen?'':';border-color:var(--bad)'}"><div class="cb">
-      <div class="row" style="justify-content:space-between"><div class="row"><span class="badge ${cls}">${lab}</span>${a.seen?'':'<span class="badge failed">new</span>'}<b>${esc(x.title||'Clip #'+a.clip_id)}</b></div><span class="mut sm">detected ${when(a.created_at)}</span></div>
-      <p style="margin:10px 0">${esc(a.message)}</p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+let ALTAB='all',ALB=null,ALSHOW=[];
+const ALTABS=[['all','All'],['deleted','Deleted'],['strikes','Strikes & copyright'],['broken','Not working'],['system','System errors']];
+const ALHINT={all:'Everything in one list: what is wrong right now first, then the history, newest first.',
+  deleted:'Videos that are gone from YouTube — deleted by you, or by YouTube without a copyright reason.',
+  strikes:'Videos YouTube rejected, blocked or claimed, and channels whose uploads were paused because of it. YouTube does not tell apps about strikes or who made a claim — press “Open in YouTube Studio” on an item for that.',
+  broken:'Things that are not working right now. Each one disappears by itself when it is fixed.',
+  system:'Unexpected problems on the server or in a background job. The system carries on by itself; they are kept here so they can be sent to the person who looks after it.'};
+const ALEMPTY={all:['No problems found','Everything is working and your uploaded videos are fine on YouTube.'],deleted:['No deleted videos','None of your uploaded videos has disappeared from YouTube.'],
+  strikes:['No strikes or copyright problems','YouTube has not rejected, blocked or claimed any of your videos.'],broken:['Everything is working','Clips, uploads, the helper PC, sources and logins are fine.'],
+  system:['No system errors','Nothing unexpected happened on the server.']};
+const ALCLS={bad:'failed',warn:'queued',info:'outline'};
+function alItems(tab){if(!ALB)return[];if(tab!=='all')return ALB.tabs[tab]||[];
+  const all=[].concat(ALB.tabs.strikes||[],ALB.tabs.deleted||[],ALB.tabs.broken||[],ALB.tabs.system||[]),rank={bad:0,warn:1,info:2};
+  return all.filter(i=>!i.at).sort((x,y)=>(rank[x.level]??1)-(rank[y.level]??1)).concat(all.filter(i=>i.at).sort((x,y)=>String(y.at).localeCompare(String(x.at))))}
+function alCard(a,n){const x=a.details||{},fresh=!a.seen&&a.level!=='info';
+  const row=(k,v)=>v?`<div><span class="mut sm">${k}</span><div>${v}</div></div>`:'';
+  const acts=(a.actions||[]).map((b,i)=>{
+    if(b.do==='link')return /^https:\/\/studio\.youtube\.com\//.test(b.href||'')?`<a class="btn outline sm" target="_blank" rel="noopener" href="${esc(b.href)}">${ico('youtube')}${esc(b.label)}</a>`:'';
+    if(b.do==='fix'){const f=FIXBTN[b.fix];if(!f)return'';return f[1]?`<a class="btn sm" href="${esc(f[1])}" ${f[1].startsWith('http')?'target="_blank" rel="noopener"':''}>${esc(f[0])}</a>`:`<button class="btn sm" data-alact="${n}:${i}">${esc(f[0])}</button>`}
+    return `<button class="btn ${b.do==='dismiss'?'ghost':'outline'} sm" data-alact="${n}:${i}">${b.do==='again'||b.do==='retry_clip'?ico('refresh'):''}${esc(b.label||'Open')}</button>`}).join('');
+  const grid=a.kind!=='now'&&a.details?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
         ${row('Your channel',esc(x.my_channel||''))}
         ${row('Video on YouTube',x.youtube_id?`<a href="https://youtu.be/${esc(x.youtube_id)}" target="_blank" rel="noopener">youtu.be/${esc(x.youtube_id)}</a>`:'')}
         ${row('Uploaded',x.uploaded_at?when(x.uploaded_at):'')}
         ${row('Went / goes live',x.publish_at?when(x.publish_at):'')}
         ${row('Original creator',esc(x.source_channel||''))}
-        ${row('Original video',x.source_url?`<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_title||x.source_url)}</a>`:'')}
-        ${row('Part used',x.clip_range?`${T(x.clip_range[0])}–${T(x.clip_range[1])} · ${esc(x.source_mode||'')}`:'')}
-      </div>
-      <div class="row" style="margin-top:12px">${x.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://studio.youtube.com/video/${esc(x.youtube_id)}/copyright">${ico('youtube')}Open in YouTube Studio</a>`:''}<button class="btn ghost sm" data-open="${a.clip_id}">Open clip</button>${['removed','failed'].includes(a.kind)?`<button class="btn outline sm" data-again="${a.clip_id}" data-ys="${a.kind}">${ico('refresh')}Upload again</button>`:''}</div>
-    </div></div>`}).join(''):empty('bell','No problems found',d.watching?'All your uploaded videos are fine on YouTube.':'Alerts appear here once videos are uploaded.');
-  wireOpen($('#al-list'));wireAgain($('#al-list'));
-  if(d.alerts.some(a=>!a.seen)){try{await api('/api/alerts/seen','POST');$('#b-alerts').style.display='none'}catch(e){}}
+        ${row('Original video',/^https?:\/\//.test(x.source_url||'')?`<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_title||x.source_url)}</a>`:esc(x.source_title||''))}
+        ${row('Part used',Array.isArray(x.clip_range)?`${T(x.clip_range[0])}–${T(x.clip_range[1])} · ${esc(x.source_mode||'')}`:'')}
+      </div>`:'';
+  return `<div class="card" style="margin-bottom:12px${fresh?';border-color:var(--'+(a.level==='bad'?'bad':'warn')+')':''}${a.seen?';opacity:.82':''}"><div class="cb">
+      <div class="row" style="justify-content:space-between"><div class="row"><span class="badge ${ALCLS[a.level]||'outline'}">${esc(a.label||'')}</span>${fresh?'<span class="badge failed">new</span>':''}${a.count>1?'<span class="badge outline">×'+Number(a.count)+'</span>':''}<b>${esc(a.title||'')}</b></div><span class="mut sm">${a.at?when(a.at):'right now'}</span></div>
+      <p style="margin:10px 0">${esc(a.text||'')}</p>${a.tech?`<p class="mut sm" style="margin:0 0 10px;word-break:break-word">Details for support: ${esc(a.tech)}</p>`:''}
+      ${grid}<div class="row" style="margin-top:12px;flex-wrap:wrap">${acts}</div>
+    </div></div>`}
+function renderAlerts(){
+  const d=ALB;if(!d)return;
+  $('#al-tabs').innerHTML=ALTABS.map(([k,l])=>`<button class="tab${k===ALTAB?' on':''}" data-t="${k}">${esc(l)}${d.counts[k]?` <span class="badge failed" style="margin-left:4px">${Number(d.counts[k])}</span>`:d.totals[k]?` <span class="mut sm">${Number(d.totals[k])}</span>`:''}</button>`).join('');
+  $$('#al-tabs .tab').forEach(b=>b.onclick=()=>{ALTAB=b.dataset.t;renderAlerts()});
+  const on=$('#al-tabs .tab.on'),bar=$('#al-tabs');if(on&&bar.scrollWidth>bar.clientWidth)bar.scrollLeft=Math.max(0,on.offsetLeft-bar.offsetLeft-12);
+  $('#al-hint').textContent=ALHINT[ALTAB]||'';
+  ALSHOW=alItems(ALTAB);
+  $('#al-seen').classList.toggle('hide',!ALSHOW.some(i=>!i.seen));
+  $('#al-retry').classList.toggle('hide',!(d.failed_clips>1&&(ALTAB==='all'||ALTAB==='broken')));
+  const em=ALEMPTY[ALTAB]||ALEMPTY.all;
+  $('#al-list').innerHTML=ALSHOW.length?ALSHOW.map(alCard).join(''):empty('bell',em[0],ALTAB==='all'&&!d.watching?'Alerts appear here once videos are uploaded.':em[1]);
+  $$('[data-alact]',$('#al-list')).forEach(btn=>btn.onclick=()=>{const [n,i]=btn.dataset.alact.split(':').map(Number),a=ALSHOW[n],b=a&&(a.actions||[])[i];if(b)once(()=>alAct(a,b),btn)});
 }
-$('#al-check').onclick=()=>once(async()=>{const r=await api('/api/alerts/check','POST');toast(`Checked ${r.checked} video${r.checked===1?'':'s'} — ${r.new_alerts} new alert${r.new_alerts===1?'':'s'}`);await loadAlerts();loadOverview()},$('#al-check'));
+async function alAct(a,b){
+  if(b.do==='open_clip'){openEditor(+b.id);return}
+  if(b.do==='go'){go(b.page);return}
+  if(b.do==='again'){await uploadAgain(+b.id,b.ys);return}
+  if(b.do==='retry_clip'){await api(`/api/clips/${+b.id}/render`,'POST');toast('The clip is being made again — it leaves this list when it works')}
+  else if(b.do==='dismiss'){await api('/api/alerts/board/seen','POST',{tab:'all',id:a.id});toast('Marked as seen — it stays in the list as history')}
+  else if(b.do==='fix'){
+    if(b.fix==='resume'&&!confirm('Resume uploads to this channel? Only do this if the strike or removal is dealt with.'))return;
+    if(await doFix(b)===false)return}
+  await loadAlerts();loadOverview().catch(()=>{});
+}
+async function loadAlerts(){
+  if(!ALB)$('#al-list').innerHTML=skel(2);
+  let d;try{d=await api('/api/alerts/board')}catch(e){$('#al-list').innerHTML=empty('alert','The alerts could not be loaded','Check your internet and press Check now again.');return fail(e)}
+  ALB=d;
+  $('#al-desc').textContent=`Every problem in one place. Watching ${d.watching} uploaded video${d.watching===1?'':'s'} on YouTube every 2 hours`+(d.last_check?` · last check ${when(d.last_check)}`:'')+'.';
+  const ba=$('#b-alerts');ba.style.display=d.badge?'':'none';ba.textContent=d.badge;
+  renderAlerts();
+}
+$('#al-check').onclick=()=>once(async()=>{const r=await api('/api/alerts/check','POST');toast(`Checked ${r.checked} video${r.checked===1?'':'s'} — ${r.new_alerts} new alert${r.new_alerts===1?'':'s'}`);await loadAlerts();loadOverview().catch(()=>{})},$('#al-check'));
+$('#al-seen').onclick=()=>once(async()=>{const r=await api('/api/alerts/board/seen','POST',{tab:ALTAB});toast(r.marked?`${r.marked} item${r.marked===1?'':'s'} marked as seen — nothing was deleted`:'Nothing new here');await loadAlerts()},$('#al-seen'));
+$('#al-retry').onclick=()=>once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`);await loadAlerts()},$('#al-retry'));
 function clipMini(c,actions){
   return `<div class="item"><div class="th" style="background-image:url('${thumb(c.video_id)}')" data-open="${c.id}"></div>
   <div class="tx"><b>${esc(c.title||c.source_title||'Clip #'+c.id)}</b><span class="mut sm">${esc(c.source_channel||'')} · ${T(c.start)}–${T(c.end)}${c.status==='queued'?' · '+when(c.publish_at):''}</span>${c.error?`<span class="sm" style="color:var(--bad);display:block">${esc((c.error||'').slice(0,110))}</span>`:''}</div>${actions||''}</div>`;
@@ -793,14 +843,16 @@ async function loadHealth(h0,target){
     return `<div class="item"><span class="badge ${it.level==='bad'?'failed':it.level==='warn'?'queued':'outline'}">${it.level==='bad'?'Fix now':it.level==='warn'?'Check':'Info'}</span><div class="tx grow"><span>${esc(it.text)}</span></div>${btn}</div>`}).join('')
     :`<div class="row" style="gap:10px">${ico('check')}<b>Everything is working.</b><span class="mut sm">Uploads, thumbnails, sources and the helper are fine.</span></div>`;
   $$('[data-hfix]',$(target||'#hl-list')).forEach(b=>b.onclick=()=>once(async()=>{const it=h.items[+b.dataset.hfix];
-    if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return}
-    if(it.fix==='add_source'){openAdd();return}if(it.fix==='sources'){go('sources');return}if(it.fix==='guide'){go('guide');return}
-    if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return}
-    if(it.fix==='resume'){await api(`/api/destinations/${it.id}/resume`,'POST');toast('Uploads resumed')}
-    else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
-    else if(it.fix==='run_source'){await api(`/api/channels/${it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
-    else if(it.fix==='helper'){alert('The helper PC downloads videos from your home internet (YouTube blocks the server).'+String.fromCharCode(10,10)+'One time only: open the folder D:'+String.fromCharCode(92)+'social medi engin'+String.fromCharCode(92)+'worker and double-click install_autostart.bat.'+String.fromCharCode(10)+'After that it starts by itself whenever your PC is on.');return}
+    if(await doFix(it)===false)return;
     if(target)loadGuide();else loadDash()}));
+}
+async function doFix(it){  // returns false when it only opened another page (nothing to reload)
+  if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return false}
+  if(it.fix==='add_source'){openAdd();return false}if(it.fix==='sources'){go('sources');return false}if(it.fix==='guide'){go('guide');return false}
+  if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return false}
+  if(it.fix==='resume'){await api(`/api/destinations/${+it.id}/resume`,'POST');toast('Uploads resumed')}
+  else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
+  else if(it.fix==='run_source'){await api(`/api/channels/${+it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
 }
 const SUHELP={helper:'The helper PC is your own computer. It starts by itself when you sign in to Windows (worker\\install_autostart.bat was run once). If it is offline: turn the PC on and make sure the internet works.',
   ollama:'The local AI (Ollama) writes reel scripts for free on your PC. It is being installed for you. If you ever need to install it again: get it from ollama.com, then run:  ollama pull qwen2.5:3b'};
@@ -964,7 +1016,14 @@ async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');
   if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
 }
-async function loadFaceSize(){try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadFaceSize(){loadReminder();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
+  $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
+  $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
+  const b=$('#rm-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off'}
+function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
+$('#rm-preset').onchange=rmShow;
+$('#rm-save').onclick=()=>once(async()=>{await api('/api/settings/reminder','POST',{on:$('#rm-on').checked,preset:$('#rm-preset').value,custom:$('#rm-custom').value});toast('Saved — new clips use it. Clips that are already made: Clips → “Make all waiting clips again”.');loadReminder()},$('#rm-save'));
 $('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
   const mi=await api('/api/settings/mail');
@@ -1094,7 +1153,7 @@ function fill(c){
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
   $('#e-rewrite').classList.toggle('hide',!(AISRC.has(c.source_id)&&!['uploaded','uploading'].includes(c.status)));
   $('#e-refetch').parentElement.classList.toggle('hide',!!c.own_upload);
-  $('#e-ftitle').checked=c.frame_title!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
+  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
   $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
@@ -1166,7 +1225,7 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}

@@ -656,6 +656,7 @@ class ClipUpdate(BaseModel):
     fit: Literal["full", "wide", "fill"] | None = None
     voice_fit: Literal["", "speed"] | None = None
     frame_title: bool | None = None
+    cta_on: bool | None = None
 
 
 class TtsIn(BaseModel):
@@ -823,7 +824,8 @@ def _render_sig(c: Clip) -> tuple:
             st.get("pos") or "bottom", st.get("size") or "M", str(st.get("color") or "#ffffff").lower()) if st.get("on") else None
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
             r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False,
-            c.reframe is not False, c.fit or "full", c.voice_fit or "", c.aspect != "16:9" and c.frame_title is not False)
+            c.reframe is not False, c.fit or "full", c.voice_fit or "", c.aspect != "16:9" and c.frame_title is not False,
+            c.cta_on is not False)
 
 
 @app.put("/api/clips/{cid}")
@@ -1215,6 +1217,7 @@ def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
 
 @app.get("/api/overview")
 def overview():
+    badge = _alerts_badge()  # before the session below is opened: it reads (and may tidy) on its own
     with SessionLocal() as s:
         statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
         counts = {k: s.query(Clip).filter(Clip.status == k).count() for k in statuses}
@@ -1233,12 +1236,20 @@ def overview():
             "failed": _cards(s, failed),
             "review": _cards(s, review),
             "youtube_configured": youtube.configured(),
-            "alerts_unseen": s.query(Alert).filter(Alert.seen.is_(False)).count(),
+            "alerts_unseen": (n_alerts := s.query(Alert).filter(Alert.seen.isnot(True), Alert.kind != "restored").count()),
+            "alerts_badge": n_alerts if badge is None else badge,  # sidebar: new serious items (deleted + strikes + not working)
             "quota": quota.summary(),
             "uploads_today": _uploads_today(s),
             "helper": _helper_state(s),
             "thumbs_pending": s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count(),
         }
+
+
+def _alerts_badge() -> int | None:
+    try:
+        return _alerts_board(record=False)["badge"]  # polled every 30 s: the Alerts page itself writes problems down
+    except Exception:  # noqa: BLE001  (the dashboard must open even if the alert list cannot be made)
+        return None
 
 
 def _uploads_today(s) -> dict:
@@ -1299,6 +1310,39 @@ def alerts_check():
     return check_uploads()
 
 
+def _alerts_board(record: bool = True) -> dict:
+    """Every problem, sorted into the tabs of the Alerts page (see alerts.py). Never fails: a part that cannot be
+    read is left out and written down under System errors."""
+    from . import alerts, guide
+
+    try:
+        items = health()["items"]
+    except Exception as e:  # noqa: BLE001
+        if record:
+            guide.record_error("Alerts: checking the system", e)
+        items = None
+    return alerts.board(items)
+
+
+@app.get("/api/alerts/board")
+def alerts_board():
+    return _alerts_board()
+
+
+class AlertSeenIn(BaseModel):
+    tab: Literal["all", "deleted", "strikes", "broken", "system"] = "all"
+    id: str | None = Field(None, max_length=200)  # one item; empty = everything in the tab
+
+
+@app.post("/api/alerts/board/seen")
+def alerts_board_seen(body: AlertSeenIn):
+    """Dismiss one item or mark a whole tab as seen. Nothing is deleted: the history stays, only the 'new' mark goes."""
+    from . import alerts
+
+    n = alerts.mark_seen(_alerts_board(), body.tab, body.id)
+    return {"ok": True, "marked": n, "badge": _alerts_board()["badge"]}
+
+
 def _future_time(iso: str) -> datetime:
     """A publish time from the dashboard: must be at least 15 minutes ahead (else YouTube publishes at once)."""
     try:
@@ -1334,7 +1378,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
-            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title")}, status="draft")
+            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on")}, status="draft")
         s.add(new)
         s.commit()
         old_dir, new_dir = DATA_DIR / "clips" / str(c.id), DATA_DIR / "clips" / str(new.id)
@@ -1634,6 +1678,35 @@ def face_size_set(body: FaceSizeIn):
     set_setting("thumb_face_size", body.size)
     executor.submit(_rethumb, None)
     return {"size": body.size}
+
+
+class ReminderIn(BaseModel):
+    on: bool = True
+    preset: str = Field("en", max_length=20)
+    custom: str = Field("", max_length=200)
+
+
+@app.get("/api/settings/reminder")
+def reminder_get():
+    """The small "like and subscribe" line near the end of every video: on/off and the wording."""
+    from . import reminder
+
+    return reminder.settings()
+
+
+@app.post("/api/settings/reminder")
+def reminder_set(body: ReminderIn):
+    from . import reminder
+
+    if body.preset != "custom" and body.preset not in dict(reminder.PRESETS):
+        raise HTTPException(400, "Choose one of the wordings in the list.")
+    custom = reminder.clean(body.custom)
+    if body.preset == "custom":
+        if len(body.custom.strip()) > reminder.MAX_LEN:
+            raise HTTPException(400, f"Keep it short: at most {reminder.MAX_LEN} letters.")
+        if len(custom) < 3:
+            raise HTTPException(400, "Type a few plain words (letters only — emoji and symbols cannot be shown on the video).")
+    return reminder.save(body.on, body.preset, custom)
 
 
 @app.get("/api/settings/pexels")
@@ -2144,52 +2217,53 @@ def health():
     with SessionLocal() as s:
         dests = s.query(Destination).order_by(Destination.id).all()
         if not dests:
-            items.append({"level": "bad", "text": "No YouTube channel is connected.", "fix": "connect"})
+            items.append({"level": "bad", "text": "No YouTube channel is connected.", "fix": "connect", "key": "no_channel"})
         for d in dests:
             dd = _dest_dict(d)
             if dd["needs_reconnect"] or (d.paused and "login expired" in (d.paused_reason or "")):
-                items.append({"level": "bad", "text": f"{d.name}: the Google login must be renewed.", "fix": "connect"})
+                items.append({"level": "bad", "text": f"{d.name}: the Google login must be renewed.", "fix": "connect", "key": "reconnect", "ref": d.id})
             elif d.paused:
                 items.append({"level": "bad", "text": f"{d.name}: uploads are paused — {d.paused_reason or ''}",
-                              "fix": "resume", "id": d.id})
+                              "fix": "resume", "id": d.id,
+                              "key": "paused_by_you" if (d.paused_reason or "").startswith("Paused ") else "paused"})
         if tenant.current() != tenant.OWNER and not youtube.configured():
             items.append({"level": "bad", "text": "Your Google project keys are missing (or sharing was switched off). Uploads and sign-ins "
-                                                 "with Google cannot work until you save your own keys.", "fix": "keys"})
+                                                 "with Google cannot work until you save your own keys.", "fix": "keys", "key": "keys"})
         stuck = s.query(Clip).filter(Clip.status == "uploaded", Clip.yt_state == "private", Clip.publish_at.isnot(None),
                                      Clip.publish_at < now - timedelta(hours=6)).count()
         if stuck:
             items.append({"level": "warn", "text": f"{stuck} uploaded video(s) are still Private hours after their publish time. YouTube locks "
                                                   "uploads from a Google project that has not passed its “API compliance audit”. Fill in "
                                                   "the “YouTube API Services - Audit and Quota Extension Form” for your Google project; "
-                                                  "until then, set each video to Public by hand in YouTube Studio.", "fix": None})
+                                                  "until then, set each video to Public by hand in YouTube Studio.", "fix": None, "key": "private_stuck"})
         hp = _helper_state(s)
         if hp["waiting"] and not hp["online"]:
             items.append({"level": "bad", "text": f"Helper PC is offline and {hp['waiting']} job(s) are waiting for it.",
-                          "fix": "helper"})
+                          "fix": "helper", "key": "helper_offline"})
         elif not hp["approved"]:
             items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
-                          "fix": "helper"})
+                          "fix": "helper", "key": "no_helper"})
         failed = s.query(Clip).filter(Clip.status == "failed").count()
         if failed:
-            items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed"})
+            items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed", "key": "failed"})
         thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
         if thumbs_wait:
             items.append({"level": "warn", "text": f"{thumbs_wait} thumbnail(s) were refused by YouTube. Verify the channel's phone "
                                                   "number at youtube.com/verify — they are then sent again by themselves.",
-                          "fix": "verify"})
+                          "fix": "verify", "key": "thumbs"})
         if dests and not s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count():
-            items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source"})
+            items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source", "key": "no_source"})
         for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto.is_(True)).all():
             if not ch.auto_scripts and not any(not x.get("used") for x in (ch.scripts or [])):
                 items.append({"level": "info", "text": f"Reel source “{ch.name}” has no scripts left — add scripts (Sources → Scripts).",
-                              "fix": "sources"})
+                              "fix": "sources", "key": "no_scripts", "ref": ch.id})
         try:
             from . import gmail
             from .permissions import listing
 
             if not gmail.connected_email() and any(c["status"] in ("new", "asked") for c in listing()):
                 items.append({"level": "warn", "text": "Gmail is not connected, so permission mails cannot be sent and replies are not read.",
-                              "fix": "gmail"})
+                              "fix": "gmail", "key": "gmail"})
         except Exception:  # noqa: BLE001
             pass
         from .guide import recent_errors
@@ -2198,18 +2272,18 @@ def health():
         n_err = sum(int(e.get("count") or 1) for e in fresh)
         if n_err >= 3:
             items.append({"level": "warn", "text": f"{n_err} unexpected server problems in the last 6 hours "
-                                                  f"(latest: {fresh[0]['type']} in {fresh[0]['where']}).", "fix": "guide"})
+                                                  f"(latest: {fresh[0]['type']} in {fresh[0]['where']}).", "fix": "guide", "key": "errors"})
         if quota.summary()["uploads_left"] == 0 and s.query(Clip).filter(Clip.status == "queued").count():
             items.append({"level": "info", "text": "Today's upload budget is used; queued clips go up after the daily "
-                                                  "reset (1:30 PM IST). Nothing to do.", "fix": None})
+                                                  "reset (1:30 PM IST). Nothing to do.", "fix": None, "key": "quota"})
         due = now - timedelta(hours=8)
         for ch in s.query(Channel).filter(Channel.auto.is_(True)).all():
             if ch.last_status and ch.last_status.startswith("error"):
                 items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” failed last time: "
-                                                      f"{friendly_error(ch.last_status[7:])[:160]}", "fix": "run_source", "id": ch.id})
+                                                      f"{friendly_error(ch.last_status[7:])[:160]}", "fix": "run_source", "id": ch.id, "key": "source_failed"})
             elif ch.last_run and ch.last_run < due:
                 items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” has not run for a while.",
-                              "fix": "run_source", "id": ch.id})
+                              "fix": "run_source", "id": ch.id, "key": "source_stale"})
     return {"ok": not any(i["level"] in ("bad", "warn") for i in items), "items": items}
 
 
