@@ -276,3 +276,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - **Setup guide** page (app/guide.py): numbered steps with how-to for a non-coder, live problems with fix buttons, 18 "if something goes wrong" answers, and "Details for support" (unexpected server errors recorded without secrets, de-duplicated, Copy details). Catch-all exception handler returns a plain message. Checklist got Main channel / phone-verified / at-least-one-source lines and "How?" links.
 - Independent review agent found 18 issues (4 high: original sound stopped with the voice; disk clean-up/Re-download deleted an uploaded video; upload trim start ignored; plus stale-thumbnail, Main semantics, ghost clip on failed upload, NULL kind sources skipped by the new filter, error-log secrets/duplicates, label mismatches). All fixed; 21 regression tests (test_review.py).
 - Tests: render 14, upload+sync 18, channels 18, guide 16, review 21; all older suites pass (3 known stale expectations).
+
+## 2026-11-22 — Task 48: three dashboard gaps closed
+- **Edit a source** (Sources → Edit; PUT /api/channels/{id}): name, channel, upload as, videos per run, clips per video, clip length, run interval, upload times (validated, e.g. "10:00, 18:30"), captions, review first. Reel sources stay vertical. Only sent fields change.
+- **Make all waiting clips again** (Clips; POST /api/fix/rerender-waiting): every clip in review/queue is rendered again, optionally with "Whole video" for Shorts; queued clips keep their upload time, review clips come back to review, rule-breaking clips are skipped.
+- **Reject — write a new one** (editor, AI reels only; POST /api/clips/{id}/rewrite): discards the reel and asks the local AI for a new script on the next topic; refused (reel kept) while the helper is offline.
+- Clip cards carry source_id / own_upload; overview lists ai_sources. Guide has entries for all three. Tests 16/16.

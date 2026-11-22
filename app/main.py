@@ -377,6 +377,25 @@ class ChannelIn(BaseModel):
     tz_offset: int = Field(0, ge=-900, le=900)
 
 
+TIMES_RE = re.compile(r"^\s*([01]?\d|2[0-3]):[0-5]\d(\s*,\s*([01]?\d|2[0-3]):[0-5]\d){0,11}\s*$")
+
+
+class ChannelEdit(BaseModel):
+    """What can be changed on a source after it was added (only the fields that are sent change)."""
+    name: str | None = Field(None, min_length=1, max_length=300)
+    videos_per_run: int | None = Field(None, ge=1, le=20)
+    clips_per_video: int | None = Field(None, ge=1, le=10)
+    clip_len: int | None = Field(None, ge=10, le=120)
+    aspect: Literal["16:9", "9:16", "1:1"] | None = None
+    post_times: str | None = Field(None, max_length=100)
+    tz_offset: int | None = Field(None, ge=-900, le=900)
+    interval_hours: int | None = Field(None, ge=1, le=48)
+    captions: bool | None = None
+    review_first: bool | None = None
+    destination_id: int | None = None
+    voice: str | None = Field(None, max_length=60)
+
+
 class CookiesIn(BaseModel):
     text: str = Field(max_length=400_000)
 
@@ -855,6 +874,8 @@ def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     d["mode"] = p.mode if p else None
     d["license"] = p.license if p else None
     d["duration"] = p.duration if p else None
+    d["source_id"] = p.channel_ref if p else None
+    d["own_upload"] = bool(p and p.mode == "original" and (p.license or "").endswith("(my own video)"))
     return d
 
 
@@ -887,6 +908,7 @@ def overview():
             "sources": s.query(Channel).count(),
             "videos_analyzed": s.query(Project).count(),
             "destinations": _dests_main_first(s),
+            "ai_sources": [c.id for c in s.query(Channel.id).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True))],
             "upcoming": _cards(s, upcoming),
             "recent": _cards(s, recent),
             "failed": _cards(s, failed),
@@ -1853,6 +1875,84 @@ def retry_failed():
                 executor.submit(run_render, c.id)
         s.commit()
     return {"retried": n}
+
+
+@app.put("/api/channels/{chid}")
+def edit_channel(chid: int, body: ChannelEdit):
+    with SessionLocal() as s:
+        ch = _get(s, Channel, chid)
+        data = body.model_dump(exclude_unset=True)
+        if data.get("post_times") is not None:
+            pt = data["post_times"].strip()
+            if pt and not TIMES_RE.match(pt):
+                raise HTTPException(400, "Upload times must look like 10:00, 18:30 (24-hour clock, separated by commas).")
+            data["post_times"] = ", ".join(x.strip().zfill(5) for x in pt.split(",")) if pt else ""
+        if "destination_id" in data:
+            if data["destination_id"] is None:
+                data.pop("destination_id")
+            else:
+                _get(s, Destination, data["destination_id"])
+        if ch.kind == "reel":  # reels are always vertical originals
+            data.pop("aspect", None)
+            data.pop("clips_per_video", None)
+            data.pop("clip_len", None)
+        else:
+            data.pop("voice", None)
+        for k, v in data.items():
+            setattr(ch, k, v)
+        s.commit()
+        return to_dict(ch)
+
+
+# (3) a reel the local AI wrote badly: throw it away and have a new script written on another topic
+@app.post("/api/clips/{cid}/rewrite")
+def clip_rewrite(cid: int):
+    from .autopilot import trending_phrase
+
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = _get(s, Project, c.project_id)
+        ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
+        if not ch or ch.kind != "reel" or not ch.auto_scripts:
+            raise HTTPException(400, "Only reels written by the local AI can be written again.")
+        if c.status in ("uploading", "uploaded"):
+            raise HTTPException(409, "Already on YouTube; delete it there instead.")
+        if not _helper_state(s)["online"]:
+            raise HTTPException(409, "The helper PC is offline — it writes the scripts. Start it and try again.")
+        topic = (ch.script_wanted or {}).get("topic") or trending_phrase(ch)
+        if not topic:
+            raise HTTPException(409, "No new topic is available right now — try again later.")
+        if not ch.script_wanted:
+            ch.script_wanted = {"topic": topic, "since": utcnow().isoformat()}
+        shutil.rmtree(DATA_DIR / "clips" / str(cid), ignore_errors=True)
+        s.delete(c)
+        s.commit()
+        return {"discarded": True, "topic": topic}
+
+
+# (2) make every waiting clip again (e.g. after changing how Shorts look); upload times are kept
+class RerenderIn(BaseModel):
+    fit: Literal["full", "wide", "fill"] | None = None  # also set the picture option on Shorts/square clips
+
+
+@app.post("/api/fix/rerender-waiting")
+def rerender_waiting(body: RerenderIn):
+    n, skipped = 0, 0
+    with SessionLocal() as s:
+        for c in s.query(Clip).filter(Clip.status.in_(["rendered", "queued"])).order_by(Clip.publish_at, Clip.id).all():
+            p = s.get(Project, c.project_id)
+            if p is None or check_edit(p, c):
+                skipped += 1
+                continue
+            keep_queue = c.status == "queued"
+            res = s.execute(update(Clip).where(Clip.id == c.id, Clip.status.in_(["rendered", "queued"]))
+                            .values(status="rendering", error=None, autoqueue=keep_queue,
+                                    **({"fit": body.fit} if body.fit and c.aspect != "16:9" else {})))
+            if res.rowcount:
+                n += 1
+                executor.submit(run_render, c.id)
+        s.commit()
+    return {"started": n, "skipped": skipped}
 
 
 class ReelLangIn(BaseModel):
