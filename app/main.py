@@ -2280,7 +2280,7 @@ class FaceSizeIn(BaseModel):
 
 @app.get("/api/settings/face-size")
 def face_size_get():
-    return {"size": get_setting("thumb_face_size") or "S"}
+    return {"size": get_setting("thumb_face_size") or "S", "has_face": faces.DEFAULT_FACE.exists()}  # no 404 probe needed
 
 
 @app.post("/api/settings/face-size")

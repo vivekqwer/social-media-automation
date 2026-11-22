@@ -82,7 +82,12 @@ def model(stats: list, clips: list, now: datetime, min_n: int = MIN_N) -> dict:
     out = {"videos": len(rows), "channel_videos": len(old), "needed": min_n, "enough": len(rows) >= min_n,
            "usual": round(statistics.median(list(usual.values())), 1) if usual else None,
            "sources": [], "words": [], "lengths": [], "hours": [], "layouts": []}
-    if not out["enough"]:
+    if not out["enough"]:  # the real reason, with the real numbers
+        have = max((len(x) for x in by_dest.values()), default=0)
+        out["why"] = (f"your channel has {have} public video{'' if have == 1 else 's'} older than 2 days with numbers so far; "
+                      f"at least {min_n} are needed to know your usual views." if not usual else
+                      f"{len(rows)} of your uploaded clips {'is' if len(rows) == 1 else 'are'} older than 2 days with numbers "
+                      f"from YouTube so far; at least {min_n} are needed to compare.")
         return out
     likes = [r["like"] for r in rows if r["like"] is not None]
     like_all = statistics.median(likes) if likes else None
@@ -98,9 +103,9 @@ def model(stats: list, clips: list, now: datetime, min_n: int = MIN_N) -> dict:
         for k, rs in g.items():
             if len(rs) < min_n or (skip_common and len(rs) > 0.7 * len(rows)):
                 continue  # too few to say anything / a word in nearly every title says nothing
-            ratio = statistics.median(r["ratio"] for r in rs)
+            ratio = round(statistics.median(r["ratio"] for r in rs), 1)  # one decimal everywhere it is shown
             lk = [r["like"] for r in rs if r["like"] is not None]
-            res.append({"key": k, "label": label(k), "n": len(rs), "ratio": round(ratio, 2),
+            res.append({"key": k, "label": label(k), "n": len(rs), "ratio": ratio,
                         "vpd": round(statistics.median(r["vpd"] for r in rs), 1),
                         "like_rate": round(100 * statistics.median(lk), 2) if lk else None,
                         "verdict": "win" if ratio >= WIN else "weak" if ratio <= WEAK else "usual"})
@@ -367,7 +372,7 @@ def _say(m: dict, on: bool, changed: dict) -> list[str]:
     for e in m["sources"]:
         if e["verdict"] == "win":
             act = " — making more of them" if on and str(e["key"]) in changed else " — worth making more of them" if not on else ""
-            lines.append(f"Clips from “{e['label']}” get {e['ratio']:g}× more views than your usual{act}.")
+            lines.append(f"Clips from “{e['label']}” get {e['ratio']:g}× your usual views{act}.")
         elif e["verdict"] == "weak":
             act = " — making fewer of them" if on and str(e["key"]) in changed else ""
             lines.append(f"Clips from “{e['label']}” get only {e['ratio']:g}× your usual views{act}.")
