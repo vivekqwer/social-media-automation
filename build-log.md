@@ -409,3 +409,10 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Found: all sources said "paused: 62 clips already queued" — autopilot stopped at 30 waiting clips per channel, so the batch could only grow as uploads went out.
 - app/autopilot.py: `queue_cap()` = account setting "queue_cap" (10–300, usual 30); sources also wait while the disk has less than 0.7 GB free. app/learn.py uses the same number. Routes: GET /api/settings/queue-cap, POST /api/admin/queue-cap (Super Admin only). No dashboard control yet.
 - Test: test_queue_cap.py 10/10; test_acl_routes 19, test_acl 65, test_security 18, test_learn 68, test_channels 18.
+
+## 2026-11-22 — Task 66: 200 clips, one a day for 6 months, unattended (owner's request)
+- Owner: "all on my server today, schedule everything for 6 months, I will not look for 6 months."
+- Live settings (no code): queue cap 195 (5 already uploaded + 195 = 200); every source's upload time = 18:00 IST, so `_next_slot` gives one clip a day; the 62 ready clips were re-scheduled one a day from 25 Nov 2026 (18:00 IST) to 25 Jan 2027; new clips continue from 26 Jan.
+- Found: 4 of the 8 channel sources said "no new videos" — a source only looked at the newest videos_per_run×4 (20) uploads. app/youtube.py `api_list_video_ids` pages through the uploads; app/autopilot.py: when the newest are all used, the source goes back through up to 300 older uploads ("nothing new: taking older videos of this channel").
+- Test: test_older_videos.py 7/7; test_queue_cap 10, test_channels 18, test_multi 5, test_noncc 4.
+- Not done: the helper PC is the bottleneck (one clip in 4–9 minutes); more agents cannot speed it up.
