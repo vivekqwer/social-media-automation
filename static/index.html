@@ -1126,7 +1126,7 @@ async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');
   if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
 }
-const BKNAMES={projects:'Videos opened',clips:'Clips',channels:'Sources',destinations:'YouTube channels',workers:'Helper PCs',alerts:'Alerts',settings:'Settings'};
+const BKNAMES={projects:'Videos added (long videos the clips are cut from)',clips:'Clips (short videos made from them)',channels:'Sources (channels clips are taken from)',destinations:'YouTube channels (where clips are uploaded)',workers:'Helper PCs',alerts:'Messages for you (alerts)',settings:'Settings'};
 const bkSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';
 async function loadBackup(){let b;try{b=await api('/api/backup')}catch(e){return}
   $('#bk-list').innerHTML=b.files.length?'<div class="sm" style="font-weight:500;margin-bottom:4px">Kept on the server</div>'+b.files.map(f=>`<div class="row" style="justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--border)"><span class="sm">${esc(new Date(f.at).toLocaleString())} · ${f.kind==='safety'?'made before a restore':'daily'} · ${bkSize(f.size)}</span><span class="row" style="gap:6px"><a class="btn ghost sm" href="/api/backup/files/${encodeURIComponent(f.name)}">Download</a><button class="btn outline sm" data-bkr="${esc(f.name)}">Restore</button></span></div>`).join('')
@@ -1142,7 +1142,7 @@ function bkPreview(p){
   $('#bk-prev').innerHTML=`<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px">
     <b>What is in this backup</b><div class="sm mut">Made ${p.made_at?esc(new Date(p.made_at).toLocaleString()):'(date unknown)'}${p.brand?' · '+esc(p.brand):''}</div>
     ${(p.warnings||[]).map(w=>`<div class="alert bad" style="margin-top:8px">${ico('alert')}<span>${esc(w)}</span></div>`).join('')}
-    <table class="tbl sm" style="margin-top:8px"><thead><tr><th>What</th><th style="text-align:right">In the backup</th><th style="text-align:right">Now</th></tr></thead><tbody>${rows}<tr><td>Face photos</td><td style="text-align:right">${p.faces}</td><td></td></tr></tbody></table>
+    <table class="tbl sm" style="margin-top:8px"><thead><tr><th>What</th><th style="text-align:right">In the backup</th><th style="text-align:right">Now</th></tr></thead><tbody>${rows}<tr><td>Face photos</td><td style="text-align:right">${p.faces}</td><td style="text-align:right">${p.faces_now??''}</td></tr></tbody></table>
     ${(p.notes||[]).map(n=>`<div class="mut sm" style="margin-top:6px">${esc(n)}</div>`).join('')}
     <div class="sm" style="margin-top:8px">Restoring <b>replaces everything</b> in ${whose} system with this backup. A safety backup of what is there now is made first — it appears in the list below, so you can go back.</div>
     ${p.same_account&&p.signed?'':`<label class="row sm" style="gap:8px;margin-top:8px"><input type="checkbox" id="bk-other">Yes, put this backup here anyway</label>`}

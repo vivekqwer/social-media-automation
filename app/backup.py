@@ -41,6 +41,9 @@ MAX_UNPACKED = 300 * 1024 * 1024  # what it may grow to when unpacked (gzip bomb
 MAX_UPLOAD_USER = 20 * 1024 * 1024  # the same for customers: one upload must never be able to take the server down
 MAX_UNPACKED_USER = 50 * 1024 * 1024
 RATE = {"check": 6, "restore": 3}  # per customer account and hour
+BUSY = "The system is busy right now — nothing was changed. Try again in a minute."
+INT_RANGE = (-2 ** 31, 2 ** 31 - 1)  # Integer columns on PostgreSQL
+BIG_RANGE = (-2 ** 63, 2 ** 63 - 1)  # BigInteger
 NOT_YOURS = "This backup was not made by this server for your account. Ask the person who runs the system to restore it."
 MAX_ROWS = 500_000  # per table
 MAX_FACE = 3_000_000
@@ -139,9 +142,12 @@ def make() -> dict:
     tid = tenant.current()
     data = {"format": FORMAT, "version": VERSION, "made_at": utcnow().isoformat() + "Z", "tenant": tid, "brand": brand(tid),
             "app_commit": (os.getenv("RAILWAY_GIT_COMMIT_SHA") or "")[:40], "tables": {}}
-    with engine_for(tid).connect() as conn:
+    conn = engine_for(tid).connect()
+    if not IS_SQLITE:  # every table read from the same moment, even while jobs write
+        conn = conn.execution_options(isolation_level="REPEATABLE READ")
+    with conn, conn.begin():
         for t in tables():
-            rows = conn.execute(t.select()).mappings().all()
+            rows = conn.execute(t.select().order_by(*t.primary_key.columns)).mappings().all()
             data["tables"][t.name] = [{k: _value(v) for k, v in r.items()} for r in rows]
     data["counts"] = {k: len(v) for k, v in data["tables"].items()}
     faces = DATA_DIR / "faces"
@@ -316,6 +322,13 @@ def current_counts() -> dict:
         return {t.name: conn.execute(select(func.count()).select_from(t)).scalar() or 0 for t in tables()}
 
 
+def current_faces() -> int:
+    faces = DATA_DIR / "faces"
+    if not faces.exists():
+        return 0
+    return sum(1 for f in faces.glob("*.png") if FACE_RE.match(f.name) and f.stat().st_size < MAX_FACE)
+
+
 def preview(data: dict, is_super: bool) -> dict:
     """What the file contains and what restoring it would do (nothing is changed)."""
     tid = tenant.current()
@@ -324,7 +337,7 @@ def preview(data: dict, is_super: bool) -> dict:
     counts = {t.name: len(data["tables"].get(t.name) or []) for t in tables()}
     out = {"made_at": data.get("made_at"), "brand": data.get("brand") or "", "tenant": owner_of, "this_tenant": tid,
            "version": data.get("version", 0), "app_commit": data.get("app_commit") or "", "counts": counts,
-           "current": current_counts(), "faces": len(data.get("faces") or {}), "warnings": [], "same_account": owner_of == tid}
+           "current": current_counts(), "faces": len(data.get("faces") or {}), "faces_now": current_faces(), "warnings": [], "same_account": owner_of == tid}
     other = sorted(set(data["tables"]) - known - set(SKIP))
     if other:
         out["warnings"].append("Parts this version does not know are skipped: " + ", ".join(other[:10]) + ".")
@@ -376,13 +389,25 @@ def _default(col):
     return None
 
 
+def _has_nul(v) -> bool:
+    if isinstance(v, str):
+        return "\x00" in v
+    if isinstance(v, dict):
+        return any(_has_nul(k) or _has_nul(x) for k, x in v.items())
+    if isinstance(v, list):
+        return any(_has_nul(x) for x in v)
+    return False
+
+
 def _cell(table, col, v, i):
-    from sqlalchemy import JSON, Boolean, DateTime, Float, Integer, String
+    from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, Integer, String
 
     if v is None:
         return None
     where = f"the part “{table}”, row {i + 1}, “{col.name}”"
     t = col.type
+    if _has_nul(v):
+        raise BackupError(f"The file is damaged ({where} contains an invisible NUL character).")
     try:
         if isinstance(t, DateTime):
             dt = datetime.fromisoformat(str(v).replace("Z", "+00:00"))
@@ -396,7 +421,11 @@ def _cell(table, col, v, i):
         if isinstance(t, Integer):
             if isinstance(v, bool) or (isinstance(v, float) and not v.is_integer()):
                 raise ValueError
-            return int(v)
+            n = int(v)
+            lo, hi = BIG_RANGE if isinstance(t, BigInteger) else INT_RANGE
+            if not lo <= n <= hi:
+                raise BackupError(f"The file is damaged ({where} has a number that is too large: {str(n)[:30]}).")
+            return n
         if isinstance(t, Float):
             if isinstance(v, bool):
                 raise ValueError
@@ -425,6 +454,28 @@ def _rows(table, rows: list) -> list[dict]:
             raise BackupError(f"The file is damaged (the part “{table.name}”, row {i + 1} has no number).")
         out.append(row)  # columns the file has but this version does not are dropped
     return out
+
+
+def _check_links(prepared: dict):
+    """A row that points to another row (a clip to its project, …) must find it in the file — checked for every
+    foreign key of the tables, before anything is changed (PostgreSQL would refuse it half-way, SQLite would accept it)."""
+    names = {t.name for t in tables()}
+    for t in tables():
+        for fk in t.foreign_keys:
+            ref, ref_col, col = fk.column.table.name, fk.column.name, fk.parent.name
+            if ref not in names:
+                continue
+            have = {r.get(ref_col) for r in prepared.get(ref) or []}
+            for i, r in enumerate(prepared.get(t.name) or []):
+                v = r.get(col)
+                if v is not None and not hasattr(v, "compile") and v not in have:
+                    raise BackupError(f"The file is damaged (the part “{t.name}”, row {i + 1}: “{col}” is {v}, but there is no "
+                                      f"such row in the part “{ref}”). Nothing was changed.")
+
+
+def _busy(e) -> bool:
+    o = getattr(e, "orig", None)
+    return (getattr(o, "pgcode", None) or getattr(o, "sqlstate", None)) in ("55P03", "40P01") or "lock timeout" in str(e).lower()
 
 
 def _reset_sequences(conn, tid: int):
@@ -459,24 +510,17 @@ def restore(data: dict, is_super: bool) -> dict:
         safe = safety()
         prepared = {t.name: _rows(t, data["tables"].get(t.name) or []) for t in tables()}
         faces = _faces(data.get("faces") or {})
+        _check_links(prepared)
         settings = next(t for t in tables() if t.name == "settings")
         kept_uploaded = 0
-        with engine_for(tid).begin() as conn:  # all or nothing
-            keep = [dict(r) for r in conn.execute(settings.select()).mappings() if _protected(r["key"])]
-            if data.get("tenant") == tid:
-                kept_uploaded = _keep_uploaded(conn, prepared.get("clips") or [])
-            if not is_super:  # a file must never be able to add an approved helper (helper approval is a switch)
-                wk = next(t for t in tables() if t.name == "workers")
-                prepared["workers"] = [dict(r) for r in conn.execute(wk.select()).mappings()]
-            for t in reversed(tables()):
-                conn.execute(t.delete())
-            for t in tables():
-                rows = prepared[t.name]
-                if t.name == "settings":
-                    rows = [r for r in rows if not _protected(r["key"])] + keep
-                for i in range(0, len(rows), 1000):
-                    conn.execute(t.insert(), rows[i:i + 1000])
-            _reset_sequences(conn, tid)
+        from sqlalchemy.exc import DBAPIError
+
+        try:
+            kept_uploaded = _replace(tid, data, prepared, settings, is_super)
+        except DBAPIError as e:
+            if _busy(e):  # a row is held by another connection: give up instead of waiting forever
+                raise BackupError(BUSY) from e
+            raise
         try:
             _put_faces(faces)
         except OSError as e:  # the data is restored already; only the photos are missing
@@ -488,6 +532,32 @@ def restore(data: dict, is_super: bool) -> dict:
         jobs.end_restore(tid)
     _after(tid)
     return {"restored": {k: len(v) for k, v in prepared.items()}, "faces": len(faces), "safety": safe, "kept_uploaded": kept_uploaded}
+
+
+def _replace(tid: int, data: dict, prepared: dict, settings, is_super: bool) -> int:
+    """Delete this copy's rows and insert the file's, in one transaction (all or nothing)."""
+    from sqlalchemy import text
+
+    kept_uploaded = 0
+    with engine_for(tid).begin() as conn:
+        if not IS_SQLITE:
+            conn.execute(text("SET LOCAL lock_timeout = '10s'"))
+        keep = [dict(r) for r in conn.execute(settings.select()).mappings() if _protected(r["key"])]
+        if data.get("tenant") == tid:
+            kept_uploaded = _keep_uploaded(conn, prepared.get("clips") or [])
+        if not is_super:  # a file must never be able to add an approved helper (helper approval is a switch)
+            wk = next(t for t in tables() if t.name == "workers")
+            prepared["workers"] = [dict(r) for r in conn.execute(wk.select()).mappings()]
+        for t in reversed(tables()):
+            conn.execute(t.delete())
+        for t in tables():
+            rows = prepared[t.name]
+            if t.name == "settings":
+                rows = [r for r in rows if not _protected(r["key"])] + keep
+            for i in range(0, len(rows), 1000):
+                conn.execute(t.insert(), rows[i:i + 1000])
+        _reset_sequences(conn, tid)
+    return kept_uploaded
 
 
 def _keep_uploaded(conn, rows: list) -> int:
