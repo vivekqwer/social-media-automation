@@ -2336,7 +2336,7 @@ def queue_cap_get():
     return {"cap": autopilot.queue_cap(), "usual": autopilot.MAX_QUEUED_PER_DEST, "range": list(autopilot.QUEUE_CAP_RANGE)}
 
 
-@app.post("/api/settings/queue-cap")
+@app.post("/api/admin/queue-cap")
 def queue_cap_set(body: QueueCapIn):
     """How many clips may wait for one YouTube channel before the sources pause (usually 30). Raising it makes a large
     batch at once; the sources also wait while the server's disk is almost full."""
