@@ -111,6 +111,8 @@ class Clip(Base):
     title = Column(String(200))
     description = Column(Text)
     tags = Column(JSON, default=list)
+    kw = Column(JSON)  # keyword helper: what was chosen, from where and when {at, lead, net, note, items: [{k, src, hot, used}]}
+    meta_edited = Column(Boolean)  # the owner changed title/description/tags by hand: the keyword helper leaves them alone
     publish_at = Column(DateTime)  # UTC, naive
     destination_id = Column(Integer)
     attempted_at = Column(DateTime)  # last upload attempt (quota accounting)

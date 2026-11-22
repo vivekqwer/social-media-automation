@@ -34,6 +34,7 @@ from .jobs import executor
 from .keywords import suggest
 from .metadata import auto_metadata
 from .metadata import build as build_meta
+from .metadata import freshen_clip, mark_hand_edit, propose as propose_meta
 from .policy import check_edit
 from .quick import quick_run
 from .render import apply_short_cover, run_render
@@ -837,6 +838,7 @@ def update_clip(cid: int, body: ClipUpdate):
         before = _render_sig(c)
         for k, v in body.model_dump(exclude_unset=True).items():
             if getattr(c, k) != v:
+                mark_hand_edit(c, k, v)  # title/description/tags changed by hand: the keyword helper leaves them alone
                 setattr(c, k, v)
         if (c.end or 0) <= (c.start or 0):
             raise HTTPException(400, "end must be greater than start")
@@ -1079,16 +1081,49 @@ def clip_video(cid: int):
         return FileResponse(c.output_path, media_type="video/mp4")
 
 
-@app.post("/api/clips/{cid}/metadata")
-def clip_metadata(cid: int, body: MetaIn):
+# ---------- keyword helper: the most-typed search phrases, put into title, description and tags ----------
+class ClipKeywordsIn(BaseModel):
+    extra_keywords: list[str] = Field(default_factory=list, max_length=20)  # the owner's own picks: they always lead
+    topic: str | None = Field(None, max_length=120)  # the owner's own topic words (None = keep the saved ones)
+
+
+def _keyword_clip(cid: int):
     with SessionLocal() as s:
-        _get(s, Clip, cid)
-    return auto_metadata(cid, body.extra_keywords)
+        c = _get(s, Clip, cid)
+        if c.status in ("uploading", "uploaded"):
+            raise HTTPException(409, "This video is already on YouTube, so its title, description and tags "
+                                     "can no longer be changed from here.")
+
+
+@app.post("/api/clips/{cid}/metadata")
+def clip_metadata(cid: int, body: ClipKeywordsIn):
+    """'Use these': research the keywords, write title, description and tags from them and save."""
+    _keyword_clip(cid)
+    return auto_metadata(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic)
+
+
+@app.post("/api/keywords/clip/{cid}")
+def clip_keywords_preview(cid: int, body: ClipKeywordsIn):
+    """'Find better keywords': research now and show what would be written. Nothing is saved."""
+    _keyword_clip(cid)
+    return propose_meta(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic, fresh=True)
 
 
 @app.get("/api/keywords")
-def keywords(q: str):
-    return {"keywords": suggest(q)}
+def keywords(q: str = Query("", max_length=200)):
+    """Keyword research for a topic: the phrases people type into YouTube search, most typed first, in groups.
+    Free (YouTube's own search suggestions, saved for a day); no search-volume numbers exist, so none are shown."""
+    from .keywords import research
+
+    q = " ".join(q.split())
+    if len(q) < 2:
+        raise HTTPException(400, "Type a topic first, for example: street food india")
+    r = research(q)
+    if r["net"] == "offline":
+        raise HTTPException(502, "YouTube's search suggestions could not be reached just now. Please try again in a few minutes.")
+    r["note"] = ("YouTube could not be reached just now — these are the results saved earlier." if r["net"] == "stale"
+                 else "" if r["keywords"] else "Nobody seems to type this. Try fewer or simpler words.")
+    return r
 
 
 @app.get("/api/voices")
@@ -1098,6 +1133,7 @@ def voices():
 
 @app.post("/api/clips/{cid}/schedule")
 def schedule(cid: int, body: ScheduleIn):
+    freshen_clip(cid)  # keywords older than a day are researched again before it goes up (never a hand-edited clip)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
@@ -1188,6 +1224,7 @@ def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     d = to_dict(c)
     if not full:
         d.pop("description", None)
+        d.pop("kw", None)  # the chosen keywords are only needed in the editor
     d["video_id"] = p.video_id if p else None
     d["source_title"] = p.title if p else None
     d["source_channel"] = p.channel if p else None
@@ -1398,6 +1435,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
 @app.post("/api/clips/{cid}/approve")
 def approve_clip(cid: int, body: ApproveIn):
     """Review-first flow: queue a rendered clip for upload (next free slot unless a time is given)."""
+    freshen_clip(cid)  # keywords older than a day are researched again before it goes up (never a hand-edited clip)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
