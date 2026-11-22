@@ -147,6 +147,7 @@ class Clip(Base):
     cta_on = Column(Boolean)  # small "like and subscribe" reminder near the end of the video (None/True = on)
     reuploaded_as = Column(Integer)  # this video was deleted from YouTube and uploaded again as that clip
     removed_at = Column(DateTime)  # deleted from YouTube and removed from the dashboard by the owner (kept as history)
+    live_noted = Column(Boolean)  # the owner was told this video went live
     meta_done = Column(Boolean, default=False)  # also posted to Instagram / Facebook
     meta_result = Column(JSON)
     thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low

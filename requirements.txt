@@ -17,3 +17,4 @@ numpy>=1.26
 onnxruntime>=1.18
 reportlab>=4
 opencv-python-headless>=4.10
+segno>=1.6

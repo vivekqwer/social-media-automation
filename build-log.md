@@ -317,3 +317,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Disk free space in /api/overview (for big batches).
 - Tests: 780 pass; 3 known stale expectations remain (test_mailnotify, test_trend3 x2).
 - Disk: the Railway volume is 4.8 GB. A queued, rendered clip now keeps only out.mp4 + thumbnail (the downloaded part and body.mp4 are removed after an hour; re-fetched by itself if the clip is edited), so ~200 queued clips fit. Fixed: the clean-up's age used a naive-UTC .timestamp() (wrong outside UTC), and it deleted helper-made reel.mp4 sources.
+
+## 2026-11-22 — Task 53: phone notifications without passwords + live / 10-clips / views / subscribers / needs-you
+- app/phone.py: the free ntfy app. My channels → "Phone notifications": Set up → QR code (secret topic per account), Send a test, Turn off, New QR code. Every existing alert (telegram.notify) is also pushed to the phone; Gmail stays the fallback when neither Telegram nor the phone is set up.
+- events() every 10 minutes per account: video went live (phone + always mail), every 10 new clips scheduled, view milestones (100 … 10M), new subscribers, a new "bad" Dashboard problem (phone + mail, once). The first run only records the current state.
+- New column Clip.live_noted; segno (QR) added to requirements. ACL lines for /api/phone*. Tests 13/13; related suites pass.

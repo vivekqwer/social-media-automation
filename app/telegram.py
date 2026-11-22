@@ -74,9 +74,18 @@ def disconnect():
         set_setting(k, "")
 
 
-def notify(text: str, buttons: list | None = None):
-    """Send a message to the owner (Telegram, or the owner's own Gmail when Telegram is not set up). Never raises."""
+def notify(text: str, buttons: list | None = None, push_phone: bool = True):
+    """Send a message to the owner (Telegram, or the owner's own Gmail when Telegram is not set up; and the phone app
+    when it is set up). Never raises."""
+    try:
+        from . import phone
+
+        pushed = phone.push(text) if push_phone and phone.enabled() else False
+    except Exception:  # noqa: BLE001
+        pushed = False
     if not enabled():
+        if pushed:
+            return  # the phone has it; the inbox is kept for what must be read later (see phone._say mail=True)
         try:
             from .gmail import notify_owner
 

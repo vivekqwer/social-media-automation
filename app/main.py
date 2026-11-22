@@ -2005,6 +2005,38 @@ def reminder_set(body: ReminderIn):
     return reminder.save(body.on, body.preset, custom)
 
 
+class PhoneIn(BaseModel):
+    action: Literal["setup", "new", "on", "off"]
+
+
+@app.get("/api/phone")
+def phone_get():
+    from . import phone
+
+    return phone.status()
+
+
+@app.post("/api/phone")
+def phone_set(body: PhoneIn):
+    from . import phone
+
+    if body.action in ("setup", "new"):
+        return phone.setup(new=body.action == "new")
+    set_setting("ntfy_on", "1" if body.action == "on" else "0")
+    return phone.status()
+
+
+@app.post("/api/phone/test")
+def phone_test():
+    from . import phone
+
+    if not phone.enabled():
+        raise HTTPException(400, "Set up phone notifications first.")
+    if not phone.push("If you can read this on your phone, notifications work.", title="Raji Studio test", tags="white_check_mark"):
+        raise HTTPException(502, "The notification service could not be reached. Try again in a minute.")
+    return {"ok": True}
+
+
 @app.get("/api/settings/pexels")
 def get_pexels():
     return {"set": bool(_secret_setting("pexels_key"))}
