@@ -10,7 +10,11 @@ Rules:
   10 minutes; the video's real state is checked first, 1 unit).
 * Never twice: comment_id is kept; the claim "waiting -> posting" is atomic; and before posting, the video's newest
   comments are read once (1 unit) — one written by the channel itself is taken as the first comment.
-* Uploads come first: a comment waits when the day's YouTube budget is needed for the uploads still to go up.
+* Uploads come first: a comment waits when the day's YouTube budget is needed for the uploads still to go up — of every
+  account on that budget (the owner and each customer using the server's Google project share one).
+* Account switch off: nothing is posted; comments already waiting stay waiting (posted if the switch is turned on again
+  within 14 days, else quietly "off"); videos uploaded while it is off get none. A clip's own "on" does not override it
+  (as with the like & subscribe reminder). The 14 days count from the publish time.
 * A login made before comments were added lacks the scope: "no permission", no call to Google; the comment goes out by
   itself after the channel is connected once more (for videos of the last two weeks).
 * Network trouble / YouTube busy: tried again (5 times, longer gaps). Comments switched off, made for kids, refused:
@@ -178,11 +182,51 @@ def _reason(e) -> tuple[int, str, str]:
     return status, reason, msg
 
 
-def uploads_waiting() -> int:
-    """Uploads that still want today's budget: queued clips due before the next reset (and the lead window)."""
-    from .config import UPLOAD_LEAD_HOURS
-    from . import quota
+def budget_tenants() -> list[int]:
+    """Every copy that spends from the same YouTube budget as the running one (the rule of quota._BudgetSession):
+    a customer with their own Google keys has their own budget; the owner and every customer without own keys
+    (using the server's project, e.g. "Share my Google project") share the owner's."""
+    from . import tenant
 
+    cur = tenant.current()
+    if cur != tenant.OWNER and get_setting("google_client_id"):
+        return [cur]
+    try:
+        from .accounts import active_tenants
+
+        ids = active_tenants()
+    except Exception:  # noqa: BLE001  (accounts table unreachable: at least the owner and this copy)
+        ids = [tenant.OWNER]
+    if cur not in ids:
+        ids.append(cur)
+    out = []
+    for tid in ids:
+        if tid == tenant.OWNER:
+            out.append(tid)
+            continue
+        try:
+            with tenant.use(tid):
+                if not get_setting("google_client_id"):
+                    out.append(tid)
+        except Exception:  # noqa: BLE001  (an unreadable copy: count it, so uploads stay safe)
+            out.append(tid)
+    return out
+
+
+def _uploads_due_here() -> int:
+    """This copy's uploads that will really go up before the next reset: queued clips due by then on channels that are
+    not paused, no more than the account's uploads-a-day limit leaves for today, none while its uploads are paused."""
+    from . import acl, quota
+    from .config import MAX_UPLOADS_PER_DAY, UPLOAD_LEAD_HOURS
+    from .scheduler import _pacific_midnight
+
+    try:
+        if acl.upload_block():
+            return 0
+        cap = acl.uploads_cap(MAX_UPLOADS_PER_DAY)
+    except Exception:  # noqa: BLE001
+        cap = MAX_UPLOADS_PER_DAY
+    now = utcnow()
     with SessionLocal() as s:
         paused = [d.id for d in s.query(Destination.id).filter(Destination.paused.is_(True))]
         until = quota.next_reset() + timedelta(hours=UPLOAD_LEAD_HOURS)
@@ -190,7 +234,24 @@ def uploads_waiting() -> int:
                                  (Clip.publish_at.is_(None)) | (Clip.publish_at <= until))
         if paused:
             q = q.filter((Clip.destination_id.is_(None)) | (Clip.destination_id.notin_(paused)))
-        return q.count()
+        due = q.count()
+        done_today = s.query(Clip).filter(Clip.attempted_at >= _pacific_midnight(now)).count()
+    return min(due, max(0, cap - done_today))
+
+
+def uploads_waiting() -> int:
+    """Uploads that still want today's budget, over every account that shares it (the owner's too when the budget is
+    the owner's project)."""
+    from . import tenant
+
+    total = 0
+    for tid in budget_tenants():
+        try:
+            with tenant.use(tid):
+                total += _uploads_due_here()
+        except Exception as e:  # noqa: BLE001
+            log.warning("uploads waiting for %s: %s", tid, str(e)[:150])
+    return total
 
 
 def _notify(title: str, video_id: str):
@@ -248,17 +309,30 @@ def post_due(only: int | None = None) -> dict:
     cfg = settings()
     by_dest: dict = {}
     for c in rows:
-        if (c.attempted_at or c.created_at or now) < oldest:
+        # 14 days from when the video goes public (a video scheduled weeks ahead must not run out before then)
+        start = max(x for x in (c.attempted_at or c.created_at or now, c.publish_at) if x is not None)
+        if start < oldest:
+            if not cfg["on"]:  # held only because the account switched comments off: simply none for this video
+                _set(c.id, comment_state="off")
+                continue
             _set(c.id, comment_state="failed: the video did not become public in time, so no comment was posted"
                  if (c.comment_state or "").startswith("waiting") else
                  "failed: the channel was not connected again in time to allow comments")
             done["failed"] += 1
             continue
-        if c.publish_at and c.publish_at > now or (c.comment_next and c.comment_next > now):
+        if not cfg["on"] or c.publish_at and c.publish_at > now or (c.comment_next and c.comment_next > now):
+            # account switch off (My channels → First comment): nothing is posted, the comment keeps waiting and goes
+            # out if the switch is turned on again within the 14 days. A clip's own "on" does not override it.
             done["waiting"] += 1
             continue
         by_dest.setdefault(c.destination_id, []).append(c)
     skip_dest = set()
+    _need: list = []
+
+    def uploads_need() -> int:  # every account on this budget, counted once per run
+        if not _need:
+            _need.append(uploads_waiting())
+        return _need[0]
     for did, clips in by_dest.items():
         d = dests.get(did)
         if not d:
@@ -270,7 +344,7 @@ def post_due(only: int | None = None) -> dict:
                 done["no_permission"] += 1
             continue
         try:  # is each video really public now? (scheduled ones flip at their time; new projects may stay private)
-            if not quota.can_comment(uploads_waiting()):
+            if not quota.can_comment(uploads_need()):
                 done["waiting"] += sum(1 for _ in clips)
                 break
             live = youtube.video_status(did, [c.youtube_id for c in clips])
@@ -299,7 +373,7 @@ def post_due(only: int | None = None) -> dict:
                 _set(c.id, comment_state="waiting: the video is not public yet", comment_next=now + timedelta(minutes=30))
                 done["waiting"] += 1
                 continue
-            if not quota.can_comment(uploads_waiting()):  # the budget is needed for uploads: try after the reset
+            if not quota.can_comment(uploads_need()):  # the budget is needed for uploads: try after the reset
                 done["waiting"] += 1
                 skip_dest.add(did)
                 break
