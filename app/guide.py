@@ -147,7 +147,8 @@ HELP = [
      "video link. Uploads always come first: when today's YouTube allowance is needed for uploads, comments wait.",
      "To pin: open the link → comments → tap ⋮ next to your comment → Pin. If a clip says “no permission”: My channels → "
      "Connect a YouTube channel → choose the same channel and tick every box; waiting comments then go out by themselves. "
-     "Words: My channels → “First comment”; one clip: open it → Details."),
+     "Words: My channels → “First comment”; one clip: open it → Details. Switched off there, nothing is posted (not even "
+     "for one clip); comments already waiting are held and go out if you switch it on again within 14 days."),
     ("My thumbnail does not show on my Shorts",
      "YouTube shows a frame of the video for Shorts (on the channel's Shorts tab and in the feed), not the uploaded thumbnail — nobody can choose it through the API. So every Short carries the title and your small face at the top of every frame, and the thumbnail itself is shown for the first moment of the video.",
      "Nothing. To choose the exact picture yourself: YouTube app on your phone → the Short → Edit → thumbnail → pick the first frame. To switch the title band off for one clip: open it → Trim & look. Face size: My channels → “Size on thumbnails”."),

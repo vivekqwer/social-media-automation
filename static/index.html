@@ -379,6 +379,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
                 <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
             <div class="card"><div class="ch"><div><h3>First comment</h3><p>After every upload your channel writes the first comment under the new video, as soon as the video is public (a scheduled video: at its publish time, within about 10 minutes). <b>YouTube does not let any app pin a comment</b> — so you get a message with the video link: open it, tap ⋮ next to your comment → Pin.</p></div><span class="badge" id="fc-badge">…</span></div>
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="fc-on" checked><i></i></span>Post a first comment on my new videos</label>
+                <span class="mut sm" style="display:block;margin-top:4px">Off: nothing is posted, not even for single clips. Comments that were still waiting are held and go out if you switch it on again within 14 days; videos uploaded while it is off get none.</span>
                 <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Comment<select id="fc-preset"></select></label><button class="btn" id="fc-save">Save</button></div>
                 <label class="f hide" id="fc-custom-wrap" style="margin-top:8px">Your own comment (up to 500 characters, emoji are fine). These words are filled in for each video: {title} {channel} {hashtags}<textarea id="fc-custom" maxlength="500" style="min-height:70px" placeholder="Which one would you try first? 👇"></textarea></label>
                 <div class="mut sm" style="margin-top:8px">Preview: <span id="fc-prev" style="color:var(--fg);white-space:pre-wrap"></span></div>
@@ -1191,6 +1192,7 @@ function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   if(done)n=`Posted ✔ — <a href="https://youtu.be/${esc(c.youtube_id)}" target="_blank" rel="noopener">open the video</a> and pin it: tap ⋮ next to the comment → Pin. (YouTube does not let apps pin comments.)`;
   else if(st==='no permission')n='Not posted yet: this channel was connected before comments were added. Reconnect it once (My channels → Connect a YouTube channel → the same channel) — the comment is then posted by itself.';
   else if(st.startsWith('failed'))n='Not posted: '+esc(st.slice(7).trim())+'. Press Save comment to try once more.';
+  else if(st.startsWith('waiting')&&c.comment_account_on===false)n='Held: first comments are switched off for your account (My channels → First comment). It is posted if you switch them on again within 14 days.';
   else if(st.startsWith('waiting'))n=st.length>8?'Waiting: '+esc(st.slice(8).trim())+'.':'Waiting — posted within about 10 minutes after the video is public.';
   else if(st==='posting')n='Posting now…';
   else if(st==='off'&&c.status==='uploaded')n='No comment for this video. Switch it on and press Save comment to post one now.';
