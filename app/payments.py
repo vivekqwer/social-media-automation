@@ -170,7 +170,7 @@ def set_price(plan: str, price: int | None, period: str = "monthly", description
     if period not in PERIODS:
         raise ValueError("Choose monthly, yearly or one-time.")
     if price is not None and not 0 <= int(price) <= MAX_PRICE:
-        raise ValueError(f"The price must be between ₹0 and ₹{MAX_PRICE:,}.")
+        raise ValueError(f"The price must be between ₹0 and {inr(MAX_PRICE)}.")
     p = prices()
     for n in [n for n in p if n.lower() == plan.lower()]:
         p.pop(n)
@@ -195,14 +195,28 @@ def with_prices(overview: dict) -> dict:
     return overview
 
 
+def inr(rupees) -> str:
+    """₹ in the Indian way (₹2,499 · ₹1,00,000), the same as the page's inr()."""
+    n = round(float(rupees or 0), 2)
+    whole, paise = int(n), round((n - int(n)) * 100)
+    d = str(whole)
+    head, tail = d[:-3], d[-3:]
+    groups = []
+    while head:
+        groups.insert(0, head[-2:])
+        head = head[:-2]
+    return "₹" + "".join(g + "," for g in groups) + tail + (f".{paise:02d}" if paise else "")
+
+
 def _includes(plan: str) -> dict:
-    """What a plan gives, from its limits (empty = no limit)."""
+    """What a plan gives, from its limits (empty = no limit). channels None = the plan leaves the account's channel
+    limit as it is (acl.apply_plan only sets it when the plan has one)."""
     from . import acl
 
     cfg = acl.config()
     eff = acl._resolve({"plan": plan}, cfg)
     ch = (cfg["plans"].get(plan) or {"limits": {}})["limits"].get("channels")
-    return {"channels": ch or 1, **{k: eff["limits"].get(k) for k in acl.LIMIT_KEYS}}
+    return {"channels": ch or None, **{k: eff["limits"].get(k) for k in acl.LIMIT_KEYS}}
 
 
 def catalog(account_id: int | None) -> dict:
@@ -400,8 +414,6 @@ def _expiry(a: Account, plan: str, period: str):
 
 def mark_paid(order_id: str, payment_id: str, via: str) -> dict:
     """Mark an order paid and put its plan on the account — once, however often this is called."""
-    from . import acl
-
     now = utcnow()
     with CoreSession() as s:
         res = s.execute(update(Payment).where(Payment.order_id == order_id, Payment.status != "paid")
@@ -413,33 +425,73 @@ def mark_paid(order_id: str, payment_id: str, via: str) -> dict:
     a = _account(row.account_id)
     if not a:
         _note(order_id, "the account is gone — refund it in Razorpay")
-        _tell_owner(f"💰 ₹{row.amount / 100:,.0f} received for an account that no longer exists (order {order_id}). Refund it in Razorpay.")
+        _tell_owner(f"💰 {inr(row.amount / 100)} received for an account that no longer exists (order {order_id}). Refund it in Razorpay.")
         return {"ok": True, "applied": False}
-    expires = _expiry(a, row.plan, row.period)
     test = "[TEST — no real money] " if row.mode == "test" else ""
+    out = _apply_paid(a, row.plan, row.period, row.amount, test, "online")
+    if not out.get("applied"):
+        _note(order_id, "the plan was deleted before the payment — put the customer on a plan by hand")
+    return out
+
+
+def _apply_paid(a: Account, plan: str, period: str, amount: int, test: str, how: str) -> dict:
+    """Put a paid plan on an account (online payment or a UPI payment the Super Admin allowed): what the Super Admin
+    restricted stays, the end date and the channel limit to give back at the end are remembered, the open request is
+    answered, everyone is told."""
+    from . import acl
+
+    expires = _expiry(a, plan, period)
     # the channel limit given back when this paid period ends: the one from before the FIRST payment of the period
     running = bool(a.paid_plan and (a.plan_expires is None or a.plan_expires > utcnow()))
     before = a.limit_before_pay if running and a.limit_before_pay else (a.channel_limit or 1)
     try:
-        acl.apply_plan(a.id, row.plan, keep_restrictions=True)  # what the Super Admin switched off stays off
+        acl.apply_plan(a.id, plan, keep_restrictions=True)  # what the Super Admin switched off stays off
     except (ValueError, KeyError):
-        _note(order_id, "the plan was deleted before the payment — put the customer on a plan by hand")
-        _tell_owner(f"💰 {test}₹{row.amount / 100:,.0f} received from {a.brand or a.name} ({a.email}), but the plan “{row.plan}” "
+        _tell_owner(f"💰 {test}{inr(amount / 100)} received from {_e(a.brand or a.name)} ({_e(a.email)}), but the plan “{_e(plan)}” "
                     "no longer exists. Put them on a plan by hand (Users → Access).")
         return {"ok": True, "applied": False}
     with CoreSession() as s:
         acc = s.get(Account, a.id)
         acc.plan_expires, acc.expiry_warned = expires, None
-        acc.paid_plan, acc.limit_before_pay = row.plan, before
+        acc.paid_plan, acc.limit_before_pay = plan, before
         if acc.upgrade:
             acc.upgrade = None  # an open "I have paid" request is answered by this payment
         s.commit()
     acl.invalidate()
     until = f" until {expires:%d %b %Y}" if expires else ""
-    acl.record(a.id, "system", "payment", f"{test}Paid ₹{row.amount / 100:,.0f} online — plan “{row.plan}”{until}", a.tenant_id)
-    _tell_owner(f"💰 {test}₹{row.amount / 100:,.0f} received from {_e(a.brand or a.name)} — plan “{_e(row.plan)}” applied{until}.")
-    _tell_customer(a, f"✅ Payment received: ₹{row.amount / 100:,.0f}. Your plan “{_e(row.plan)}” is active{until}. Thank you!")
-    return {"ok": True, "applied": True, "plan": row.plan, "expires": expires.isoformat() + "Z" if expires else None}
+    acl.record(a.id, "system" if how == "online" else "super", "payment",
+               f"{test}Paid {inr(amount / 100)} {how} — plan “{plan}”{until}", a.tenant_id)
+    if how == "online":
+        _tell_owner(f"💰 {test}{inr(amount / 100)} received from {_e(a.brand or a.name)} — plan “{_e(plan)}” applied{until}.")
+    _tell_customer(a, f"✅ Payment received: {inr(amount / 100)}. Your plan “{_e(plan)}” is active{until}. Thank you!")
+    return {"ok": True, "applied": True, "plan": plan, "expires": expires.isoformat() + "Z" if expires else None}
+
+
+def allow_manual(account_id: int) -> dict:
+    """The Super Admin checked a customer's UPI payment for the plan they asked for ("I have paid ₹X"): the plan is put
+    on exactly like an online payment (restrictions kept, ends on time) and a row is added to the payments list."""
+    a = _account(account_id)
+    req = (a.upgrade or {}) if a else {}
+    if not a or not req.get("plan"):
+        raise ValueError("There is no open plan request for this account.")
+    from . import acl
+
+    name = acl._plan_name(acl.config(), req["plan"])
+    if not name:
+        raise ValueError(f"The plan “{req['plan']}” no longer exists. Put the customer on a plan by hand (Access).")
+    pr = price_of(name) or {}
+    period = req.get("period") or pr.get("period") or "monthly"
+    amount = int(req.get("price") or pr.get("price") or 0) * 100
+    out = _apply_paid(a, name, period, amount, "", "by UPI")
+    if not out.get("applied"):
+        raise ValueError("The plan could not be put on. Put the customer on a plan by hand (Access).")
+    now = utcnow()
+    with CoreSession() as s:
+        s.add(Payment(account_id=a.id, plan=name, amount=amount, currency="INR", period=period,
+                      order_id=f"manual_{a.id}_{int(now.timestamp() * 1000)}", status="paid", via="manual",
+                      note=("UPI: " + (req.get("message") or "no reference"))[:300], created_at=now, paid_at=now))
+        s.commit()
+    return out
 
 
 def _note(order_id: str, text: str):

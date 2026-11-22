@@ -193,6 +193,7 @@ ROUTES = [
     ("GET", "/api/admin/users/{aid}/access", SUPER, None),
     ("POST", "/api/admin/users/{aid}/access", SUPER, None),
     ("POST", "/api/admin/users/{aid}/plan", SUPER, None),
+    ("POST", "/api/admin/users/{aid}/allow-plan", SUPER, None),
     ("POST", "/api/admin/users/{aid}/control", SUPER, None),
     ("DELETE", "/api/admin/users/{aid}/channels/{did}", SUPER, None),
     ("POST", "/api/admin/users/{aid}/delete-data", SUPER, None),
