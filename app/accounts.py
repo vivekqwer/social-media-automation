@@ -13,7 +13,7 @@ import re
 import secrets
 import time
 
-from sqlalchemy import JSON, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from . import tenant
@@ -45,6 +45,9 @@ class Account(CoreBase):
     access = Column(JSON)
     plan_expires = Column(DateTime)  # a paid plan with a period ends here (app/payments.py); empty = it does not end
     expiry_warned = Column(DateTime)  # the end date the customer was already warned about (3 days before)
+    paid_plan = Column(String(40))  # the plan the running payment is for; the end only acts while the account is still on it
+    limit_before_pay = Column(Integer)  # channel limit before the first payment of this paid period (given back at the end)
+    limit_by_hand = Column(Boolean)  # the Super Admin set the channel limit by hand: a payment's end leaves it alone
     session_gen = Column(String(20), default="0")  # changes on logout / password change: old cookies stop working
     terms_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

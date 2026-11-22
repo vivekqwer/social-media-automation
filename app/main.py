@@ -546,6 +546,7 @@ def admin_edit(aid: int, body: UserEdit):
         acl.record(aid, "super", "admin.account", "Blocked the account (signed out at once)" if data["status"] == "blocked"
                    else "Unblocked the account", acc.tenant_id)
     if data.get("channel_limit") and data["channel_limit"] != (acc.channel_limit or 1):
+        payments.limit_set_by_hand(aid)  # a paid plan's end leaves this limit as the Super Admin set it
         acl.record(aid, "super", "admin.switch", f"YouTube channels: {acc.channel_limit or 1} → {data['channel_limit']}", acc.tenant_id)
     if body.close_request:
         acl.record(aid, "super", "admin.account", "Closed the request for more channels", acc.tenant_id)
@@ -827,7 +828,9 @@ def admin_access_set(aid: int, body: AccessIn):
 
 @app.post("/api/admin/users/{aid}/plan")
 def admin_access_plan(aid: int, body: UserPlanIn):
-    return _acl_call(acl.apply_plan, aid, body.plan)
+    out = _acl_call(acl.apply_plan, aid, body.plan)
+    payments.taken_over(aid)  # the Super Admin decides now: a running paid plan no longer ends by itself
+    return out
 
 
 @app.post("/api/admin/users/{aid}/control")
@@ -2903,6 +2906,10 @@ def guide_errors_clear():
 def health():
     items, now = [], utcnow()
     items += acl.health_items()  # what the administrator paused, switched off or limited for this account
+    if tenant.current() == tenant.OWNER and payments.enabled() and payments.mode() == "test":
+        items.append({"level": "warn", "key": "pay_test_mode", "fix": None,
+                      "text": "Online payment is in TEST mode — customers can get plans with test cards. Save your live keys "
+                              "(Users → Online payment) before selling."})
     with SessionLocal() as s:
         dests = s.query(Destination).order_by(Destination.id).all()
         if not dests:
