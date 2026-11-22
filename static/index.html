@@ -312,10 +312,24 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <section id="p-users" class="hide">
         <div class="page-h"><div><h1>Users</h1><div class="desc">People who use this system. Each one has a private copy: their own channels, sources, clips, mails and settings. Nobody sees anybody else's data.</div></div>
           <div class="row"><a class="btn outline sm" href="/register" target="_blank">Open the sign-up page</a><button class="btn outline sm" id="us-test">Check that copies are separate</button></div></div>
-        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>How customers pay for more channels</h3><p>Shown to a customer when they ask for more channels. You check the payment yourself, then raise their limit below.</p></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>How customers pay for more channels</h3><p>Shown to a customer when they ask for more channels (also when online payment below is set up, as a second way to pay). You check the payment yourself, then raise their limit below.</p></div></div>
           <div class="cb"><div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Your UPI ID / account<input id="pay-upi" maxlength="100" placeholder="name@upi"></label><label class="f grow">Price<input id="pay-price" maxlength="100" placeholder="₹499 per extra channel, per month"></label></div>
             <label class="f" style="margin-top:8px">What the customer should do<input id="pay-text" maxlength="1000" placeholder="Pay, then write the payment reference in the request."></label>
             <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn sm" id="pay-save">Save</button></div></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Online payment (Razorpay)</h3><p>Customers pay for a plan with UPI, card or net banking, and the plan is switched on by itself. Without keys, customers see the UPI steps above.</p></div><span class="badge outline" id="rz-badge">…</span></div>
+          <div class="cb"><div class="sm" id="rz-state">…</div>
+            <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:10px"><label class="f grow">Key ID<input id="rz-id" maxlength="60" autocomplete="off" placeholder="rzp_test_… or rzp_live_…"></label><label class="f grow">Key Secret<input id="rz-secret" type="password" maxlength="200" autocomplete="new-password" placeholder="empty = keep the saved one"></label><label class="f grow">Webhook secret<input id="rz-wh" type="password" maxlength="200" autocomplete="new-password" placeholder="empty = keep the saved one"></label></div>
+            <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn ghost sm" id="rz-clear">Remove keys</button><button class="btn outline sm" id="rz-check">Check keys</button><button class="btn sm" id="rz-save">Save</button></div>
+            <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Step by step: where to find the keys (no coding)</summary>
+              <ol class="sm" style="margin:8px 0;padding-left:18px;line-height:1.8">
+                <li>Sign in at <b>dashboard.razorpay.com</b>. At the top, switch to <b>Test mode</b> to try everything without real money first. <b>Live mode</b> works after Razorpay has activated your account (KYC).</li>
+                <li>Open <b>Account &amp; Settings → API Keys</b> (on older screens: Settings → API Keys) and press <b>Generate Key</b>. Copy the <b>Key ID</b> and the <b>Key Secret</b> into the boxes above. The secret is shown only once — if you lose it, generate a new key.</li>
+                <li>Open <b>Account &amp; Settings → Webhooks</b> and press <b>Add New Webhook</b>.<br>Webhook URL: <code id="rz-url" style="user-select:all">…</code> <button class="btn ghost sm" id="rz-copy">Copy</button><br>Secret: make up a long password (20 or more letters and numbers) and type the same one into <b>Webhook secret</b> above.<br>Active events: tick <b>payment.captured</b> and <b>order.paid</b> (you may also tick payment.failed). Press Create / Save.</li>
+                <li>Press <b>Save</b> here, then <b>Check keys</b>. It says the keys work when Razorpay accepts them.</li>
+                <li>Give each plan a price: <b>Plans &amp; defaults → Edit → Price</b>. A plan without a price is not shown to customers.</li>
+                <li>Try one payment in test mode (Razorpay shows test cards and the test UPI ID on its payment screen). When it works, do steps 2–4 again in Live mode: live keys start with <b>rzp_live_</b> and need their own webhook.</li>
+              </ol></details></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Payments</h3><p>Online payments from customers, newest first. “Started” means the customer opened the payment window but did not finish (yet).</p></div><button class="btn outline sm" id="rz-reload">Refresh</button></div><div class="cb" id="rz-pays"><span class="mut sm">…</span></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Plans &amp; defaults</h3><p>A plan is a ready set of switches and limits (for example “Starter” or “Pro”). Put a customer on a plan with one press in their Access panel. The default set is what customers without a plan get.</p></div><button class="btn outline sm" id="pl-new"><i data-ico="plus"></i>New plan</button></div><div class="cb" id="pl-list"><span class="mut sm">…</span></div></div>
         <div class="card"><div class="ch"><div><h3>Accounts</h3><p id="us-sub">…</p></div></div><div class="cb" id="us-list"></div></div>
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>Activity log</h3><p>What customers did and what you changed for them, newest first.</p></div>
@@ -1512,7 +1526,7 @@ function renderPlan(){
   const lim=ME.channel_limit||1,pay=ME.pay||{},up=ME.upgrade;
   $('#plan-badge').className='badge '+(ME.channels>=lim?'queued':'uploaded');$('#plan-badge').textContent=`${ME.channels} of ${lim} channel${lim===1?'':'s'} used`;
   $('#plan-sub').textContent=`Your plan allows ${lim} YouTube channel${lim===1?'':'s'}. More channels are switched on after payment.`;
-  $('#plan-box').innerHTML=(up?`<div class="alert" style="margin-bottom:10px"><span>Your request for <b>${up.channels} channels</b> was sent on ${new Date(up.at).toLocaleDateString()}. It is switched on as soon as the payment has been checked.</span></div>`:'')
+  $('#plan-box').innerHTML='<div id="pp-box"></div>'+(up?`<div class="alert" style="margin-bottom:10px"><span>Your request for <b>${up.channels} channels</b> was sent on ${new Date(up.at).toLocaleDateString()}. It is switched on as soon as the payment has been checked.</span></div>`:'')
     +`<details ${new URLSearchParams(location.search).has('limit')||window.PLANOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">More channels</summary>
       <ol class="sm" style="margin:8px 0;padding-left:18px;line-height:1.8"><li>${pay.price?'Price: <b>'+esc(pay.price)+'</b>.':'Ask for the price.'}</li><li>${pay.upi?'Pay to <b>'+esc(pay.upi)+'</b>.':'Payment details will be sent to you.'} ${esc(pay.text||'')}</li><li>Write how many channels you want and the payment reference, then press Send.</li><li>When the payment has been checked, the extra channels are switched on and you can connect them here.</li></ol>
       <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f">Channels wanted<input id="up-n" type="number" min="${lim+1}" max="50" value="${lim+1}" style="width:120px"></label><label class="f grow">Payment reference / message<input id="up-msg" maxlength="500" placeholder="UPI reference number"></label><button class="btn" id="up-send" style="align-self:flex-end">Send request</button></div></details>
@@ -1521,9 +1535,37 @@ function renderPlan(){
   $('#up-send').onclick=()=>once(async()=>{await api('/api/account/upgrade','POST',{channels:+$('#up-n').value,message:$('#up-msg').value});toast('Request sent — you get the extra channels after the payment is checked');await loadMe()},$('#up-send'));
   $('#br-save').onclick=()=>once(async()=>{await api('/api/account/brand','POST',{brand:$('#br-name').value});toast('Renamed');await loadMe()},$('#br-save'));
   keysForm($('#gk-body'),()=>{toast('Keys saved. If a channel now shows “Reconnect needed”, connect it again.');loadDests()});
+  loadOffers().catch(()=>{});
   api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
     claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
     $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
+}
+const PERIODS={monthly:'per month',yearly:'per year',once:'one-time'};
+const limTxt=(v,one,many)=>v==null?'No limit on '+many:v+' '+(v===1?one:many);
+async function loadOffers(){
+  const el=$('#pp-box');if(!el)return;const d=await api('/api/plans');const ends=d.expires?new Date(d.expires):null;
+  if(d.current)$('#plan-sub').textContent=`Your plan: ${d.current}`+(ends?` — active until ${ends.toLocaleDateString([], {dateStyle:'medium'})}`:'')+`. It allows ${d.channel_limit||1} YouTube channel${(d.channel_limit||1)===1?'':'s'}.`;
+  if(!d.plans.length){el.innerHTML='';return}
+  const canPay=d.online&&ME.role==='user';
+  el.innerHTML=`<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Plans</b>${d.online&&d.mode==='test'?'<span class="badge queued">Test mode — no real money</span>':''}</div>
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px">${d.plans.map(p=>{const i=p.includes,cur=d.current&&d.current.toLowerCase()===p.name.toLowerCase(),st=i.storage_mb==null?'No storage limit':(i.storage_mb>=1024?(i.storage_mb/1024).toFixed(i.storage_mb%1024?1:0)+' GB':i.storage_mb+' MB')+' storage';
+      return `<div class="card" style="padding:12px;${cur?'border-color:var(--brand)':''}"><div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b>${cur?'<span class="badge uploaded">Your plan</span>':''}</div>
+        <div style="font-size:20px;font-weight:600;margin:4px 0">₹${esc(p.price.toLocaleString('en-IN'))} <span class="mut sm" style="font-weight:400">${esc(p.period_text)}</span></div>
+        ${p.description?`<div class="mut sm" style="margin-bottom:6px">${esc(p.description)}</div>`:''}
+        <ul class="sm" style="margin:0 0 8px;padding-left:18px;line-height:1.7"><li>${esc(limTxt(i.channels,'YouTube channel','YouTube channels'))}</li><li>${esc(limTxt(i.clips_per_day,'clip a day','clips a day'))}</li><li>${esc(limTxt(i.uploads_per_day,'upload a day','uploads a day'))}</li><li>${esc(st)}</li></ul>
+        ${cur&&p.period==='once'?'<span class="mut sm">Paid once — it never ends.</span>':canPay?`<button class="btn ${cur?'outline':''} sm" data-pay="${esc(p.name)}" style="width:100%">${cur&&p.period!=='once'?'Renew — ':''}Pay ₹${esc(p.price.toLocaleString('en-IN'))}</button>`:''}</div>`}).join('')}</div>
+    ${d.online?(ME.role==='user'?'<div class="mut sm" style="margin-bottom:10px">Pay with UPI, card or net banking. The plan is switched on as soon as the payment goes through. Renewing adds to the days you have left.</div>':'<div class="mut sm" style="margin-bottom:10px">Only the customer can pay (not in “View as”).</div>'):'<div class="mut sm" style="margin-bottom:10px">To buy a plan, follow the payment steps under “More channels” below and write the plan name in your message.</div>'}`;
+  $$('[data-pay]',el).forEach(b=>b.onclick=()=>once(()=>payPlan(b.dataset.pay),b));
+}
+function rzScript(){return window.Razorpay?Promise.resolve():new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=ok;s.onerror=()=>no(new Error('The payment window could not be loaded. Check your internet connection and try again.'));document.head.appendChild(s)})}
+async function payPlan(name){
+  const o=await api('/api/pay/order','POST',{plan:name});await rzScript();
+  const rz=new Razorpay({key:o.key_id,amount:o.amount,currency:o.currency,order_id:o.order_id,name:o.name,description:o.description,prefill:o.prefill,notes:{plan:o.plan},
+    handler:r=>once(async()=>{const v=await api('/api/pay/verify','POST',{razorpay_order_id:r.razorpay_order_id,razorpay_payment_id:r.razorpay_payment_id,razorpay_signature:r.razorpay_signature});
+      toast('Payment received — your plan “'+(v.plan||o.plan)+'” is active');await loadMe()}),
+    modal:{ondismiss:()=>toast('The payment window was closed. If money was taken, the plan is switched on by itself within a few minutes.')}});
+  rz.on('payment.failed',r=>toast('The payment did not go through: '+((r&&r.error&&r.error.description)||'try again'),true));
+  rz.open();
 }
 async function keysForm(el,done){
   if(!el)return;let o;try{o=await api('/api/onboarding')}catch(e){el.textContent='';return}const g=o.google||{};
@@ -1611,7 +1653,7 @@ function renderPlans(){
   const el=$('#pl-list');if(!el||!ACL)return;
   const sum=s=>{const off=Object.values(s.perms||{}).filter(v=>v===false).length,lim=ACL.catalog.limits.filter(l=>(s.limits||{})[l.key]).map(l=>l.label+': '+s.limits[l.key]).join(' · ');return (off?off+' switched off':'everything switched on')+' · '+(lim||'no limits')};
   el.innerHTML=`<div class="item"><div class="tx grow"><b>Default</b> <span class="badge outline">${ACL.no_plan_users} without a plan</span><span class="mut sm" style="display:block">${esc(sum(ACL.default))}</span></div><button class="btn outline sm" data-pledit="">Edit</button></div>`
-    +ACL.plans.map(p=>`<div class="item"><div class="tx grow"><b>${esc(p.name)}</b> <span class="badge ${p.users?'uploaded':'outline'}">${p.users} customer${p.users===1?'':'s'}</span>${ACL.new_plan===p.name?' <span class="badge queued">new accounts start here</span>':''}<span class="mut sm" style="display:block">${esc(sum(p))}</span></div><button class="btn outline sm" data-pledit="${esc(p.name)}">Edit</button><button class="btn bad sm" data-pldel="${esc(p.name)}">Delete</button></div>`).join('')
+    +ACL.plans.map(p=>`<div class="item"><div class="tx grow"><b>${esc(p.name)}</b> <span class="badge ${p.users?'uploaded':'outline'}">${p.users} customer${p.users===1?'':'s'}</span> ${p.price?`<span class="badge rendered">₹${esc(p.price.price)} ${esc(PERIOD[p.price.period]||'')}</span>`:'<span class="badge outline">not for sale</span>'}${ACL.new_plan===p.name?' <span class="badge queued">new accounts start here</span>':''}<span class="mut sm" style="display:block">${esc(sum(p))}</span></div><button class="btn outline sm" data-pledit="${esc(p.name)}">Edit</button><button class="btn bad sm" data-pldel="${esc(p.name)}">Delete</button></div>`).join('')
     +`<div class="row sm" style="margin-top:12px;gap:8px"><span>A new account starts on</span><select id="pl-start" style="width:auto"><option value="">the default switches</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${ACL.new_plan===p.name?'selected':''}>the plan “${esc(p.name)}”</option>`).join('')}</select></div>`;
   $$('[data-pledit]',el).forEach(b=>b.onclick=()=>openPlan(b.dataset.pledit));
   $$('[data-pldel]',el).forEach(b=>b.onclick=()=>once(async()=>{const p=ACL.plans.find(x=>x.name===b.dataset.pldel);if(!confirm(`Delete the plan “${p.name}”?`+(p.users?`\n\nThe ${p.users} customer(s) on it keep exactly the switches and limits they have now.`:'')))return;
@@ -1623,9 +1665,13 @@ function openPlan(name){
   $('#pe-title').textContent=isNew?'New plan':isDef?'Default switches':'Plan “'+name+'”';
   $('#pe-sub').textContent=isDef?'What customers without a plan may use. A customer\'s own switches (set in their Access panel) still win.':'A ready set of switches and limits. Put customers on it in their Access panel.';
   $('#pe-name-wrap').classList.toggle('hide',!isNew);$('#pe-name').value='';
-  $('#pe-body').innerHTML=`<b>Limits</b> <span class="mut sm">(empty = no limit)</span><div style="margin-top:4px">${limitRow(p.limits||{},'data-pl',null,!isDef)}</div>${permGrid(p.perms||{},'data-pp')}`;
+  const pr=p.price||{};
+  $('#pe-body').innerHTML=(isDef?'':`<b>Price</b> <span class="mut sm">(empty = not for sale: customers do not see this plan)</span><div class="row" style="flex-wrap:wrap;gap:12px;margin:4px 0 12px"><label class="f sm">Price in ₹<input id="pe-price" type="number" min="0" max="1000000" value="${pr.price??''}" placeholder="not for sale" style="width:140px"></label><label class="f sm">Billing<select id="pe-period" style="width:auto"><option value="monthly">Every month (30 days)</option><option value="yearly">Every year (365 days)</option><option value="once">One-time (never ends)</option></select></label><label class="f sm grow">Short description customers see<input id="pe-desc" maxlength="200" value="${esc(pr.description||'')}" placeholder="Best for one growing channel"></label></div>`)
+    +`<b>Limits</b> <span class="mut sm">(empty = no limit)</span><div style="margin-top:4px">${limitRow(p.limits||{},'data-pl',null,!isDef)}</div>${permGrid(p.perms||{},'data-pp')}`;
+  if(!isDef)$('#pe-period').value=pr.period||'monthly';
   const body=apply=>({perms:Object.fromEntries($$('#pe-body [data-pp]').map(i=>[i.dataset.pp,i.checked])),
-    limits:Object.fromEntries($$('#pe-body [data-pl]').map(i=>[i.dataset.pl,i.value===''?(isDef||i.dataset.pl==='channels'?null:0):+i.value])),apply});
+    limits:Object.fromEntries($$('#pe-body [data-pl]').map(i=>[i.dataset.pl,i.value===''?(isDef||i.dataset.pl==='channels'?null:0):+i.value])),apply,
+    ...(isDef?{}:{price:$('#pe-price').value===''?0:+$('#pe-price').value,period:$('#pe-period').value,description:$('#pe-desc').value})});
   const send=async apply=>{if(isDef)await api('/api/admin/acl/default','POST',{...body(apply),new_plan:ACL.new_plan||''});
     else{const nm=isNew?$('#pe-name').value.trim():name;if(!nm)throw new Error('Give the plan a name, for example Starter');await api('/api/admin/plans','POST',{...body(apply),name:nm})}
     $('#m-plan').classList.remove('on');toast(apply&&p.users?'Saved and applied':'Saved');await loadUsers()};
@@ -1681,9 +1727,29 @@ async function loadUsers(){
   $$('[data-uacc]').forEach(b=>b.onclick=()=>{const id=+b.dataset.uacc;if(UOPEN.has(id)){UOPEN.delete(id);$('#ua-'+id).classList.add('hide');$('#ua-'+id).innerHTML='';return}once(()=>openAccess(id),b)});
   const pick=$('#lg-acc'),was=pick.value;pick.innerHTML='<option value="">All customers</option>'+U.map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.email)})</option>`).join('');if(U.some(u=>String(u.id)===was))pick.value=was;
   try{await loadAcl()}catch(e){fail(e)}
+  loadRazorpay().catch(fail);
   [...UOPEN].forEach(id=>{if($('#ua-'+id))openAccess(id).catch(fail);else UOPEN.delete(id)});
   loadLog(false).catch(()=>{});
 }
+const PERIOD={monthly:'per month',yearly:'per year',once:'one-time'};
+function rzPaint(k){
+  $('#rz-badge').className='badge '+(k.enabled?(k.mode==='live'?'uploaded':'queued'):'outline');
+  $('#rz-badge').textContent=k.enabled?(k.mode==='live'?'Live — real money':'Test mode — no real money'):'Not set up';
+  $('#rz-state').innerHTML=`Key ID: ${k.key_set?'saved ✓ (ends in <b>'+esc(k.key_end)+'</b>)':'<b>not saved</b>'} · Key Secret: ${k.secret_set?'saved ✓':'<b>not saved</b>'} · Webhook secret: ${k.webhook_set?'saved ✓':'<b>not saved</b> (needed so a payment is applied even when the customer closes the page)'}`;
+  $('#rz-url').textContent=k.webhook_url||'';$('#rz-id').value='';$('#rz-secret').value='';$('#rz-wh').value='';
+}
+async function loadRazorpay(){
+  rzPaint(await api('/api/admin/razorpay'));
+  const rows=(await api('/api/admin/payments')).payments,st={paid:['Paid','uploaded'],created:['Started','queued'],failed:['Failed','failed']};
+  $('#rz-pays').innerHTML=rows.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(new Date(r.paid_at||r.created_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}))}</td><td><b>${esc(r.brand||r.name)}</b> <span class="mut sm">${esc(r.email)}</span></td><td>${esc(r.plan)}</td><td>₹${esc(r.amount.toLocaleString('en-IN'))}</td><td><span class="badge ${(st[r.status]||['',''])[1]}">${esc((st[r.status]||[r.status])[0])}</span>${r.note?`<span class="mut sm" style="display:block">${esc(r.note)}</span>`:''}${r.payment_id?`<span class="mut sm" style="display:block">${esc(r.payment_id)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`
+    :'<span class="mut sm">No online payments yet.</span>';
+}
+$('#rz-save').onclick=()=>once(async()=>{const b={key_id:$('#rz-id').value.trim(),key_secret:$('#rz-secret').value.trim(),webhook_secret:$('#rz-wh').value.trim()};
+  if(!b.key_id&&!b.key_secret&&!b.webhook_secret)throw new Error('Paste at least one key first');rzPaint(await api('/api/admin/razorpay','POST',b));toast('Saved — press Check keys');await loadAcl()},$('#rz-save'));
+$('#rz-check').onclick=()=>once(async()=>{const r=await api('/api/admin/razorpay/check','POST');toast(r.message,!r.ok)},$('#rz-check'));
+$('#rz-clear').onclick=()=>once(async()=>{if(!confirm('Remove the Razorpay keys? Customers then see only the UPI steps. Payments already made stay in the list.'))return;rzPaint(await api('/api/admin/razorpay','POST',{clear:true}));toast('Keys removed');await loadAcl()},$('#rz-clear'));
+$('#rz-copy').onclick=async()=>{const u=$('#rz-url').textContent;try{await navigator.clipboard.writeText(u);toast('Copied')}catch(e){prompt('Copy this address:',u)}};
+$('#rz-reload').onclick=()=>once(loadRazorpay,$('#rz-reload'));
 $('#pay-save').onclick=()=>once(async()=>{await api('/api/admin/pay','POST',{upi:$('#pay-upi').value,price:$('#pay-price').value,text:$('#pay-text').value});toast('Saved — customers see this when they ask for more channels')},$('#pay-save'));
 $('#us-test').onclick=()=>once(async()=>{const r=await api('/api/admin/selftest');alert(r.ok?'OK — a customer\'s copy is separate from yours on this database ('+r.database+').\n\nA test record written in a customer copy was not visible in your own copy.':'PROBLEM — the copies are not separate. Do not approve customers; send these details for support:\n'+JSON.stringify(r))},$('#us-test'));
 

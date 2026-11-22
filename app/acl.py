@@ -153,12 +153,17 @@ ROUTES = [
     ("GET", "/about", ANYONE, None),
     ("GET", "/healthz", ANYONE, None),
     ("GET", "/media/{cid}/{exp}/{sig}.mp4", ANYONE, None),  # signed, short-lived link for Instagram / Facebook
+    ("POST", "/api/pay/razorpay/webhook", ANYONE, None),  # Razorpay's own call, proven by its signature (app/payments.py)
     # --- the account itself
     ("GET", "/api/me", SIGNED, None),
     ("POST", "/api/change-password", SIGNED, "Changed the password"),
     ("POST", "/api/account/upgrade", "account.upgrade", "Asked for more channels"),
     ("POST", "/api/account/brand", "account.rename", "Renamed the system"),
     ("GET", "/api/account/helper-code", "helper.manage", None),
+    # --- plans and online payment (any customer may see the plans and pay; the amount always comes from the server)
+    ("GET", "/api/plans", SIGNED, None),
+    ("POST", "/api/pay/order", SIGNED, "Started an online payment"),
+    ("POST", "/api/pay/verify", SIGNED, "Paid for a plan online"),
     # --- step-by-step setup
     ("GET", "/api/onboarding", SIGNED, None),
     ("POST", "/api/onboarding/ack", SIGNED, "Confirmed a setup step"),
@@ -175,6 +180,10 @@ ROUTES = [
     ("GET", "/api/admin/pay", SUPER, None),
     ("POST", "/api/admin/pay", SUPER, None),
     ("GET", "/api/admin/selftest", SUPER, None),
+    ("GET", "/api/admin/razorpay", SUPER, None),
+    ("POST", "/api/admin/razorpay", SUPER, None),
+    ("POST", "/api/admin/razorpay/check", SUPER, None),
+    ("GET", "/api/admin/payments", SUPER, None),
     ("GET", "/api/admin/acl", SUPER, None),
     ("POST", "/api/admin/acl/default", SUPER, None),
     ("POST", "/api/admin/plans", SUPER, None),
@@ -817,6 +826,28 @@ def upload_block() -> str:
     return ""
 
 
+def channel_cap() -> int | None:
+    """How many of this account's YouTube channels may upload (None = all of them: the owner's own copy)."""
+    st = state()
+    return None if st is None else int(st["limits"].get("channels") or accounts.DEFAULT_CHANNELS)
+
+
+def over_cap_channels(s) -> set[int]:
+    """Channels beyond the plan's channel limit (e.g. after a paid plan ended). They stay connected and keep their
+    clips; only their uploads wait. The main channel is always the first one allowed, then the oldest."""
+    cap = channel_cap()
+    if cap is None:
+        return set()
+    from .db import Destination, main_destination
+
+    ids = [d.id for d in s.query(Destination.id).order_by(Destination.id)]
+    if len(ids) <= cap:
+        return set()
+    main = main_destination(s)
+    order = ([main.id] if main else []) + [i for i in ids if not main or i != main.id]
+    return set(order[cap:])
+
+
 def uploads_cap(server_cap: int) -> int:
     st = state()
     cap = None if st is None else st["limits"].get("uploads_per_day")
@@ -844,6 +875,18 @@ def health_items() -> list[dict]:
     if not st["perms"].get("uploads.auto", True):
         out.append({"key": "acl_auto_off", "level": "info", "text": "Automatic upload is switched off for your account: every new clip waits in Clips → Ready to review until you approve it.", "fix": None})
     lim = st["limits"]
+    try:
+        from .db import Destination, SessionLocal
+
+        with SessionLocal() as s:
+            over = over_cap_channels(s)
+            names = [d.name for d in s.query(Destination).filter(Destination.id.in_(over))] if over else []
+        if names:
+            out.append({"key": "acl_channels_over", "level": "bad", "text": f"Your plan allows {lim.get('channels') or 1} YouTube channel(s). "
+                        f"Uploads to {', '.join(names)} wait (nothing is deleted). Renew or change your plan on My channels → Your plan, "
+                        "or disconnect a channel.", "fix": None})
+    except Exception:  # noqa: BLE001
+        pass
     if lim.get("uploads_per_day") is not None and uploads_today() >= lim["uploads_per_day"]:
         out.append({"key": "acl_uploads_limit", "level": "info", "text": f"Today's limit of {lim['uploads_per_day']} upload(s) for your account is reached. "
                                              "The rest go up tomorrow by themselves.", "fix": None})
