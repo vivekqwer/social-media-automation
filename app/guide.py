@@ -101,6 +101,9 @@ HOW = {
 
 # (what you see, what the system does by itself, what you do)
 HELP = [
+    ("A page or a button is missing, or a message says “switched off for your account”",
+     "The person who runs the system decides what each account can use: pages, buttons, kinds of sources, uploads and daily limits. What is off is hidden, and work that is not allowed waits quietly. Nothing of yours is deleted.",
+     "Dashboard → Problems & fixes shows what is paused or limited. To get something switched on, ask the person who gave you access. Super Admin: Users → Access on that account — every switch, limit and the pause buttons are there; changes apply at once."),
     ("I want to use a different YouTube channel",
      "Sources and waiting clips can move to another channel in one press. Uploaded videos stay where they are.",
      "My channels → Connect a YouTube channel (the old one stays connected). Then on the new channel press “Move everything here”. If you no longer want the old one, press Disconnect on it."),

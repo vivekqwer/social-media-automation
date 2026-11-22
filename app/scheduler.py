@@ -151,9 +151,12 @@ def cleanup_disk():
 
 def process_queue():
     """Upload queued clips whose publish time is within the lead window (YouTube holds them private until publishAt)."""
-    from . import tenant as _t
+    from . import acl, tenant as _t
 
     now, tid = utcnow(), _t.current()
+    if acl.upload_block():  # paused by the administrator, or uploading is switched off for this account:
+        return  # everything stays queued, quietly (the customer's dashboard says why)
+    day_cap = acl.uploads_cap(MAX_UPLOADS_PER_DAY)  # the account's own uploads-a-day limit, if it has one
     _quota_blocked_until = _quota_blocked.get(tid)
     if _quota_blocked_until and now < _quota_blocked_until:
         return
@@ -177,7 +180,9 @@ def process_queue():
     ids = [r.id for r in rows]
 
     for cid in ids:
-        if used >= MAX_UPLOADS_PER_DAY or not quota.can_upload():
+        if used >= day_cap or not quota.can_upload():
+            break
+        if acl.upload_block():  # paused while this round was running: stop before the next video
             break
         now = utcnow()  # uploads take minutes: judge every clip's time against the real clock
         with SessionLocal() as s:
@@ -203,6 +208,7 @@ def process_queue():
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
                 s.commit()  # saved at once: a crash now must never upload the video twice
+                acl.record_here("uploads.youtube", f"Uploaded to YouTube: {(c.title or '')[:120]} (#{c.id})")
                 _tg(f"⬆️ Uploaded: <b>{_e(c.title)}</b>\nhttps://youtu.be/{c.youtube_id}"
                     + (f"\nGoes live {c.publish_at:%d %b %H:%M} UTC" if publish_at else "\nLive now"))
                 if c.thumb_path and Path(c.thumb_path).exists():
@@ -287,6 +293,19 @@ def for_each_customer(fn):
     return run
 
 
+def when_on(key: str, fn):
+    """A timed job that belongs to something the Super Admin can switch off per account (see app/acl.py):
+    for an account that has it off the job is skipped quietly — no error, nothing queued."""
+    def run():
+        from . import acl
+
+        if acl.feature(key):
+            return fn()
+        return None
+    run.__name__ = getattr(fn, "__name__", "job")
+    return run
+
+
 def start():
     for_each_customer(recover)()
     sch = BackgroundScheduler(timezone="UTC")
@@ -294,6 +313,18 @@ def start():
     def add(fn, *args, **kw):
         sch.add_job(for_each_customer(fn), *args, **kw)
 
+    # Every timed job, and what decides whether it runs for a customer (the owner's own copy always runs everything):
+    #   process_queue        uploads paused / "Upload to YouTube at all" / uploads-a-day limit  -> inside process_queue
+    #   autopilot_tick       sources stopped / each source type / clips-a-day / storage / AI reels -> autopilot.run_channel
+    #   poll (Telegram)      "Telegram"
+    #   swap_weak_thumbnails "Thumbnails"
+    #   weekly_report        "Analytics page"
+    #   check_replies        "Permission mails to creators"
+    #   refresh_inbox        "Permission inbox"
+    #   viral_refresh        "Viral today page" or "Viral picks" (viral.refresh; picks only with "Viral picks")
+    #   scan_if_due          "Competitor tracker"
+    #   daily_summary        Telegram (telegram.enabled)
+    #   always: sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
     add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
@@ -301,20 +332,22 @@ def start():
     add(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
     # Telegram remote control (standalone: does nothing until it is set up)
     from .telegram import daily_summary, poll
-    add(poll, "interval", seconds=20, max_instances=1, coalesce=True)
+    add(when_on("telegram.use", poll), "interval", seconds=20, max_instances=1, coalesce=True)
     add(check_helper, "interval", minutes=30, max_instances=1, coalesce=True)
     from .growth import swap_weak_thumbnails, weekly_report
-    add(lambda: executor.submit(swap_weak_thumbnails), "cron", hour=6, minute=0, max_instances=1, coalesce=True)
-    add(lambda: executor.submit(weekly_report), "cron", day_of_week="sun", hour=15, minute=35, max_instances=1,
-                coalesce=True)  # Sunday 9:05 PM IST
+    add(when_on("clips.thumbnail", lambda: executor.submit(swap_weak_thumbnails)), "cron", hour=6, minute=0, max_instances=1,
+                coalesce=True)
+    add(when_on("page.analytics", lambda: executor.submit(weekly_report)), "cron", day_of_week="sun", hour=15, minute=35,
+                max_instances=1, coalesce=True)  # Sunday 9:05 PM IST
     from .permissions import check_replies, refresh_inbox
-    add(lambda: executor.submit(check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
-    add(lambda: executor.submit(refresh_inbox), "cron", hour=4, minute=30, max_instances=1, coalesce=True)  # 10 AM IST
+    add(when_on("gmail.send", lambda: executor.submit(check_replies)), "interval", minutes=15, max_instances=1, coalesce=True)
+    add(when_on("permissions.manage", lambda: executor.submit(refresh_inbox)), "cron", hour=4, minute=30, max_instances=1,
+                coalesce=True)  # 10 AM IST
     from .viral import refresh as viral_refresh
     add(lambda: executor.submit(viral_refresh), "interval", hours=2, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # viral board + 5 daily picks
     from .competitors import scan_if_due
-    add(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
+    add(when_on("ideas.competitors", lambda: executor.submit(scan_if_due)), "interval", hours=1, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=8))
     add(daily_summary, "cron", hour=15, minute=30, max_instances=1, coalesce=True)  # 9:00 PM IST
     add(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,

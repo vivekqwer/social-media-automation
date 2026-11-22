@@ -65,9 +65,13 @@ def quick_run(pid: int):
             ranges = _distinct(ranges)[:count]
             first_at = _utc(q.get("publish_at"))
             ids = []
+            from . import acl
+
+            # "Automatic upload without review" switched off for this account: the clip waits in Clips for approval
+            auto = acl.auto_upload()
             for i, (start, end) in enumerate(ranges):
                 c = Clip(project_id=p.id, start=start, end=end, aspect="9:16" if fmt == "shorts" else "16:9",
-                         effects=["fade"], overlays=[], destination_id=dest.id, autoqueue=True,
+                         effects=["fade"], overlays=[], destination_id=dest.id, autoqueue=auto,
                          publish_at=first_at if i == 0 else _later_slot(s, dest.id, first_at))
                 s.add(c)
                 s.commit()

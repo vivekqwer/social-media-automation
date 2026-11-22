@@ -8,7 +8,7 @@ import yt_dlp
 from sqlalchemy import func
 
 from .db import Channel, Clip, Destination, Project, SessionLocal, utcnow
-from . import quota, youtube
+from . import acl, quota, youtube
 from . import workers
 from .captions import fetch_cues, parse_json3
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
@@ -167,7 +167,14 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
         return
     if not p.moments:
         log.append(f"{p.video_id}: no replay data, using the middle of the video")
+    # "Automatic upload without review" switched off for this account: every new clip waits for approval,
+    # whatever the source says
+    review_first = bool(ch.review_first) or not acl.auto_upload()
     for m in moments[:ch.clips_per_video]:
+        full = acl.room_for_clip()  # the account's clips-a-day limit and storage
+        if full:
+            log.append(f"stopped: {full}")
+            break
         c = Clip(project_id=p.id, start=m["start"], end=m["end"], aspect=ch.aspect, effects=["fade"],
                  destination_id=ch.destination_id, credit_on=ch.mode != "own")
         s.add(c)
@@ -186,7 +193,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
         if c.status == "fetching":  # helper PC will fetch the video; render finishes later
             auto_metadata(c.id)
             s.refresh(c)
-            if not ch.review_first:
+            if not review_first:
                 c.publish_at = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0)
                 c.autoqueue = True  # becomes 'queued' as soon as the render completes
                 s.commit()
@@ -197,7 +204,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
             continue
         auto_metadata(c.id)
         s.refresh(c)
-        if ch.review_first:
+        if review_first:
             log.append(f"clip {c.id} ready for review")
             continue
         c.publish_at, c.status, c.autoqueue = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0), "queued", True
@@ -209,6 +216,11 @@ def run_channel(channel_id: int):
     with SessionLocal() as s:
         ch = s.get(Channel, channel_id)
         if not ch or ch.kind == "viral":  # viral picks are driven by app/viral.py, never by the source timer
+            return
+        blocked = acl.source_block(ch.kind, bool(ch.auto_scripts))  # stopped, switched off or limited by the administrator
+        if blocked:  # wait quietly; the source carries on by itself when it is allowed again
+            ch.last_status, ch.last_run = f"waiting: {blocked}", utcnow()
+            s.commit()
             return
         log = []
         try:
@@ -406,7 +418,12 @@ def _run_reels(s, ch: Channel, log: list):
     scripts = [dict(x) for x in (ch.scripts or [])]
     todo = [i for i, x in enumerate(scripts) if not x.get("used") and (x.get("text") or "").strip()]
     dest = s.get(Destination, ch.destination_id) if ch.destination_id else None
+    review_first = bool(ch.review_first) or not acl.auto_upload()  # see _make_clips
     for i in todo[:ch.videos_per_run]:
+        full = acl.room_for_clip()
+        if full:
+            log.append(f"stopped: {full}")
+            break
         text = scripts[i]["text"].strip()
         subject = (scripts[i].get("topic") or ch.query or "").split(":")[0].strip().lower()
         p = Project(url="", video_id=None, title=_script_title(text), channel=dest.name if dest else "",
@@ -417,7 +434,7 @@ def _run_reels(s, ch: Channel, log: list):
         s.commit()
         c = Clip(project_id=p.id, start=0, end=60, aspect="9:16", effects=[], overlays=[], credit_on=False,
                  destination_id=ch.destination_id, status="fetching", fetch_since=utcnow())
-        if not ch.review_first:
+        if not review_first:
             c.publish_at = _next_slot(s, ch.gap_hours, ch.destination_id, ch.post_times, ch.tz_offset or 0)
             c.autoqueue = True  # becomes 'queued' as soon as the reel is made and rendered
         s.add(c)

@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import accounts, auth, quota, scheduler, tenant, workers, youtube
+from . import accounts, acl, auth, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
@@ -161,6 +161,9 @@ async def auth_gate(request: Request, call_next):
         if who:  # e.g. Google sends a signed-in person back to /auth/callback: it must run in THEIR copy
             request.state.who = who
             with tenant.use(who["tenant"]):
+                if who["role"] == "super":
+                    with acl.as_super():
+                        return _secure(await call_next(request))
                 return _secure(await call_next(request))
         return _secure(await call_next(request))
     if not auth.auth_configured():
@@ -178,8 +181,18 @@ async def auth_gate(request: Request, call_next):
             # and row numbers repeat between copies — never act on the wrong one
             return JSONResponse({"detail": "This page was showing another account's dashboard. It is being reloaded.",
                                  "reload": True}, status_code=409)
+        real = request.scope.get("path") or path  # exactly what the router matches
+        denied = acl.check_request(request.method, real, who)  # what the Super Admin switched off for this account
+        if denied:
+            return JSONResponse({"detail": denied}, status_code=403)
         with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
-            return _secure(await call_next(request))
+            if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
+                with acl.as_super():
+                    resp = await call_next(request)
+            else:
+                resp = await call_next(request)
+            acl.log_request(who, request.method, real, resp.status_code)
+            return _secure(resp)
     if path.startswith("/api/"):
         return JSONResponse({"detail": "Not logged in"}, status_code=401)
     return RedirectResponse("/login?next=" + quote(path), status_code=302)
@@ -249,6 +262,7 @@ def api_login(body: LoginIn, request: Request):
         resp = JSONResponse({"ok": True})
         _set_cookie(resp, auth.SESSION_COOKIE, accounts.make_session(acc), auth.SESSION_TTL)
         resp.delete_cookie(auth.AS_COOKIE, path="/")
+        acl.record(acc.id, "user", "account", "Signed in", acc.tenant_id)
         return resp
     if not auth.check_login(body.username, body.password):
         auth.note_fail(ip)
@@ -300,6 +314,7 @@ def api_me(request: Request):
     if who["role"] == "user":
         acc = accounts.get(who["account_id"])
         who["upgrade"] = acc.upgrade if acc else None
+        who["access"] = acl.for_me(who)  # the dashboard hides what is switched off (the server refuses it anyway)
     who["pay"] = _pay_info() if who["role"] == "user" or who.get("viewing") else None
     if who["tenant"] != tenant.OWNER:
         from . import onboarding
@@ -479,15 +494,19 @@ def admin_users():
     rows = accounts.listing()
     for r in rows:
         r["usage"] = _usage(r["tenant_id"]) if r["status"] != "pending" and r["tenant_id"] else None
+        eff = acl.effective(r["id"])  # one line about the account's access; the whole panel is /api/admin/users/{id}/access
+        r["acl"] = {"plan": eff["plan"], "controls": eff["controls"], "off": sum(1 for v in eff["perms"].values() if not v)} if eff else None
     return {"users": rows, "pay": _pay_info(), "owner": _usage(tenant.OWNER)}
 
 
 @app.post("/api/admin/users/{aid}/approve")
 def admin_approve(aid: int):
     try:
-        return accounts.approve(aid)
+        out = accounts.approve(aid)
     except KeyError:
         raise HTTPException(404, "Account not found")
+    acl.record(aid, "super", "admin.account", "Approved the account", out.get("tenant_id"))
+    return out
 
 
 @app.post("/api/admin/users/{aid}")
@@ -501,26 +520,38 @@ def admin_edit(aid: int, body: UserEdit):
     if body.close_request or (data.get("channel_limit") and acc.upgrade and data["channel_limit"] >= int(acc.upgrade.get("channels") or 0)):
         data["upgrade"] = None  # the request is answered
     try:
-        return accounts.update(aid, **data)
+        out = accounts.update(aid, **data)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    if data.get("status") and data["status"] != acc.status:
+        acl.record(aid, "super", "admin.account", "Blocked the account (signed out at once)" if data["status"] == "blocked"
+                   else "Unblocked the account", acc.tenant_id)
+    if data.get("channel_limit") and data["channel_limit"] != (acc.channel_limit or 1):
+        acl.record(aid, "super", "admin.switch", f"YouTube channels: {acc.channel_limit or 1} → {data['channel_limit']}", acc.tenant_id)
+    if body.close_request:
+        acl.record(aid, "super", "admin.account", "Closed the request for more channels", acc.tenant_id)
+    return out
 
 
 @app.post("/api/admin/users/{aid}/reset-password")
 def admin_reset_password(aid: int):
-    if not accounts.get(aid):
+    acc = accounts.get(aid)
+    if not acc:
         raise HTTPException(404, "Account not found")
+    acl.record(aid, "super", "admin.account", "Gave a temporary password (old sign-ins ended)", acc.tenant_id)
     return {"password": accounts.reset_password(aid)}  # shown once; the customer changes it after signing in
 
 
 @app.delete("/api/admin/users/{aid}")
 def admin_delete(aid: int):
+    acc = accounts.get(aid)
     try:
         accounts.delete(aid)
     except KeyError:
         raise HTTPException(404, "Account not found")
     except ValueError as e:
         raise HTTPException(400, str(e))
+    acl.record(aid, "super", "admin.account", f"Removed the login of {acc.email if acc else aid}", acc.tenant_id if acc else None)
     return {"deleted": True}
 
 
@@ -532,6 +563,7 @@ def admin_view_as(aid: int):
         raise HTTPException(400, "This account has no dashboard yet (approve it first).")
     resp = JSONResponse({"ok": True, "viewing": acc.name})
     _set_cookie(resp, auth.AS_COOKIE, auth.make_view_as(aid), auth.AS_TTL)
+    acl.record(aid, "super", "admin.view", "Opened the customer's dashboard (View as)", acc.tenant_id)
     return resp
 
 
@@ -574,6 +606,137 @@ def admin_selftest():
     """Check on the live database that customers' copies are really separate."""
     with tenant.use(tenant.OWNER):
         return accounts.self_test()
+
+
+# ---------- Super Admin: access control (switches, limits, plans, direct controls, activity log) ----------
+# The rules themselves are in app/acl.py; these are only the buttons of the Users page.
+class AccessIn(BaseModel):
+    perms: dict[str, bool | None] = Field(default_factory=dict)  # None = follow the plan again
+    limits: dict[str, int | None] = Field(default_factory=dict)  # None or 0 = no limit, -1 = follow the plan again
+
+
+class PlanIn(BaseModel):
+    name: str = Field(min_length=1, max_length=40)
+    perms: dict[str, bool] = Field(default_factory=dict)
+    limits: dict[str, int | None] = Field(default_factory=dict)
+    apply: bool = True  # accounts on this plan follow the change (False: they keep what they have now)
+
+
+class DefaultIn(BaseModel):
+    perms: dict[str, bool] = Field(default_factory=dict)
+    limits: dict[str, int | None] = Field(default_factory=dict)
+    new_plan: str | None = Field(None, max_length=40)  # the plan a NEW account starts on ("" = none)
+    apply: bool = True
+
+
+class UserPlanIn(BaseModel):
+    plan: str = Field("", max_length=40)
+
+
+class ControlIn(BaseModel):
+    action: Literal["pause_uploads", "resume_uploads", "stop_sources", "start_sources", "sign_out"]
+
+
+class DeleteDataIn(BaseModel):
+    email: str = Field(max_length=200)
+
+
+def _acl_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except KeyError:
+        raise HTTPException(404, "Not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/admin/acl")
+def admin_acl():
+    """Every switch and limit there is, the plans, and what accounts without a plan get."""
+    return acl.overview()
+
+
+@app.post("/api/admin/acl/default")
+def admin_acl_default(body: DefaultIn):
+    return {**_acl_call(acl.save_default, body.perms, body.limits, body.new_plan, body.apply), **acl.overview()}
+
+
+@app.post("/api/admin/plans")
+def admin_plan_save(body: PlanIn):
+    return {**_acl_call(acl.save_plan, body.name, body.perms, body.limits, body.apply), **acl.overview()}
+
+
+@app.delete("/api/admin/plans/{name}")
+def admin_plan_delete(name: str):
+    return {**_acl_call(acl.delete_plan, name), **acl.overview()}
+
+
+@app.get("/api/admin/activity")
+def admin_activity(account_id: int | None = None, actor: str = Query("", max_length=10), q: str = Query("", max_length=60),
+                   limit: int = Query(100, ge=1, le=500), before: int | None = None):
+    """What customers did and what was changed for them, newest first."""
+    return {"rows": acl.activity(account_id, actor, q, limit, before)}
+
+
+@app.get("/api/admin/users/{aid}/access")
+def admin_access_get(aid: int, fresh: int = 0):
+    acc = accounts.get(aid)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if fresh and acc.tenant_id:
+        acl.storage_bytes(acc.tenant_id, fresh=True)  # "Measure again"
+    return acl.public_access(aid, with_usage=True)
+
+
+@app.post("/api/admin/users/{aid}/access")
+def admin_access_set(aid: int, body: AccessIn):
+    """Switches and limits of one account. They apply to the very next thing the customer does."""
+    changed = _acl_call(acl.set_access, aid, body.perms, body.limits)
+    return {**acl.public_access(aid), "changed": changed}
+
+
+@app.post("/api/admin/users/{aid}/plan")
+def admin_access_plan(aid: int, body: UserPlanIn):
+    return _acl_call(acl.apply_plan, aid, body.plan)
+
+
+@app.post("/api/admin/users/{aid}/control")
+def admin_access_control(aid: int, body: ControlIn):
+    """Pause / resume all uploads, stop / start all sources, or sign the customer out — at once."""
+    acc = accounts.get(aid)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if body.action == "sign_out":
+        accounts.end_sessions(aid)
+        acl.record(aid, "super", "admin.control", "Signed the customer out everywhere", acc.tenant_id)
+        return {"ok": True, "controls": acl.public_access(aid)["controls"]}
+    name, on = {"pause_uploads": ("uploads_paused", True), "resume_uploads": ("uploads_paused", False),
+                "stop_sources": ("sources_stopped", True), "start_sources": ("sources_stopped", False)}[body.action]
+    return {"ok": True, "controls": _acl_call(acl.set_control, aid, name, on)}
+
+
+@app.delete("/api/admin/users/{aid}/channels/{did}")
+def admin_disconnect_channel(aid: int, did: int):
+    """Disconnect one of a customer's YouTube channels. Their sources and waiting clips are kept."""
+    acc = accounts.get(aid)
+    if not acc or not acc.tenant_id:
+        raise HTTPException(404, "Account not found")
+    with tenant.use(acc.tenant_id):
+        with SessionLocal() as s:
+            d = s.get(Destination, did)
+            if not d:
+                raise HTTPException(404, "This channel is not connected any more.")
+            name = d.name
+        out = delete_destination(did, None, True)
+    acl.record(aid, "super", "admin.control", f"Disconnected the YouTube channel “{name}”", acc.tenant_id)
+    return out
+
+
+@app.post("/api/admin/users/{aid}/delete-data")
+def admin_delete_data(aid: int, body: DeleteDataIn):
+    """Delete a customer's whole private copy (database part + files). Needs the account's e-mail typed out.
+    The account is blocked and signed out first. The owner's own copy can never be deleted here."""
+    return _acl_call(acl.delete_account_data, aid, body.email)
 
 
 @app.get("/privacy")
@@ -788,6 +951,7 @@ def analyze(pid: int, clip_len: int = Query(30, ge=5, le=600)):
 
 @app.post("/api/projects/{pid}/clips")
 def create_clip(pid: int, body: ClipIn):
+    acl.need_clip_room()  # the account's clips-a-day and storage limits
     with SessionLocal() as s:
         p = _get(s, Project, pid)
         if body.end <= body.start or body.end > (p.duration or 10**9) + 1:
@@ -943,6 +1107,7 @@ def upload_video(file: UploadFile = File(...), title: str = Form("")):
     ext = Path(file.filename or "video.mp4").suffix.lower()
     if ext not in VIDEO_EXT:
         raise HTTPException(400, "Upload an MP4 or MOV video file.")
+    acl.need_clip_room()
     name = re.sub(r"\s+", " ", (title or Path(file.filename or "My video").stem).replace("_", " ")).strip()[:150] or "My video"
     with SessionLocal() as s:
         dest = main_destination(s)
@@ -1005,6 +1170,7 @@ def make_captions(cid: int, body: CaptionsIn):
 
 @app.post("/api/clips/{cid}/voice-upload")
 def voice_upload(cid: int, file: UploadFile = File(...)):
+    acl.need_storage()
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         folder = DATA_DIR / "clips" / str(cid)
@@ -1331,6 +1497,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
                                      "can bring another strike (3 strikes close the channel), so it is blocked.")
         if not body.confirm:
             raise HTTPException(400, "Confirm first")
+        acl.need_clip_room()
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
@@ -1404,6 +1571,11 @@ def discard_clip(cid: int):
 @app.post("/api/channels")
 def add_channel(body: ChannelIn):
     _need_step("source")
+    acl.need(acl.SOURCE_KIND.get(body.kind, "source.channel"))  # each kind of source has its own switch
+    if body.kind == "reel" and body.auto_scripts:
+        acl.need("ai.reels")
+    if body.kind != "viral":
+        acl.need_source_room()  # the account's limit on sources
     if body.kind in ("topic", "reel", "trending"):  # topics are always CC; reels are my own content
         body.mode, body.permission_note = "cc", ""
     if body.mode not in ("cc", "permission", "own"):
@@ -1916,6 +2088,8 @@ def gmail_status():
 def gmail_login():
     from . import gmail, onboarding
 
+    if not acl.allowed("gmail.connect"):
+        return RedirectResponse("/?gmail_error=" + quote(acl.message("gmail.connect")), status_code=302)
     if not onboarding.allows("gmail"):
         return RedirectResponse("/?gmail_error=" + quote("Finish the earlier setup steps first."), status_code=302)
     if not youtube.configured():
@@ -2141,6 +2315,7 @@ def guide_errors_clear():
 @app.get("/api/health")
 def health():
     items, now = [], utcnow()
+    items += acl.health_items()  # what the administrator paused, switched off or limited for this account
     with SessionLocal() as s:
         dests = s.query(Destination).order_by(Destination.id).all()
         if not dests:
@@ -2345,8 +2520,25 @@ def delete_channel(chid: int):
 
 
 # ---------- youtube oauth ----------
+def _log_me(request: Request, action: str, text: str):
+    """One line in the activity log for something a route did itself (customers, and the Super Admin inside their dashboard)."""
+    who = getattr(request.state, "who", None) or {}
+    if who.get("role") == "user":
+        acl.record(who.get("account_id"), "user", action, text, who.get("tenant"))
+    elif who.get("viewing"):
+        acl.record(who["viewing"].get("account_id"), "super", action, text, who.get("tenant"))
+
+
+def _reconnect_needed() -> bool:
+    with SessionLocal() as s:
+        return any(_dest_dict(d)["needs_reconnect"] or (d.paused and "login expired" in (d.paused_reason or ""))
+                   for d in s.query(Destination).all())
+
+
 @app.get("/auth/login")
 def auth_login():
+    if not acl.allowed("channels.connect") and not _reconnect_needed():  # renewing an expired login stays possible
+        return RedirectResponse("/?connect_error=" + quote(acl.message("channels.connect")), status_code=302)
     if not youtube.configured():
         if tenant.current() != tenant.OWNER:
             return RedirectResponse("/?connect_error=" + quote("Save your Google project's keys first (Get started → step 1, or My channels → Google project keys)."), status_code=302)
@@ -2470,20 +2662,27 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
 
         if error or not code:
             return RedirectResponse("/#settings", status_code=302)
+        if not acl.allowed("gmail.connect"):
+            return RedirectResponse("/?gmail_error=" + quote(acl.message("gmail.connect")), status_code=302)
         try:
             gmail.handle_callback(code, state)
         except Exception as e:  # noqa: BLE001
             return RedirectResponse("/?gmail_error=" + quote(str(e)[:200]), status_code=302)
+        _log_me(request, "gmail.connect", "Connected Gmail")
         return RedirectResponse("/?gmail=ok", status_code=302)
     if error or not code or not state:
         return RedirectResponse("/", status_code=302)
     with SessionLocal() as s:
         before = {d.id for d in s.query(Destination.id)}
     who = auth.request_identity(request) or {}
+    # a NEW channel needs the switch "Connect a YouTube channel"; renewing the login of a connected one is always allowed
+    new_ok = acl.allowed("channels.connect")
     try:
         with tenant.use(who.get("tenant") or tenant.OWNER):
-            did = youtube.handle_callback(code, state, who.get("channel_limit"))
+            did = youtube.handle_callback(code, state, who.get("channel_limit") if new_ok else 0)
     except youtube.ChannelLimit as e:
+        if not new_ok:
+            return RedirectResponse("/?connect_error=" + quote(acl.message("channels.connect")), status_code=302)
         return RedirectResponse("/?limit=" + quote(str(e)[:300]), status_code=302)
     except Exception as e:  # noqa: BLE001
         return RedirectResponse("/?connect_error=" + quote(str(e)[:200]), status_code=302)
@@ -2493,6 +2692,9 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
             d.paused, d.paused_reason = False, None
             s.commit()
         adopt_orphans(s)
+        if d:
+            _log_me(request, "channels.connect",
+                    ("Connected the YouTube channel “" if did not in before else "Renewed the login of “") + (d.name or "") + "”")
     return RedirectResponse(f"/?connected={did}&new={0 if did in before else 1}", status_code=302)
 
 
@@ -2596,7 +2798,8 @@ def worker_jobs(request: Request):
                 w.ai_status = request.headers["x-worker-ai"][:200]
             s.commit()
     want_ai = False
-    if "x-worker-ai" in request.headers and request.headers.get("x-worker-llm") != "1":  # only helpers that know the job
+    ai_on, pexels_on = acl.feature("ai.reels"), acl.feature("pexels.use")  # switched off for this account: no such jobs
+    if ai_on and "x-worker-ai" in request.headers and request.headers.get("x-worker-llm") != "1":  # only helpers that know the job
         with SessionLocal() as s:
             want_ai = get_setting("ai_wanted") == "1" or s.query(Channel).filter(
                 Channel.kind == "reel", Channel.auto_scripts.is_(True)).count() > 0
@@ -2618,7 +2821,7 @@ def worker_jobs(request: Request):
             if p.mode == "original":  # ReelGen makes the whole reel from my script on the helper PC
                 ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
                 job = {"type": "reel", "clip_id": c.id, "script": p.description or "", "voice": (ch.voice if ch else "") or ""}
-                pk = _secret_setting("pexels_key")
+                pk = _secret_setting("pexels_key") if pexels_on else ""
                 if pk:  # real stock photos instead of colour backgrounds
                     job["pexels_key"], job["photo_query"] = pk, (ch.query if ch and ch.query else "") or p.title
                 jobs.append(job)
@@ -2645,7 +2848,7 @@ def worker_jobs(request: Request):
             p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
             jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
                          "captions": bool((p.quick or {}).get("captions", True))})
-        if request.headers.get("x-worker-llm") == "1":
+        if ai_on and request.headers.get("x-worker-llm") == "1":
             for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True), Channel.script_wanted.isnot(None)):
                 w = dict(ch.script_wanted or {})  # Postgres keeps an empty JSON value as 'null', which passes IS NOT NULL
                 if not w.get("topic"):
@@ -2906,6 +3109,7 @@ def quick_start(body: QuickIn):
             raise HTTPException(400, "Connect your YouTube channel first (My channels).")
         if body.destination_id:
             _get(s, Destination, body.destination_id)
+    acl.need_clip_room(body.count)
     try:
         info = fetch_info(body.url)
     except Exception as e:  # noqa: BLE001
@@ -2986,6 +3190,7 @@ def face_upload(did: int, file: UploadFile = File(...)):
     if did:
         with SessionLocal() as s:
             _get(s, Destination, did)
+    acl.need_storage()
     data = file.file.read(8 * 1024 * 1024 + 1)
     if len(data) > 8 * 1024 * 1024:
         raise HTTPException(400, "Photo is larger than 8 MB")
@@ -3039,6 +3244,7 @@ def thumb_upload(cid: int, file: UploadFile = File(...)):
     ext = Path(file.filename or "t.jpg").suffix.lower()
     if ext not in (".jpg", ".jpeg", ".png"):
         raise HTTPException(400, "Use a JPG or PNG image")
+    acl.need_storage()
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         dest = DATA_DIR / "clips" / str(cid) / ("thumb_custom" + (".png" if ext == ".png" else ".jpg"))
