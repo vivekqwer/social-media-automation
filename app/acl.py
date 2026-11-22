@@ -1007,8 +1007,26 @@ _write_lock = threading.Lock()
 def _own(a: Account) -> dict:
     """A fresh copy of what is saved for one account, with every part present."""
     acc = a.access or {}
-    return {"plan": str(acc.get("plan") or ""), "perms": dict(acc.get("perms") or {}), "limits": dict(acc.get("limits") or {}),
-            "controls": dict(acc.get("controls") or {})}
+    perms, limits = dict(acc.get("perms") or {}), dict(acc.get("limits") or {})
+    held = acc.get("held")
+    if isinstance(held, dict):
+        held = {"perms": [k for k in held.get("perms") or [] if k in DEFAULT],
+                "limits": [k for k in held.get("limits") or [] if k in LIMIT_KEYS or k == "channels"]}
+    else:  # saved before restrictions were marked: every own OFF switch and own limit counts as one (the safe reading)
+        held = {"perms": [k for k, v in perms.items() if v is False and k in DEFAULT],
+                "limits": [k for k, v in limits.items() if k in LIMIT_KEYS and _int(v)]}
+    return {"plan": str(acc.get("plan") or ""), "perms": perms, "limits": limits,
+            "controls": dict(acc.get("controls") or {}), "held": held}
+
+
+def _hold(acc: dict, kind: str, key: str, on: bool):
+    """Mark (or unmark) one switch or limit as restricted by the Super Admin for this account. Only these survive a
+    payment or a paid plan's end; values an account merely kept from a deleted or edited plan do not."""
+    keys = acc["held"][kind]
+    if on and key not in keys:
+        keys.append(key)
+    elif not on and key in keys:
+        keys.remove(key)
 
 
 def set_access(aid: int, perms: dict | None = None, limits: dict | None = None) -> list[str]:
@@ -1026,17 +1044,33 @@ def set_access(aid: int, perms: dict | None = None, limits: dict | None = None) 
         for k, v in (perms or {}).items():
             if v is None:
                 acc["perms"].pop(k, None)
+                _hold(acc, "perms", k, False)
             else:
+                if bool(v):
+                    _hold(acc, "perms", k, False)
+                elif acc["perms"].get(k) is not False:
+                    _hold(acc, "perms", k, True)  # switched OFF here, by hand: a payment does not switch it on again
                 acc["perms"][k] = bool(v)
         for k, v in (limits or {}).items():
             n = _int(v)
             if k == "channels":
                 if n is not None and n >= 1:
-                    row.channel_limit, row.limit_by_hand = min(n, 50), True  # a paid plan's end leaves it alone
+                    was, new = row.channel_limit or accounts.DEFAULT_CHANNELS, min(n, 50)
+                    if new < was:
+                        _hold(acc, "limits", "channels", True)  # lowered by hand: a payment does not raise it
+                    elif new > was:
+                        _hold(acc, "limits", "channels", False)  # raised by hand: a gift, not a restriction
+                    row.channel_limit, row.limit_by_hand = new, True  # a paid plan's end leaves it alone
             elif n is not None and n < 0:
                 acc["limits"].pop(k, None)  # follow the plan again
+                _hold(acc, "limits", k, False)
             else:
-                acc["limits"][k] = min(n or 0, MAX_LIMIT)  # 0 = no limit for this account, whatever its plan says
+                new = min(n or 0, MAX_LIMIT)  # 0 = no limit for this account, whatever its plan says
+                if not new:
+                    _hold(acc, "limits", k, False)
+                elif _int(acc["limits"].get(k)) != new:
+                    _hold(acc, "limits", k, True)  # a number set here, by hand
+                acc["limits"][k] = new
 
     _write_access(aid, change)
     a = _account(aid)
@@ -1060,6 +1094,13 @@ def _show(v) -> str:
     return "no limit" if v is None else str(v)
 
 
+def channels_by_hand(aid: int, was: int, new: int):
+    """The Super Admin changed the channel limit on the Users screen: lowering it is a restriction a payment keeps,
+    raising it is a gift the paid plan may go beyond."""
+    if new != was:
+        _write_access(aid, lambda acc, row: _hold(acc, "limits", "channels", new < was))
+
+
 def set_control(aid: int, name: str, on: bool) -> dict:
     if name not in CONTROLS:
         raise ValueError("Unknown control.")
@@ -1075,8 +1116,10 @@ def apply_plan(aid: int, name: str, keep_restrictions: bool = False) -> dict:
     """Put an account on a plan in one step: its own switches and limits are cleared, so the plan decides everything.
     '' = no plan (the default for everybody).
     keep_restrictions (a plan put on by a payment or by a paid plan's end, not by the Super Admin): every switch the
-    Super Admin set OFF for this account, and every own limit stricter than the plan's, stay. A channel limit the
-    Super Admin set by hand stays when it is lower than the plan's. Direct controls are never touched here."""
+    Super Admin set OFF for this account in the Access panel, and every limit they set there that is stricter than the
+    plan's, stay. A channel limit they LOWERED by hand stays when it is lower than the plan's. Values an account only
+    kept from a deleted or edited plan are not restrictions: the plan that was paid for replaces them. Direct controls
+    are never touched here."""
     cfg = config()
     pname = _plan_name(cfg, name) if name else ""
     if name and pname is None:
@@ -1087,24 +1130,31 @@ def apply_plan(aid: int, name: str, keep_restrictions: bool = False) -> dict:
     kept = []
 
     def change(acc, row):
-        perms, limits = {}, {}
+        perms, limits, held = {}, {}, {"perms": [], "limits": []}
+        was = acc["held"]
         if keep_restrictions:
-            perms = {k: False for k, v in acc["perms"].items() if v is False and k in DEFAULT}
-            for k, v in acc["limits"].items():
-                n, cap = _int(v), plan_limits.get(k)
+            perms = {k: False for k in was["perms"] if acc["perms"].get(k) is False and k in DEFAULT}
+            for k in was["limits"]:
+                n, cap = _int(acc["limits"].get(k)), plan_limits.get(k)
                 if k in LIMIT_KEYS and n and (cap is None or n < cap):  # 0 = "no limit": never stricter
                     limits[k] = n
             kept.extend([LABEL[k] for k in perms] + [k for k in limits])
+            held = {"perms": list(perms), "limits": list(limits)}
         acc["perms"], acc["limits"], acc["plan"] = perms, limits, pname or ""
         row.plan = pname or ""  # the old column is only the name shown under the customer's name
         ch = plan_set["limits"].get("channels")
+        ch_held = keep_restrictions and "channels" in was["limits"]
         if ch:
-            if keep_restrictions and row.limit_by_hand and (row.channel_limit or accounts.DEFAULT_CHANNELS) < ch:
-                kept.append("channels")  # the Super Admin's lower channel limit stays
+            if ch_held and row.limit_by_hand and (row.channel_limit or accounts.DEFAULT_CHANNELS) < ch:
+                kept.append("channels")  # the channel limit the Super Admin lowered stays
+                held["limits"].append("channels")
             else:
                 row.channel_limit = ch
                 if keep_restrictions:
                     row.limit_by_hand = False  # the plan decides the channel limit now
+        elif ch_held:
+            held["limits"].append("channels")  # this plan leaves the channel limit alone: the mark stays with it
+        acc["held"] = held
 
     _write_access(aid, change)
     if keep_restrictions:

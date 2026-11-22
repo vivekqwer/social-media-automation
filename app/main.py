@@ -564,6 +564,7 @@ def admin_edit(aid: int, body: UserEdit):
                    else "Unblocked the account", acc.tenant_id)
     if data.get("channel_limit") and data["channel_limit"] != (acc.channel_limit or 1):
         payments.limit_set_by_hand(aid)  # a paid plan's end leaves this limit as the Super Admin set it
+        acl.channels_by_hand(aid, acc.channel_limit or 1, data["channel_limit"])  # lowered = a restriction, raised = a gift
         acl.record(aid, "super", "admin.switch", f"YouTube channels: {acc.channel_limit or 1} → {data['channel_limit']}", acc.tenant_id)
     if body.close_request:
         asked = (acc.upgrade or {}).get("plan")
@@ -572,12 +573,16 @@ def admin_edit(aid: int, body: UserEdit):
     return out
 
 
+class AllowPlanIn(BaseModel):
+    plan: str | None = Field(None, max_length=80)  # the plan shown on the button that was pressed
+
+
 @app.post("/api/admin/users/{aid}/allow-plan")
-def admin_allow_plan(aid: int):
+def admin_allow_plan(aid: int, body: AllowPlanIn | None = None):
     """'Paid — allow': the customer's UPI payment for the plan they asked for was checked; the plan is put on like an
     online payment (what the Super Admin restricted stays, and it ends on time)."""
     try:
-        return payments.allow_manual(aid)
+        return payments.allow_manual(aid, body.plan if body else None)
     except ValueError as e:
         raise HTTPException(400, str(e))
 

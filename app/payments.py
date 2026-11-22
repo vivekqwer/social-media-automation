@@ -416,7 +416,20 @@ def mark_paid(order_id: str, payment_id: str, via: str) -> dict:
     """Mark an order paid and put its plan on the account — once, however often this is called."""
     now = utcnow()
     with CoreSession() as s:
-        res = s.execute(update(Payment).where(Payment.order_id == order_id, Payment.status != "paid")
+        row = s.query(Payment).filter(Payment.order_id == order_id).first()
+    if row is not None and row.status != "paid" and row.mode == "test" and mode() != "test":
+        # made while test keys were saved, paid with a test card after going live: no real money, so no plan
+        with CoreSession() as s:
+            res = s.execute(update(Payment).where(Payment.order_id == order_id, Payment.status.notin_(["paid", "refused"]))
+                            .values(status="refused", payment_id=payment_id or None, via=via,
+                                    note="test-mode order paid after live keys were saved - no plan was put on"))
+            s.commit()
+        if res.rowcount == 1:
+            _tell_owner(f"⚠️ A TEST payment (order {order_id}) arrived after you went live. No real money was paid, so no "
+                        "plan was put on. Switch off the test-mode webhook in Razorpay.")
+        return {"ok": True, "applied": False, "ignored": "test order in live mode"}
+    with CoreSession() as s:
+        res = s.execute(update(Payment).where(Payment.order_id == order_id, Payment.status.notin_(["paid", "refused"]))
                         .values(status="paid", payment_id=payment_id or None, paid_at=now, via=via))
         s.commit()
         row = s.query(Payment).filter(Payment.order_id == order_id).first()
@@ -442,8 +455,9 @@ def _apply_paid(a: Account, plan: str, period: str, amount: int, test: str, how:
 
     expires = _expiry(a, plan, period)
     # the channel limit given back when this paid period ends: the one from before the FIRST payment of the period
-    running = bool(a.paid_plan and (a.plan_expires is None or a.plan_expires > utcnow()))
-    before = a.limit_before_pay if running and a.limit_before_pay else (a.channel_limit or 1)
+    # (paid_plan stays set until the end is carried out by expire_due, also when the date has passed: a renewal made
+    # between the end date and the daily job must not remember the PAID channel limit as the one to give back)
+    before = a.limit_before_pay if a.paid_plan and a.limit_before_pay else (a.channel_limit or 1)
     try:
         acl.apply_plan(a.id, plan, keep_restrictions=True)  # what the Super Admin switched off stays off
     except (ValueError, KeyError):
@@ -467,13 +481,16 @@ def _apply_paid(a: Account, plan: str, period: str, amount: int, test: str, how:
     return {"ok": True, "applied": True, "plan": plan, "expires": expires.isoformat() + "Z" if expires else None}
 
 
-def allow_manual(account_id: int) -> dict:
+def allow_manual(account_id: int, expected: str | None = None) -> dict:
     """The Super Admin checked a customer's UPI payment for the plan they asked for ("I have paid ₹X"): the plan is put
     on exactly like an online payment (restrictions kept, ends on time) and a row is added to the payments list."""
     a = _account(account_id)
     req = (a.upgrade or {}) if a else {}
     if not a or not req.get("plan"):
         raise ValueError("There is no open plan request for this account.")
+    if expected and str(req["plan"]).lower() != str(expected).lower():
+        raise ValueError(f"The customer changed the request to the plan “{req['plan']}” meanwhile. Check the payment for "
+                         "that plan, then press again.")
     from . import acl
 
     name = acl._plan_name(acl.config(), req["plan"])
@@ -587,6 +604,9 @@ def expire_due() -> dict:
     for aid, exp, warned_for in rows:
         try:
             a = _account(aid)
+            if a is None or a.plan_expires is None:
+                continue  # ended or taken over meanwhile
+            exp, warned_for = a.plan_expires, a.expiry_warned  # the fresh row: a payment may have arrived since the list was read
             old = acl._plan_of(a)
             if not a.paid_plan or old.lower() != a.paid_plan.lower():
                 with CoreSession() as s:  # the account is on another plan now (changed by hand): not ours to end
@@ -596,9 +616,20 @@ def expire_due() -> dict:
             if exp <= now:
                 free = _free_plan()
                 by_hand, before = bool(a.limit_by_hand), a.limit_before_pay or 1
+                with CoreSession() as s:  # claim the end: only while the end date is still the one that passed
+                    res = s.execute(update(Account).where(Account.id == aid, Account.plan_expires == exp)
+                                    .values(expiry_warned=exp))
+                    s.commit()
+                if res.rowcount != 1:
+                    continue  # renewed this very moment: the new end date stands
                 acl.apply_plan(aid, free, keep_restrictions=True)
                 with CoreSession() as s:
                     acc = s.get(Account, aid)
+                    if acc.plan_expires != exp:  # a payment landed while the plan was being taken off: put it back
+                        back = acc.paid_plan or old
+                        s.commit()
+                        acl.apply_plan(aid, back, keep_restrictions=True)
+                        continue
                     if by_hand:
                         acc.channel_limit, acc.limit_by_hand = a.channel_limit, True  # exactly as the Super Admin set it
                     else:

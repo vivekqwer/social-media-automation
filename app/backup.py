@@ -249,7 +249,23 @@ def safety() -> str:
 
 
 # ---------------------------------------------------------------- reading a file sent for restore
+_unpack_one = threading.BoundedSemaphore(1)  # customers' files are unpacked one at a time, server-wide
+
+
 def unpack(blob: bytes, is_super: bool = True) -> dict:
+    """Read a file sent for restore. A customer's file waits for its turn, so several large files sent at the same
+    moment can never be in memory together."""
+    if is_super:
+        return _unpack(blob, True)
+    if not _unpack_one.acquire(timeout=20):
+        raise BackupError("The system is busy checking another backup right now. Try again in a minute.")
+    try:
+        return _unpack(blob, False)
+    finally:
+        _unpack_one.release()
+
+
+def _unpack(blob: bytes, is_super: bool = True) -> dict:
     cap, cap_raw = (MAX_UPLOAD, MAX_UNPACKED) if is_super else (MAX_UPLOAD_USER, MAX_UNPACKED_USER)
     if not blob:
         raise BackupError("The file is empty.")
