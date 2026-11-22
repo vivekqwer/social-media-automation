@@ -338,3 +338,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Seen live again: download 3.5 min + captions on the PC (Whisper) = 12 minutes without calling in → "Helper PC is offline".
 - app/main.py `_helper_state`: when no helper called in lately but one took a job within the job time (40 min) and was seen within that time, it counts as online (working). No job in hand, or silent for longer → offline as before.
 - Test: scratchpad test_helper_busy.py 4/4.
+
+## 2026-11-22 — Task 61: reminder says "Like, share and subscribe" (owner's request)
+- app/reminder.py: three new ready-made wordings with "share" (English, Hinglish, Hindi); the default for an account that never chose is now "Like, share and subscribe for more". Accounts that saved a wording keep it.
+- Only videos made after the deploy carry the new words; clips already rendered keep the old line.
+- Checked for the owner (code): credit to the creator (on the video + in the description), the reminder, the face + title band on every frame of a Short, and the thumbnail (frame + face + big text, sent with thumbnails.set, also shown in the first moment of a Short) are all on by default.
+- Test: test_cta.py 49/49.
