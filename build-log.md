@@ -394,3 +394,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Also fixed: "Paid — allow" sends the plan shown on the button and is refused if the customer changed the request meanwhile; customers' backup files are unpacked one at a time (bounds memory).
 - Known, not fixed (reviewer: can wait): one-time plan lost when a periodic one is bought after it; "paid" row written before the plan is applied (a crash in between needs a by-hand fix); two payments for one account in the same second lose one period; own restore refused when the account is over its channel limit after a plan ended; safety backup made before the file is validated; a by-hand comment on an old video after a restart mid-post; the duplicate-comment check reads only the newest 50 comments.
 - Tests: new test_review2.py 24/24; full run before these fixes 1204 pass / 3 stale; after: see Task 63.
+
+## 2026-11-22 — Task 63: deploy of Tasks 55–58 + review fixes (payments, backup & restore, first comment, What works)
+- Final full run on the merged code (48 files): 1228 pass, 3 fail — the 3 known stale test assertions (test_mailnotify "alert mailed to the owner, plain text"; test_trend3 "ready message with their name", "script -> reel job created automatically"), not product bugs.
+- Merged integrate-final into main (fast-forward) and pushed; Railway deploys from main.
+- Queued clips were re-made with the new "Like, share and subscribe for more" line (owner's request): one by one through POST /api/clips/{id}/render, upload times kept.
