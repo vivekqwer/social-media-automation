@@ -170,6 +170,14 @@ HELP = [
     ("I want to upload my own video file",
      "It becomes a clip with every tool: sound, text, captions, thumbnail, schedule.",
      "Clips → “Upload my video” (MP4 or MOV, up to 300 MB). A wide video is uploaded as a full video, a tall one as a Short."),
+    ("What does auto-tune change?",
+     "Once a day the system compares the views per day of your uploaded clips (older than 2 days) with your channel's "
+     "usual. A source whose clips do 1.5× better makes one more video per run (at most twice its own setting, never "
+     "above your account's limits); one that does much worse makes one fewer (never below 1). Nothing is paused or "
+     "deleted, and upload times are never changed. Words that do best get a small extra weight in titles and tags. "
+     "A group needs at least 5 videos before anything is changed.",
+     "Nothing. See what was changed and why: Ideas → What works. “Undo auto-tune” puts every source back to its own "
+     "setting and switches auto-tune off; the switch turns it on again."),
     ("A creator answered my mail",
      "A plain yes starts their clips by itself. Everything else waits for you.",
      "Ideas → Permission inbox: read the reply and press “Permission given” or “They said no”. Press Undo if an automatic yes was wrong."),

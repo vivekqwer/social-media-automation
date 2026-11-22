@@ -202,6 +202,7 @@ ROUTES = [
     ("POST", "/api/viral/refresh", "page.viral", None),
     ("GET", "/api/ideas", "page.ideas", None),
     ("GET", "/api/permissions", "page.ideas", None),
+    ("GET", "/api/insights", "page.ideas", None),  # Ideas -> What works (read only)
     ("GET", "/api/alerts", "page.alerts", None),
     ("POST", "/api/alerts/seen", "page.alerts", None),
     ("POST", "/api/alerts/check", "page.alerts", None),
@@ -232,6 +233,8 @@ ROUTES = [
     ("POST", "/api/channels/{chid}/destination", "sources.edit", "Changed which channel a source uploads to"),
     ("POST", "/api/channels/{chid}/run", "sources.run", "Ran a source"),
     ("DELETE", "/api/channels/{chid}", "sources.delete", "Deleted a source"),
+    ("POST", "/api/insights/autotune", "sources.edit", "Switched auto-tune on / off"),  # auto-tune changes sources
+    ("POST", "/api/insights/undo", "sources.edit", "Undid auto-tune (sources back to their own settings)"),
     ("POST", "/api/viral/pick", "source.viral", "Picked a viral video"),
     # --- clips
     ("POST", "/api/projects", "clips.create", "Opened a video to make a clip"),
