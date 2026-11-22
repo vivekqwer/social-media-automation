@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import auth, quota, scheduler, workers, youtube
+from . import accounts, auth, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
@@ -45,7 +45,7 @@ MODES = {"cc", "permission", "commentary"}
 # public pages Google (OAuth consent / API audit) must be able to open without the dashboard password
 PUBLIC_PATHS = {
     "/healthz", "/privacy", "/terms", "/about",
-    "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password",
+    "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password", "/register", "/api/register",
     "/auth/reset/start", "/auth/callback",
 }
 SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
@@ -68,20 +68,23 @@ def _check_yt_url(url: str):
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
     migrate()
+    accounts.init()
     encrypt_existing()
     sch = scheduler.start()
     yield
     sch.shutdown(wait=False)
 
 
-app = FastAPI(title="Raji Studio", lifespan=lifespan)
+app = FastAPI(title="Raji Studio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 
 
 @app.exception_handler(Exception)
 async def unexpected_error(request: Request, exc: Exception):
     from .guide import record_error
 
-    record_error(f"{request.method} {request.url.path}", exc)
+    who = getattr(request.state, "who", None) or {}
+    with tenant.use(who.get("tenant") or tenant.OWNER):
+        record_error(f"{request.method} {request.url.path}", exc)
     return JSONResponse({"detail": "Something went wrong on the server. Try again in a minute. If it keeps happening, open "
                                    f"Setup guide → “If something goes wrong” and press Copy details. ({type(exc).__name__})"},
                         status_code=500)
@@ -128,26 +131,55 @@ async def auth_gate(request: Request, call_next):
             if path.startswith(("/api/worker/voice/", "/api/worker/analysis/")) else 64 * 1024
         if size > cap:
             return JSONResponse({"detail": "Too large"}, status_code=413)
-        if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
-            found = workers.authenticate(request.headers.get("x-worker-token", ""))
-            if not found:
+        tok = request.headers.get("x-worker-token", "")
+        if path == "/api/worker/register":
+            claim = request.headers.get("x-helper-claim", "")
+            tid = workers.tenant_from_claim(claim) if claim else tenant.OWNER
+            if tid is not None and tid != tenant.OWNER and tid not in accounts.active_tenants():
+                tid = None  # the account is blocked or gone
+            if tid is None:
+                return JSONResponse({"detail": "This helper code is not valid. Copy it again from My channels → Helper PC."}, status_code=403)
+        else:
+            tid = workers.tenant_of(tok)
+            if tid != tenant.OWNER and tid not in accounts.active_tenants():
                 return JSONResponse({"detail": "Unknown helper"}, status_code=401)
-            if not found[1]:
-                return JSONResponse({"detail": "Waiting for approval in the dashboard"}, status_code=403)
-        return _secure(await call_next(request))
+        with tenant.use(tid):  # the helper sees and serves only its own customer's copy
+            if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
+                found = workers.authenticate(tok)
+                if not found:
+                    return JSONResponse({"detail": "Unknown helper"}, status_code=401)
+                if not found[1]:
+                    return JSONResponse({"detail": "Waiting for approval in the dashboard"}, status_code=403)
+            return _secure(await call_next(request))
     if path == "/api/upload-video" and request.method == "POST":
         if size > MAX_VIDEO_BYTES + 1024 * 1024:
             return JSONResponse({"detail": "Video too large (max 300 MB)"}, status_code=413)
     elif size > 50 * 1024 * 1024:  # the largest other dashboard upload is a 25 MB voice file
         return JSONResponse({"detail": "File too large"}, status_code=413)
     if path in PUBLIC_PATHS:
+        who = auth.request_identity(request)
+        if who:  # e.g. Google sends a signed-in person back to /auth/callback: it must run in THEIR copy
+            request.state.who = who
+            with tenant.use(who["tenant"]):
+                return _secure(await call_next(request))
         return _secure(await call_next(request))
     if not auth.auth_configured():
         if not IS_LOCAL:
             return PlainTextResponse("Set the APP_PASSWORD env var before using this app.", status_code=503)
         return await call_next(request)
-    if auth.request_authenticated(request):
-        return _secure(await call_next(request))
+    who = auth.request_identity(request)
+    if who:
+        if path.startswith("/api/admin/") and who["role"] != "super":
+            return JSONResponse({"detail": "Only the Super Admin can do this."}, status_code=403)
+        request.state.who = who
+        shown = request.headers.get("x-copy")
+        if shown and shown != str(who["tenant"]) and path.startswith("/api/") and path != "/api/me":
+            # e.g. "View as" ended or was started in another tab: this page still shows the other copy's rows,
+            # and row numbers repeat between copies — never act on the wrong one
+            return JSONResponse({"detail": "This page was showing another account's dashboard. It is being reloaded.",
+                                 "reload": True}, status_code=409)
+        with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
+            return _secure(await call_next(request))
     if path.startswith("/api/"):
         return JSONResponse({"detail": "Not logged in"}, status_code=401)
     return RedirectResponse("/login?next=" + quote(path), status_code=302)
@@ -203,23 +235,85 @@ def page_reset(request: Request):
 @app.post("/api/login")
 def api_login(body: LoginIn, request: Request):
     ip = _client_ip(request)
-    if auth.rate_limited(ip):
+    customer = "@" in (body.username or "") and (body.username or "").strip() != APP_USER
+    if auth.rate_limited(ip, "customer" if customer else "owner"):
         raise HTTPException(429, "Too many attempts. Try again in a few minutes.")
     if not auth.auth_configured():
         raise HTTPException(503, "No password is set on the server yet.")
+    if customer:
+        acc, problem = accounts.check_login(body.username, body.password)
+        if not acc:
+            if "Wrong" in problem:  # waiting / blocked are not guesses
+                auth.note_fail(ip, "customer")
+            raise HTTPException(403 if "approval" in problem or "blocked" in problem else 401, problem)
+        resp = JSONResponse({"ok": True})
+        _set_cookie(resp, auth.SESSION_COOKIE, accounts.make_session(acc), auth.SESSION_TTL)
+        resp.delete_cookie(auth.AS_COOKIE, path="/")
+        return resp
     if not auth.check_login(body.username, body.password):
         auth.note_fail(ip)
         raise HTTPException(401, "Wrong username or password.")
     resp = JSONResponse({"ok": True})
     _set_cookie(resp, auth.SESSION_COOKIE, auth.make_session(APP_USER), auth.SESSION_TTL)
+    resp.delete_cookie(auth.AS_COOKIE, path="/")
     return resp
 
 
+class RegisterIn(BaseModel):
+    name: str = Field(max_length=120)
+    brand: str = Field(max_length=60)
+    email: str = Field(max_length=200)
+    password: str = Field(max_length=200)
+    accept_terms: bool = False
+
+
+@app.get("/register")
+def page_register(request: Request):
+    if auth.request_authenticated(request):
+        return RedirectResponse("/", status_code=302)
+    return FileResponse(_STATIC / "register.html")
+
+
+@app.post("/api/register")
+def api_register(body: RegisterIn, request: Request):
+    ip = _client_ip(request)
+    if auth.rate_limited(ip, "register"):  # its own counter: registrations never touch anybody's sign-in attempts
+        raise HTTPException(429, "Too many new accounts from this connection. Try again in an hour.")
+    try:
+        acc = accounts.register(body.email, body.name, body.brand, body.password, body.accept_terms)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    auth.note_fail(ip, "register")  # at most 3 accounts per connection in 10 minutes, 40 an hour in total
+    from .telegram import esc
+
+    _tell_owner(f"🆕 <b>New account waiting for approval</b>\n{esc(acc.name)} — {esc(acc.email)}\nSystem name: {esc(acc.brand)}\n"
+                "Open Users in the dashboard to approve it.")
+    return {"ok": True, "status": "pending"}
+
+
+@app.get("/api/me")
+def api_me(request: Request):
+    """Who is signed in and what their plan allows (the dashboard shows the name and hides what is not theirs)."""
+    who = dict(getattr(request.state, "who", None) or {"role": "super", "tenant": tenant.OWNER, "name": APP_USER})
+    with SessionLocal() as s:
+        who["channels"] = s.query(Destination).count()
+    if who["role"] == "user":
+        acc = accounts.get(who["account_id"])
+        who["upgrade"] = acc.upgrade if acc else None
+    who["pay"] = _pay_info() if who["role"] == "user" or who.get("viewing") else None
+    return who
+
+
 @app.post("/api/logout")
-def api_logout():
-    auth.end_all_sessions()  # a copied cookie stops working too
+def api_logout(request: Request):
+    who = auth.request_identity(request)
+    if who and who["role"] == "user":
+        accounts.end_sessions(who["account_id"])
+    elif who:
+        auth.end_all_sessions()  # a copied cookie stops working too
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(auth.SESSION_COOKIE, path="/")
+    resp.delete_cookie(auth.AS_COOKIE, path="/")
     return resp
 
 
@@ -247,7 +341,21 @@ def api_reset_password(body: ResetIn, request: Request):
 
 
 @app.post("/api/change-password")
-def api_change_password(body: ChangePwIn):
+def api_change_password(body: ChangePwIn, request: Request):
+    who = getattr(request.state, "who", None) or {}
+    if who.get("viewing"):
+        raise HTTPException(400, "You are viewing a customer's dashboard. Leave “View as” to change your own password.")
+    if who.get("role") == "user":
+        acc = accounts.get(who["account_id"])
+        if not acc or not auth._verify_hash(body.old_password, acc.pw_hash):
+            raise HTTPException(400, "Current password is wrong.")
+        err = auth.validate_new_password(body.new_password)
+        if err:
+            raise HTTPException(400, err)
+        accounts.set_password(acc.id, body.new_password)
+        resp = JSONResponse({"ok": True})
+        _set_cookie(resp, auth.SESSION_COOKIE, accounts.make_session(accounts.get(acc.id)), auth.SESSION_TTL)
+        return resp
     if not auth.check_login(APP_USER, body.old_password):
         raise HTTPException(400, "Current password is wrong.")
     err = auth.validate_new_password(body.new_password)
@@ -257,6 +365,189 @@ def api_change_password(body: ChangePwIn):
     resp = JSONResponse({"ok": True})
     _set_cookie(resp, auth.SESSION_COOKIE, auth.make_session(APP_USER), auth.SESSION_TTL)
     return resp
+
+
+# ---------- accounts: what a customer can do about their own plan ----------
+def _owner_setting(key: str) -> str | None:
+    with tenant.use(tenant.OWNER):
+        return get_setting(key)
+
+
+def _pay_info() -> dict:
+    """How to pay for more channels (set by the Super Admin, shown to customers)."""
+    try:
+        return json.loads(_owner_setting("pay_info") or "{}")
+    except ValueError:
+        return {}
+
+
+def _tell_owner(text: str):
+    try:
+        from .telegram import notify
+
+        with tenant.use(tenant.OWNER):
+            notify(text)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class UpgradeIn(BaseModel):
+    channels: int = Field(ge=2, le=50)
+    message: str = Field("", max_length=500)
+
+
+class BrandIn(BaseModel):
+    brand: str = Field(min_length=2, max_length=60)
+
+
+@app.post("/api/account/upgrade")
+def account_upgrade(body: UpgradeIn, request: Request):
+    """A customer asks for more channels (after paying the way the Super Admin describes)."""
+    who = getattr(request.state, "who", None) or {}
+    if who.get("role") != "user":
+        raise HTTPException(400, "Only customer accounts have a plan.")
+    if body.channels <= (who.get("channel_limit") or 1):
+        raise HTTPException(400, f"Your plan already allows {who.get('channel_limit') or 1} channel(s).")
+    req = {"channels": body.channels, "message": accounts.clean_brand(body.message)[:500], "at": utcnow().isoformat() + "Z"}
+    acc = accounts.update(who["account_id"], upgrade=req)
+    from .telegram import esc
+
+    _tell_owner(f"💳 <b>{esc(acc['name'])}</b> ({esc(acc['email'])}) asks for {body.channels} channels.\n"
+                f"{esc(req['message'])}\nOpen Users in the dashboard to allow it.")
+    return {"ok": True, "upgrade": req}
+
+
+@app.post("/api/account/brand")
+def account_brand(body: BrandIn, request: Request):
+    """A customer renames their system (the name in their dashboard)."""
+    who = getattr(request.state, "who", None) or {}
+    if who.get("role") != "user":
+        raise HTTPException(400, "The Super Admin's system name is set in the project.")
+    try:
+        return accounts.update(who["account_id"], brand=body.brand)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/account/helper-code")
+def account_helper_code():
+    """The code that attaches a new helper PC to this account's copy (the owner's helpers need none)."""
+    tid = tenant.current()
+    return {"code": None if tid == tenant.OWNER else workers.claim_code(tid)}
+
+
+# ---------- Super Admin: users, limits, payments ----------
+def _usage(tid: int) -> dict:
+    try:
+        with tenant.use(tid):
+            with SessionLocal() as s:
+                return {"channels": s.query(Destination).count(), "sources": s.query(Channel).count(),
+                        "clips": s.query(Clip).count(), "uploaded": s.query(Clip).filter(Clip.status == "uploaded").count(),
+                        "helper": _helper_state(s)["online"]}
+    except Exception as e:  # noqa: BLE001
+        return {"error": str(e)[:100]}
+
+
+class UserEdit(BaseModel):
+    status: Literal["active", "blocked"] | None = None
+    channel_limit: int | None = Field(None, ge=1, le=50)
+    plan: str | None = Field(None, max_length=40)
+    note: str | None = Field(None, max_length=2000)
+    brand: str | None = Field(None, max_length=60)
+    close_request: bool = False
+
+
+class PayIn(BaseModel):
+    upi: str = Field("", max_length=100)
+    price: str = Field("", max_length=100)
+    text: str = Field("", max_length=1000)
+
+
+@app.get("/api/admin/users")
+def admin_users():
+    rows = accounts.listing()
+    for r in rows:
+        r["usage"] = _usage(r["tenant_id"]) if r["status"] != "pending" and r["tenant_id"] else None
+    return {"users": rows, "pay": _pay_info(), "owner": _usage(tenant.OWNER)}
+
+
+@app.post("/api/admin/users/{aid}/approve")
+def admin_approve(aid: int):
+    try:
+        return accounts.approve(aid)
+    except KeyError:
+        raise HTTPException(404, "Account not found")
+
+
+@app.post("/api/admin/users/{aid}")
+def admin_edit(aid: int, body: UserEdit):
+    data = {k: v for k, v in body.model_dump(exclude={"close_request"}).items() if v is not None}
+    acc = accounts.get(aid)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if data.get("status") == "active" and not acc.tenant_id:
+        raise HTTPException(400, "Approve the account first.")
+    if body.close_request or (data.get("channel_limit") and acc.upgrade and data["channel_limit"] >= int(acc.upgrade.get("channels") or 0)):
+        data["upgrade"] = None  # the request is answered
+    try:
+        return accounts.update(aid, **data)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/admin/users/{aid}/reset-password")
+def admin_reset_password(aid: int):
+    if not accounts.get(aid):
+        raise HTTPException(404, "Account not found")
+    return {"password": accounts.reset_password(aid)}  # shown once; the customer changes it after signing in
+
+
+@app.delete("/api/admin/users/{aid}")
+def admin_delete(aid: int):
+    try:
+        accounts.delete(aid)
+    except KeyError:
+        raise HTTPException(404, "Account not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"deleted": True}
+
+
+@app.post("/api/admin/users/{aid}/view")
+def admin_view_as(aid: int):
+    """Open this customer's dashboard (to help them). Nothing they own is changed by looking."""
+    acc = accounts.get(aid)
+    if not acc or not acc.tenant_id:
+        raise HTTPException(400, "This account has no dashboard yet (approve it first).")
+    resp = JSONResponse({"ok": True, "viewing": acc.name})
+    _set_cookie(resp, auth.AS_COOKIE, auth.make_view_as(aid), auth.AS_TTL)
+    return resp
+
+
+@app.post("/api/admin/view/exit")
+def admin_view_exit():
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(auth.AS_COOKIE, path="/")
+    return resp
+
+
+@app.get("/api/admin/pay")
+def admin_pay_get():
+    return _pay_info()
+
+
+@app.post("/api/admin/pay")
+def admin_pay_set(body: PayIn):
+    with tenant.use(tenant.OWNER):
+        set_setting("pay_info", json.dumps({"upi": body.upi.strip(), "price": body.price.strip(), "text": body.text.strip()}))
+    return _pay_info()
+
+
+@app.get("/api/admin/selftest")
+def admin_selftest():
+    """Check on the live database that customers' copies are really separate."""
+    with tenant.use(tenant.OWNER):
+        return accounts.self_test()
 
 
 @app.get("/privacy")
@@ -1321,16 +1612,17 @@ class MetaIn(BaseModel):
 
 
 @app.get("/media/{cid}/{exp}/{sig}.mp4")
-def public_media(cid: int, exp: int, sig: str):
+def public_media(cid: int, exp: int, sig: str, t: int = Query(1, ge=1, le=10**9)):
     from .meta import check_link
 
-    if not check_link(cid, exp, sig):
+    if not check_link(cid, exp, sig, t):  # the signature covers the customer number: no other copy's clip can be opened
         raise HTTPException(404, "Not found")
-    with SessionLocal() as s:
-        c = s.get(Clip, cid)
-        if not c or not c.output_path or not Path(c.output_path).exists():
-            raise HTTPException(404, "Not found")
-        return FileResponse(c.output_path, media_type="video/mp4")
+    with tenant.use(t):
+        with SessionLocal() as s:
+            c = s.get(Clip, cid)
+            if not c or not c.output_path or not Path(c.output_path).exists():
+                raise HTTPException(404, "Not found")
+            return FileResponse(c.output_path, media_type="video/mp4")
 
 
 @app.get("/api/meta")
@@ -2029,8 +2321,12 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         return RedirectResponse("/", status_code=302)
     with SessionLocal() as s:
         before = {d.id for d in s.query(Destination.id)}
+    who = auth.request_identity(request) or {}
     try:
-        did = youtube.handle_callback(code, state)
+        with tenant.use(who.get("tenant") or tenant.OWNER):
+            did = youtube.handle_callback(code, state, who.get("channel_limit"))
+    except youtube.ChannelLimit as e:
+        return RedirectResponse("/?limit=" + quote(str(e)[:300]), status_code=302)
     except Exception as e:  # noqa: BLE001
         return RedirectResponse("/?connect_error=" + quote(str(e)[:200]), status_code=302)
     with SessionLocal() as s:
@@ -2111,15 +2407,17 @@ class PairIn(BaseModel):
 @app.post("/api/worker/register")
 def worker_register(body: WorkerRegIn, request: Request):
     ip = _client_ip(request)
-    if auth.rate_limited(ip):
+    if auth.rate_limited(ip, "helper"):
         raise HTTPException(429, "Too many attempts")
-    auth.note_fail(ip)  # registrations count towards the same limiter
+    auth.note_fail(ip, "helper")  # helper registrations have their own counter
     with SessionLocal() as s:
         s.query(Worker).filter(Worker.approved.is_(False), Worker.created_at < utcnow() - timedelta(minutes=30)).delete()
         s.commit()
         if s.query(Worker).filter(Worker.approved.is_(False)).count() >= 5:
             raise HTTPException(429, "Too many helpers waiting for approval")
         tok = secrets.token_urlsafe(32)
+        if tenant.current() != tenant.OWNER:
+            tok = f"t{tenant.current()}.{tok}"  # tells the server which customer this helper belongs to
         w = Worker(name=(body.name.strip() or "helper")[:60], token_hash=workers.token_hash(tok), approved=False,
                    last_seen=utcnow(), ip=ip[:60], pair_hash=workers.token_hash(workers.pair_code(tok)))
         s.add(w)

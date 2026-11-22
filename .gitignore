@@ -13,3 +13,4 @@ worker/helper.log
 worker/helper.old.log
 backups/
 .claude/
+worker/helper_code.txt

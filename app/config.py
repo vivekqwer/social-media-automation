@@ -14,10 +14,17 @@ _dd = os.getenv("DATA_DIR") or "data"
 if not Path(_dd).is_absolute() and os.name != "nt" and Path("/data").is_dir():
     # a relative DATA_DIR inside the container lands on the throw-away filesystem: use the mounted volume
     _dd = "/data"
-DATA_DIR = Path(_dd).resolve()
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+BASE_DATA_DIR = Path(_dd).resolve()  # the real folder: shared things (keys, models, ffmpeg) and tenant 1's data
+BASE_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}"
+from . import tenant  # noqa: E402
+
+tenant.set_base_dir(BASE_DATA_DIR)
+# The data folder of whichever customer the running code is working for (see app/tenant.py). For the original
+# installation (tenant 1) this is BASE_DATA_DIR itself, exactly as before.
+DATA_DIR = tenant.TenantPath()
+
+DATABASE_URL = os.getenv("DATABASE_URL") or f"sqlite:///{(BASE_DATA_DIR / 'app.db').as_posix()}"
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql+psycopg2://", 1)
 elif DATABASE_URL.startswith("postgresql://"):
@@ -73,7 +80,7 @@ def ffmpeg_bin() -> str:
         if exe.stem == "ffmpeg":
             return str(exe)
         # yt-dlp only recognises a binary literally named ffmpeg
-        alias = DATA_DIR / "bin" / ("ffmpeg" + exe.suffix)
+        alias = BASE_DATA_DIR / "bin" / ("ffmpeg" + exe.suffix)
         if not alias.exists():
             alias.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(exe, alias)

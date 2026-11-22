@@ -3,17 +3,70 @@ from datetime import datetime, timezone
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from .config import DATABASE_URL
+from . import tenant
+from .config import BASE_DATA_DIR, DATABASE_URL
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)
-SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
-Base = declarative_base()
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+connect_args = {"check_same_thread": False} if IS_SQLITE else {}
+engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)  # tenant 1 + the shared tables
+Base = declarative_base()  # the tables every customer has a private copy of
+_engines: dict[int, object] = {tenant.OWNER: engine}
+_makers: dict[int, object] = {}
+_ready: set[int] = set()
+_ensure_lock = __import__("threading").Lock()
+
+
+def engine_for(tenant_id: int | None = None):
+    """The database of one customer. PostgreSQL: the same server, the customer's own schema. SQLite: own file."""
+    tid = tenant.current() if tenant_id is None else int(tenant_id)
+    eng = _engines.get(tid)
+    if eng is None:
+        if IS_SQLITE:
+            path = tenant.root(tid) / "app.db"
+            eng = create_engine(f"sqlite:///{path.as_posix()}", connect_args=connect_args, pool_pre_ping=True)
+        else:  # every table name without a schema is looked up in this customer's schema
+            eng = engine.execution_options(schema_translate_map={None: tenant.schema(tid)})
+        _engines[tid] = eng
+    return eng
+
+
+def ensure_tenant(tenant_id: int):
+    """Create (or bring up to date) a customer's private tables. Safe to call again and again."""
+    tid = int(tenant_id)
+    if tid in _ready:
+        return
+    with _ensure_lock:
+        if tid in _ready:
+            return
+        if tid != tenant.OWNER and not IS_SQLITE:
+            from sqlalchemy import text
+
+            with engine.begin() as conn:
+                conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{tenant.schema(tid)}"'))
+        Base.metadata.create_all(engine_for(tid))
+        migrate(tid)
+        _ready.add(tid)
+
+
+class _Sessions:
+    """`SessionLocal()` — a database session for whichever customer the running code is working for."""
+
+    def __call__(self, **kw):
+        tid = tenant.current()
+        mk = _makers.get(tid)
+        if mk is None:
+            if tid != tenant.OWNER:
+                ensure_tenant(tid)
+            mk = _makers[tid] = sessionmaker(bind=engine_for(tid), expire_on_commit=False)
+        return mk(**kw)
+
+
+SessionLocal = _Sessions()
 
 
 class Project(Base):
@@ -250,17 +303,21 @@ def set_setting(key: str, value: str):
         s.commit()
 
 
-def migrate():
+def migrate(tenant_id: int = tenant.OWNER, metadata=None):
     """Tiny auto-migration: add columns that exist in the models but not in the database yet."""
     from sqlalchemy import inspect, text
 
-    insp = inspect(engine)
-    for table in Base.metadata.sorted_tables:
-        if not insp.has_table(table.name):
+    tid = int(tenant_id)
+    eng = engine_for(tid)
+    sch = None if IS_SQLITE else tenant.schema(tid)  # raw SQL is not translated: name the schema ourselves
+    insp = inspect(engine if not IS_SQLITE else eng)
+    for table in (metadata or Base.metadata).sorted_tables:
+        if not insp.has_table(table.name, schema=sch):
             continue
-        existing = {c["name"] for c in insp.get_columns(table.name)}
+        existing = {c["name"] for c in insp.get_columns(table.name, schema=sch)}
         for col in table.columns:
             if col.name not in existing:
                 ddl = col.type.compile(engine.dialect)
-                with engine.begin() as conn:
-                    conn.execute(text(f"ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}"))
+                full = f'"{sch}".{table.name}' if sch else table.name
+                with (engine if not IS_SQLITE else eng).begin() as conn:
+                    conn.execute(text(f"ALTER TABLE {full} ADD COLUMN {col.name} {ddl}"))

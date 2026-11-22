@@ -22,7 +22,9 @@ os.environ["PATH"] = str(Path(sys.executable).parent) + os.pathsep + os.environ[
 def _opts(extra: dict | None = None) -> dict:
     o = {"quiet": True, "no_warnings": True, "ffmpeg_location": ffmpeg_bin(), "allowed_extractors": ["(?i)youtube.*"],
          "socket_timeout": 30}
-    if YT_COOKIES_FILE:
+    from . import tenant
+
+    if YT_COOKIES_FILE and tenant.current() == tenant.OWNER:  # the owner's own Google login: never lent to customers
         o["cookiefile"] = YT_COOKIES_FILE
     elif COOKIES_PATH.exists():
         o["cookiefile"] = _plain_cookie_file()
@@ -50,7 +52,9 @@ def _plain_cookie_file() -> str:
     """yt-dlp needs a real file: write the decrypted copy to the container's temp space (not the volume)."""
     import tempfile
 
-    tmp = Path(tempfile.gettempdir()) / "cs_cookies.txt"
+    from . import tenant
+
+    tmp = Path(tempfile.gettempdir()) / ("cs_cookies.txt" if tenant.current() == tenant.OWNER else f"cs_cookies_t{tenant.current()}.txt")
     data = read_cookies()
     if not tmp.exists() or tmp.read_text(encoding="utf-8", errors="ignore") != data:
         tmp.write_text(data, encoding="utf-8")

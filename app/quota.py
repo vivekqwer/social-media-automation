@@ -8,7 +8,37 @@ import threading
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .db import Setting, SessionLocal
+from . import tenant
+from .db import Setting, SessionLocal as _TenantSession, get_setting
+
+
+class _BudgetSession:
+    """The YouTube budget belongs to a Google project, not to a customer. A customer who uses the server's own
+    project (no keys of their own yet) spends from the owner's budget; one with their own keys has their own."""
+
+    def __call__(self):
+        own = tenant.current() == tenant.OWNER or bool(get_setting("google_client_id"))
+        return _Scoped(tenant.current() if own else tenant.OWNER)
+
+
+class _Scoped:
+    def __init__(self, tid: int):
+        self.tid = tid
+
+    def __enter__(self):
+        self.cm = tenant.use(self.tid)
+        self.cm.__enter__()
+        self.s = _TenantSession()
+        return self.s.__enter__()
+
+    def __exit__(self, *exc):
+        try:
+            return self.s.__exit__(*exc)
+        finally:
+            self.cm.__exit__(*exc)
+
+
+SessionLocal = _BudgetSession()
 
 PT = ZoneInfo("America/Los_Angeles")
 DAILY_UNITS = int(os.getenv("YT_DAILY_QUOTA") or "10000")

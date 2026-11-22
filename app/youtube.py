@@ -1,3 +1,4 @@
+import threading
 import json
 import os
 import re
@@ -52,10 +53,19 @@ def login_url() -> str:
     return url
 
 
-def handle_callback(code: str, state: str) -> int:
-    """Exchange the code, look up which channel it is, and store it as a destination. Returns destination id."""
-    expected = get_setting("oauth_state")
-    set_setting("oauth_state", "")  # single use
+_connect_lock = threading.Lock()
+
+
+class ChannelLimit(ValueError):
+    """The account's plan does not allow another channel."""
+
+
+def handle_callback(code: str, state: str, channel_limit: int | None = None) -> int:
+    """Exchange the code, look up which channel it is, and store it as a destination. Returns destination id.
+    channel_limit: how many channels this account may have (None = no limit); reconnecting one is always allowed."""
+    with _connect_lock:
+        expected = get_setting("oauth_state")
+        set_setting("oauth_state", "")  # single use
     if not expected or state != expected:
         raise ValueError("OAuth state mismatch")
     f = _flow()
@@ -69,8 +79,15 @@ def handle_callback(code: str, state: str) -> int:
     if not items:
         raise ValueError("This Google account has no YouTube channel.")
     cid, name = items[0]["id"], items[0]["snippet"]["title"]
-    with SessionLocal() as s:
-        d = s.query(Destination).filter(Destination.channel_id == cid).first() or Destination(channel_id=cid)
+    with _connect_lock, SessionLocal() as s:
+        d = s.query(Destination).filter(Destination.channel_id == cid).first()
+        if d is None:
+            have = s.query(Destination).count()
+            if channel_limit is not None and have >= channel_limit:
+                raise ChannelLimit(f"Your plan allows {channel_limit} YouTube channel{'' if channel_limit == 1 else 's'} and "
+                                   f"{have} {'is' if have == 1 else 'are'} already connected. Ask for more channels "
+                                   "(My channels → More channels), or disconnect one first.")
+            d = Destination(channel_id=cid)
         d.name, d.token = name, encrypt(creds.to_json())
         s.add(d)
         s.commit()

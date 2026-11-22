@@ -59,10 +59,10 @@ input:focus{box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--ring)}
   <section class="main">
     <form class="form" id="f" autocomplete="on">
       <h1>Welcome back</h1><p class="sub">Enter your credentials to access the dashboard.</p>
-      <label for="u">Username</label><input id="u" name="username" autocomplete="username" value="admin" required>
+      <label for="u">Email or username</label><input id="u" name="username" autocomplete="username" required autofocus>
       <label for="p">Password</label>
-      <div class="field"><input id="p" name="password" type="password" autocomplete="current-password" required autofocus><button type="button" class="eye" id="t">Show</button></div>
-      <div class="row"><span></span><a href="/forgot">Forgot password?</a></div>
+      <div class="field"><input id="p" name="password" type="password" autocomplete="current-password" required><button type="button" class="eye" id="t">Show</button></div>
+      <div class="row"><a href="/register">Create an account</a><a href="/forgot">Forgot password?</a></div>
       <div class="err" id="e"></div>
       <button class="btn" id="b"><span class="spin" id="sp"></span><span id="bt">Sign in</span></button>
       <div class="legal">By signing in you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</div>

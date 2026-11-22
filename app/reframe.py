@@ -6,7 +6,7 @@ import statistics
 import subprocess
 from pathlib import Path
 
-from .config import DATA_DIR, ffmpeg_bin
+from .config import BASE_DATA_DIR, ffmpeg_bin
 from .ingest import stream_seconds
 
 log = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ def _model() -> Path:
     baked = Path(__file__).resolve().parent.parent / "models" / "face_detection_yunet.onnx"  # put there by the Dockerfile
     if baked.exists():
         return baked
-    p = DATA_DIR / "models" / "face_detection_yunet.onnx"
+    p = BASE_DATA_DIR / "models" / "face_detection_yunet.onnx"
     if not p.exists():
         import httpx
 

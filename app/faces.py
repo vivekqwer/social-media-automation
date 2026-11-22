@@ -12,7 +12,7 @@ import httpx
 import numpy as np
 from PIL import Image, ImageOps
 
-from .config import DATA_DIR
+from .config import BASE_DATA_DIR, DATA_DIR
 
 MODEL_URL = "https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2net_human_seg.onnx"
 _session = None
@@ -38,7 +38,7 @@ def _model() -> Path:
     baked = Path(__file__).resolve().parent.parent / "models" / "u2net_human_seg.onnx"  # put there by the Dockerfile
     if baked.exists():
         return baked
-    p = DATA_DIR / "models" / "u2net_human_seg.onnx"
+    p = BASE_DATA_DIR / "models" / "u2net_human_seg.onnx"
     if not p.exists():  # one-time download (~170 MB) onto the data volume
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(f".{os.getpid()}.part")

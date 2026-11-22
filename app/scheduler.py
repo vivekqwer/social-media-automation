@@ -1,3 +1,4 @@
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -13,11 +14,13 @@ from .config import MAX_UPLOADS_PER_DAY, UPLOAD_LEAD_HOURS
 from .crypto import TokenError
 from .db import Clip, Destination, Project, SessionLocal, utcnow
 from .jobs import executor
+
+log = logging.getLogger(__name__)
 from .monitor import check_uploads
 from .policy import check_edit
 
 PT = ZoneInfo("America/Los_Angeles")  # YouTube API quota resets at midnight Pacific
-_quota_blocked_until: datetime | None = None
+_quota_blocked: dict[int, datetime] = {}  # customer -> blocked until
 
 
 def _pacific_midnight(now: datetime, offset_days: int = 0) -> datetime:
@@ -148,8 +151,10 @@ def cleanup_disk():
 
 def process_queue():
     """Upload queued clips whose publish time is within the lead window (YouTube holds them private until publishAt)."""
-    global _quota_blocked_until
-    now = utcnow()
+    from . import tenant as _t
+
+    now, tid = utcnow(), _t.current()
+    _quota_blocked_until = _quota_blocked.get(tid)
     if _quota_blocked_until and now < _quota_blocked_until:
         return
     with SessionLocal() as s:
@@ -222,7 +227,7 @@ def process_queue():
                 msg = str(e)
                 if "quotaExceeded" in msg or "uploadLimitExceeded" in msg:
                     c.status, c.error = "queued", "YouTube quota/upload limit reached; will retry after reset."
-                    _quota_blocked_until = _pacific_midnight(now, 1)
+                    _quota_blocked[tid] = _quota_blocked_until = _pacific_midnight(now, 1)
                     quota.exhaust()
                     s.commit()
                     break
@@ -254,45 +259,77 @@ def retry_thumbnails():
         s.commit()
 
 
+def for_each_customer(fn):
+    """A timed job that runs once for every private copy (the owner's and each active customer's), as that customer.
+    One customer's failure never stops the others."""
+    def run():
+        from . import tenant
+        from .accounts import active_tenants
+
+        try:
+            ids = active_tenants()
+        except Exception:  # noqa: BLE001  (accounts table unreachable: still serve the owner)
+            ids = [tenant.OWNER]
+        for tid in ids:
+            try:
+                with tenant.use(tid):
+                    fn()
+            except Exception as e:  # noqa: BLE001
+                log.exception("timed job %s failed for customer %s", getattr(fn, "__name__", "job"), tid)
+                try:
+                    from .guide import record_error
+
+                    with tenant.use(tid):
+                        record_error("timed job: " + getattr(fn, "__name__", "job"), e)
+                except Exception:  # noqa: BLE001
+                    pass
+    run.__name__ = getattr(fn, "__name__", "job")
+    return run
+
+
 def start():
-    recover()
+    for_each_customer(recover)()
     sch = BackgroundScheduler(timezone="UTC")
-    sch.add_job(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
+
+    def add(fn, *args, **kw):
+        sch.add_job(for_each_customer(fn), *args, **kw)
+
+    add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
-    sch.add_job(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
+    add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))
-    sch.add_job(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
+    add(sweep_stale, "interval", minutes=15, max_instances=1, coalesce=True)
     # Telegram remote control (standalone: does nothing until it is set up)
     from .telegram import daily_summary, poll
-    sch.add_job(poll, "interval", seconds=20, max_instances=1, coalesce=True)
-    sch.add_job(check_helper, "interval", minutes=30, max_instances=1, coalesce=True)
+    add(poll, "interval", seconds=20, max_instances=1, coalesce=True)
+    add(check_helper, "interval", minutes=30, max_instances=1, coalesce=True)
     from .growth import swap_weak_thumbnails, weekly_report
-    sch.add_job(lambda: executor.submit(swap_weak_thumbnails), "cron", hour=6, minute=0, max_instances=1, coalesce=True)
-    sch.add_job(lambda: executor.submit(weekly_report), "cron", day_of_week="sun", hour=15, minute=35, max_instances=1,
+    add(lambda: executor.submit(swap_weak_thumbnails), "cron", hour=6, minute=0, max_instances=1, coalesce=True)
+    add(lambda: executor.submit(weekly_report), "cron", day_of_week="sun", hour=15, minute=35, max_instances=1,
                 coalesce=True)  # Sunday 9:05 PM IST
     from .permissions import check_replies, refresh_inbox
-    sch.add_job(lambda: executor.submit(check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
-    sch.add_job(lambda: executor.submit(refresh_inbox), "cron", hour=4, minute=30, max_instances=1, coalesce=True)  # 10 AM IST
+    add(lambda: executor.submit(check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
+    add(lambda: executor.submit(refresh_inbox), "cron", hour=4, minute=30, max_instances=1, coalesce=True)  # 10 AM IST
     from .viral import refresh as viral_refresh
-    sch.add_job(lambda: executor.submit(viral_refresh), "interval", hours=2, max_instances=1, coalesce=True,
+    add(lambda: executor.submit(viral_refresh), "interval", hours=2, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # viral board + 5 daily picks
     from .competitors import scan_if_due
-    sch.add_job(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
+    add(lambda: executor.submit(scan_if_due), "interval", hours=1, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=8))
-    sch.add_job(daily_summary, "cron", hour=15, minute=30, max_instances=1, coalesce=True)  # 9:00 PM IST
-    sch.add_job(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
+    add(daily_summary, "cron", hour=15, minute=30, max_instances=1, coalesce=True)  # 9:00 PM IST
+    add(cleanup_disk, "interval", hours=6, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))
-    sch.add_job(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
+    add(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)
     every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")
-    sch.add_job(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,
+    add(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))
     # live channel numbers (subscribers, views, every video) for the Analytics page
     from .stats import sync_all, sync_all_watch_time
-    sch.add_job(sync_all_watch_time, "interval", hours=3, max_instances=1, coalesce=True,
+    add(sync_all_watch_time, "interval", hours=3, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
-    sch.add_job(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
+    add(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
                 coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1))
     sch.start()
     return sch

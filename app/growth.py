@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .config import DATA_DIR
-from .db import Base, Clip, Destination, Project, SessionLocal, VideoStat, engine, utcnow
+from .db import Base, Clip, Destination, Project, SessionLocal, VideoStat, engine_for, utcnow
 
 log = logging.getLogger(__name__)
 
@@ -112,7 +112,7 @@ def weekly_report() -> Path | None:
 def backup_data() -> dict:
     """Everything needed to rebuild the dashboard (channel logins stay encrypted; videos are on YouTube)."""
     data = {"made_at": utcnow().isoformat() + "Z", "tables": {}}
-    with engine.connect() as conn:
+    with engine_for().connect() as conn:
         for t in Base.metadata.sorted_tables:
             if t.name in ("video_stats", "channel_stats"):
                 continue  # can be read from YouTube again

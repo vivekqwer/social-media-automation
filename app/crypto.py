@@ -8,7 +8,7 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet, InvalidToken
 
-from .config import DATA_DIR
+from .config import BASE_DATA_DIR
 
 PREFIX = "enc:v1:"
 
@@ -21,7 +21,7 @@ def _key() -> bytes:
     env = (os.getenv("TOKEN_ENCRYPTION_KEY") or "").strip()
     if env:
         return env.encode()
-    path = Path(DATA_DIR) / ".token_key"
+    path = BASE_DATA_DIR / ".token_key"  # one key for the whole server
     if path.exists():
         return path.read_bytes().strip()
     key = Fernet.generate_key()

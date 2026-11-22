@@ -113,7 +113,17 @@ def get_token(force_new: bool = False) -> str:
         tok = TOKEN_FILE.read_text(encoding="utf-8-sig").strip()
         if len(tok) >= 40:
             return tok
-    r = httpx.post(f"{SERVER}/api/worker/register", json={"name": socket.gethostname()}, timeout=30)
+    # A customer's helper carries the code from their dashboard (My channels -> Helper PC), in the file
+    # worker\helper_code.txt or the CLIPSTUDIO_CLAIM setting; the system owner's own helper needs none.
+    claim = os.getenv("CLIPSTUDIO_CLAIM", "").strip()
+    code_file = pathlib.Path(__file__).with_name("helper_code.txt")
+    if not claim and code_file.exists():
+        claim = code_file.read_text(encoding="utf-8-sig").strip()
+    r = httpx.post(f"{SERVER}/api/worker/register", json={"name": socket.gethostname()}, timeout=30,
+                   headers={"x-helper-claim": claim} if claim else {})
+    if r.status_code == 403:
+        sys.exit("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) into "
+                 "worker/helper_code.txt and start the helper again.")
     r.raise_for_status()
     tok = r.json()["token"]
     tmp = TOKEN_FILE.with_suffix(".tmp")

@@ -58,19 +58,22 @@ def disconnect():
 
 
 # ---------- a short-lived public link to the video (Instagram fetches the file from a URL) ----------
-def _sig(cid: int, exp: int) -> str:
+def _sig(cid: int, exp: int, tid: int = 1) -> str:
     from .auth import _secret
 
-    return hmac.new(_secret(), f"media:{cid}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
+    who = "" if tid == 1 else f"t{tid}:"  # the customer is part of what is signed: a link opens only that copy's clip
+    return hmac.new(_secret(), f"media:{who}{cid}:{exp}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
 def public_url(cid: int, base: str, minutes: int = 120) -> str:
-    exp = int(time.time()) + minutes * 60
-    return f"{base}/media/{cid}/{exp}/{_sig(cid, exp)}.mp4"
+    from . import tenant
+
+    exp, tid = int(time.time()) + minutes * 60, tenant.current()
+    return f"{base}/media/{cid}/{exp}/{_sig(cid, exp, tid)}.mp4" + ("" if tid == 1 else f"?t={tid}")
 
 
-def check_link(cid: int, exp: int, sig: str) -> bool:
-    return exp > time.time() and hmac.compare_digest(sig, _sig(cid, exp))
+def check_link(cid: int, exp: int, sig: str, tid: int = 1) -> bool:
+    return exp > time.time() and hmac.compare_digest(sig, _sig(cid, exp, tid))
 
 
 def _caption(c: Clip) -> str:

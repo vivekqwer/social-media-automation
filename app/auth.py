@@ -7,9 +7,21 @@ import re
 import secrets
 import time
 
-from . import crypto
+from . import crypto, tenant
 from .config import APP_PASSWORD, APP_USER
-from .db import get_setting, set_setting
+from .db import get_setting as _db_get, set_setting as _db_set
+
+
+def get_setting(key: str):
+    """The Super Admin's login data always lives in the owner's copy, whoever the running code is working for."""
+    with tenant.use(tenant.OWNER):
+        return _db_get(key)
+
+
+def set_setting(key: str, value: str):
+    with tenant.use(tenant.OWNER):
+        _db_set(key, value)
+
 
 SESSION_COOKIE = "cs_session"
 RESET_COOKIE = "cs_reset"
@@ -128,8 +140,53 @@ def verify_session(token: str | None) -> str | None:
     return user
 
 
+AS_COOKIE = "cs_as"  # Super Admin only: "view as this customer"
+AS_TTL = 2 * 3600
+
+
+def identify(token: str | None, as_token: str | None = None) -> dict | None:
+    """Who is signed in: the Super Admin (tenant 1) or a customer account (its own tenant). None = nobody."""
+    payload = _unpack(token)
+    if not payload:
+        return None
+    if re.match(r"^a\d+\|", payload) and not payload.startswith(APP_USER + "|"):
+        from . import accounts
+
+        a = accounts.from_session(payload)
+        if not a:
+            return None
+        return {"role": "user", "tenant": a.tenant_id, "account_id": a.id, "name": a.name, "email": a.email,
+                "brand": a.brand, "channel_limit": a.channel_limit or 1, "plan": a.plan}
+    if not verify_session(token):
+        return None
+    me = {"role": "super", "tenant": tenant.OWNER, "account_id": None, "name": APP_USER, "email": None, "brand": None,
+          "channel_limit": None, "plan": None}
+    seen = _unpack(as_token) if as_token else None
+    if seen and seen.startswith("as"):  # looking at a customer's dashboard to help them
+        try:
+            who, exp = seen[2:].split("|")
+            if int(exp) > time.time():
+                from . import accounts
+
+                a = accounts.get(int(who))
+                if a and a.tenant_id:
+                    me.update(tenant=a.tenant_id, viewing={"account_id": a.id, "name": a.name, "email": a.email, "brand": a.brand},
+                              brand=a.brand, channel_limit=a.channel_limit or 1)
+        except (ValueError, TypeError):
+            pass
+    return me
+
+
+def make_view_as(account_id: int) -> str:
+    return _pack(f"as{int(account_id)}|{int(time.time()) + AS_TTL}")
+
+
+def request_identity(request) -> dict | None:
+    return identify(request.cookies.get(SESSION_COOKIE), request.cookies.get(AS_COOKIE))
+
+
 def request_authenticated(request) -> bool:
-    return bool(verify_session(request.cookies.get(SESSION_COOKIE)))
+    return bool(request_identity(request))
 
 
 # ---------- reset (verified through Google) ----------
@@ -161,23 +218,32 @@ def forget_email(email: str):
 
 
 def remember_email(email: str):
-    """Google accounts that connected a channel may later reset the dashboard password."""
+    """Google accounts that connected a channel IN THE OWNER'S OWN COPY may later reset the Super Admin password.
+    A customer connecting a channel in their copy must never get onto this list."""
+    if tenant.current() != tenant.OWNER:
+        return
     emails = {e for e in (get_setting("admin_emails") or "").split(",") if e}
     emails.add(email.lower())
     set_setting("admin_emails", ",".join(sorted(emails)))
 
 
 # ---------- brute-force limiter ----------
-def rate_limited(ip: str) -> bool:
-    now = time.time()
+# One bucket per kind of attempt, so customers' sign-ins, registrations and helpers can never use up the
+# attempts that protect the Super Admin's own login.   kind: (per address in 10 min, everyone in 1 hour)
+LIMITS = {"owner": (8, 60), "customer": (8, 300), "register": (3, 40), "helper": (8, 60)}
+
+
+def rate_limited(ip: str, kind: str = "owner") -> bool:
+    now, (per_ip, per_all) = time.time(), LIMITS.get(kind, LIMITS["owner"])
     if len(_fails) > 5000:  # forget old entries so the table can't grow without end
         for k in [k for k, v in _fails.items() if not v or now - v[-1] > 600]:
             _fails.pop(k, None)
-    recent = [t for t in _fails.get(ip, []) if now - t < 600]
-    _fails[ip] = recent
-    everyone = sum(1 for v in _fails.values() for t in v if now - t < 3600)
-    return len(recent) >= 8 or everyone >= 60  # also a global cap: many addresses guessing at once
+    key = f"{kind}|{ip}"
+    recent = [t for t in _fails.get(key, []) if now - t < 600]
+    _fails[key] = recent
+    everyone = sum(1 for k, v in _fails.items() if k.startswith(kind + "|") for t in v if now - t < 3600)
+    return len(recent) >= per_ip or everyone >= per_all  # also a cap for all addresses together
 
 
-def note_fail(ip: str):
-    _fails.setdefault(ip, []).append(time.time())
+def note_fail(ip: str, kind: str = "owner"):
+    _fails.setdefault(f"{kind}|{ip}", []).append(time.time())

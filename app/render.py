@@ -259,7 +259,8 @@ def render_clip(project: Project, clip: Clip) -> Path:
     lead = float(clip.start or 0) if project.mode == "original" else max(0.0, clip.start - int(clip.start))
     cmd = [ffmpeg_bin(), "-y", "-ss", f"{lead:.2f}", "-f", "mov", "-i", str(src)]  # mp4 only (no playlists)
     if has_voice:
-        cmd += ["-i", str(clip.voice_path)]
+        fmt = {".mp3": "mp3", ".wav": "wav", ".m4a": "mov", ".aac": "aac", ".ogg": "ogg"}.get(Path(clip.voice_path).suffix.lower())
+        cmd += (["-f", fmt] if fmt else []) + ["-i", str(clip.voice_path)]
     cmd += [
         "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
                                          f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else "",

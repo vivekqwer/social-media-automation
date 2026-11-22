@@ -183,7 +183,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 <body>
 <div class="shell">
   <aside id="sb">
-    <div class="brand"><div class="mark"><i data-ico="play"></i></div><div><b>Raji Studio</b><span>Creator workspace</span></div></div>
+    <div class="brand"><div class="mark"><i data-ico="play"></i></div><div><b id="brand-name">Raji Studio</b><span id="brand-sub">Creator workspace</span></div></div>
     <div class="grp">Platform</div>
     <button class="nav on" data-p="dashboard"><i data-ico="dashboard"></i>Dashboard</button>
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
@@ -196,6 +196,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <div class="grp">Account</div>
     <button class="nav" data-p="settings"><i data-ico="youtube"></i>My channels</button>
     <button class="nav" data-p="guide"><i data-ico="check"></i>Setup guide</button>
+    <button class="nav hide" data-p="users" id="nav-users"><i data-ico="inbox"></i>Users<span class="count" id="b-users" style="display:none"></span></button>
     <div class="user"><div class="avatar" id="av">A</div><div class="t"><b id="un">admin</b><span id="uf">Owner</span></div><button class="btn ghost icon" id="logout" title="Log out"><i data-ico="logout"></i></button></div>
   </aside>
   <div class="scrim" id="sb-scrim" style="z-index:25"></div>
@@ -203,7 +204,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
   <div class="content">
     <header class="top">
       <button class="btn ghost icon burger" id="burger"><i data-ico="menu"></i></button>
-      <div class="crumb"><span>Raji Studio</span><span>/</span><b id="crumb">Dashboard</b></div>
+      <div class="crumb"><span id="brand-crumb">Raji Studio</span><span>/</span><b id="crumb">Dashboard</b></div>
       <div class="sp"></div>
       <button class="btn brand sm" id="top-quick"><i data-ico="zap"></i>Quick upload</button>
       <button class="btn outline sm" id="top-new"><i data-ico="scissors"></i>New clip</button>
@@ -293,6 +294,16 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div id="al-list"></div>
       </section>
 
+      <section id="p-users" class="hide">
+        <div class="page-h"><div><h1>Users</h1><div class="desc">People who use this system. Each one has a private copy: their own channels, sources, clips, mails and settings. Nobody sees anybody else's data.</div></div>
+          <div class="row"><a class="btn outline sm" href="/register" target="_blank">Open the sign-up page</a><button class="btn outline sm" id="us-test">Check that copies are separate</button></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>How customers pay for more channels</h3><p>Shown to a customer when they ask for more channels. You check the payment yourself, then raise their limit below.</p></div></div>
+          <div class="cb"><div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Your UPI ID / account<input id="pay-upi" maxlength="100" placeholder="name@upi"></label><label class="f grow">Price<input id="pay-price" maxlength="100" placeholder="₹499 per extra channel, per month"></label></div>
+            <label class="f" style="margin-top:8px">What the customer should do<input id="pay-text" maxlength="1000" placeholder="Pay, then write the payment reference in the request."></label>
+            <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn sm" id="pay-save">Save</button></div></div></div>
+        <div class="card"><div class="ch"><div><h3>Accounts</h3><p id="us-sub">…</p></div></div><div class="cb" id="us-list"></div></div>
+      </section>
+
       <section id="p-guide" class="hide">
         <div class="page-h"><div><h1>Setup guide</h1><div class="desc">Everything needed to run Raji Studio, step by step, from this dashboard. No coding. Follow the steps from top to bottom; a green tick means it is done.</div></div><button class="btn outline sm" id="gd-refresh">Check again</button></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Steps</h3><p id="gd-sub">…</p></div><span class="badge" id="gd-badge">…</span></div><div class="cb" id="gd-steps"></div></div>
@@ -305,6 +316,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="page-h"><div><h1>My channels</h1><div class="desc">Where clips get uploaded, and your account security.</div></div><a href="/auth/login" class="btn"><i data-ico="plus"></i>Connect a YouTube channel</a></div>
         <div class="grid cols">
           <div class="grid" style="align-content:start">
+            <div class="card hide" id="plan-card"><div class="ch"><div><h3>Your plan</h3><p id="plan-sub">…</p></div><span class="badge" id="plan-badge">…</span></div><div class="cb" id="plan-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
@@ -332,8 +344,9 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="grid" style="align-content:start">
             <div class="card"><div class="ch"><div><h3>Change password</h3><p>Minimum 12 characters.</p></div></div><div class="cb">
               <div class="grid" style="gap:10px"><input id="cp-old" type="password" placeholder="Current password" autocomplete="current-password"><input id="cp-new" type="password" placeholder="New password" autocomplete="new-password"><button class="btn" id="cp-go">Update password</button></div>
-              <div class="sm mut" style="margin-top:10px">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
+              <div class="sm mut" style="margin-top:10px" id="pw-hint">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
+              <div id="wk-claim" class="hide" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"></div>
               <div id="wk-list"></div>
               <div class="mut sm" style="margin-top:10px;line-height:1.7"><b>Start automatically (recommended, once):</b> in the project folder double-click <b>worker\install_autostart.bat</b>. The helper then runs hidden whenever your PC is on, restarts itself if it stops, and updates itself when the server gets new code.<br>Manual start: <b>worker\run_worker.bat</b>. New helpers appear here — press <b>Approve</b>.</div></div></div>
             <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
@@ -560,11 +573,12 @@ function paintIcons(root=document){$$('[data-ico]',root).forEach(e=>{e.outerHTML
 let ANPOLL=null,AN=null,DESTS=[],OV=null,TAB='rendered',CUR=null,POLL=null,LOCK=false,VIEW='out',VOICES={};
 
 async function api(path,method='GET',body){
-  const o={method,headers:{}};
+  const o={method,headers:{}};if(window.ME&&ME.tenant)o.headers['X-Copy']=String(ME.tenant);
   if(body instanceof FormData)o.body=body;else if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
   const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),180000);o.signal=ac.signal;
   let r;try{r=await fetch(path,o)}catch(e){throw new Error(e.name==='AbortError'?'The server took too long — please try again.':'Network problem — check your internet and try again.')}finally{clearTimeout(tm)}
   if(r.status===401){location.href='/login?next='+encodeURIComponent(location.pathname);throw new Error('Session expired — please sign in again')}
+  if(r.status===409){let j={};try{j=await r.clone().json()}catch(e){}if(j.reload){setTimeout(()=>location.reload(),600);throw new Error(j.detail)}}
   if(!r.ok){let m=r.statusText;try{const j=await r.json();m=j.detail||m;if(Array.isArray(m))m=m.map(x=>(x.loc||[]).join('.')+': '+x.msg).join('; ')}catch(e){}throw new Error(m)}
   return r.json();
 }
@@ -574,12 +588,12 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+const TITLES={users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide,users:loadUsers}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -922,7 +936,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();
+  loadFace();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -1206,7 +1220,7 @@ $('#up-file').onchange=()=>{const f=$('#up-file').files[0];$('#up-file').value='
     if(x.status===200){toast(`Video added (${j.seconds} s, ${j.aspect==='16:9'?'full video':'Short'}) — it is being prepared; open it in Clips to add sound, text and captions`);go('clips')}
     else toast(j.detail||'Upload failed',true)};
   x.onerror=()=>{b.disabled=false;b.innerHTML=old;toast('Network problem during the upload — try again',true)};
-  x.open('POST','/api/upload-video');x.send(fd)};
+  x.open('POST','/api/upload-video');if(ME.tenant)x.setRequestHeader('X-Copy',String(ME.tenant));x.send(fd)};
 $('#nav-quick').onclick=openQuick;$('#top-quick').onclick=openQuick;
 $('#q-close').onclick=$('#q-cancel').onclick=$('#q-done').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);refreshAfter()};
 async function qStart(){
@@ -1269,8 +1283,76 @@ $('#gd-copy').onclick=async()=>{const g=window.GDERR||{errors:[],setup:{items:[]
   try{await navigator.clipboard.writeText(t);toast('Copied — paste it into a message')}catch(e){prompt('Copy this text:',t)}};
 $('#gd-clear').onclick=()=>once(async()=>{await api('/api/guide/errors/clear','POST');loadGuide()});
 
+var ME={role:'super'};
+async function loadMe(){
+  try{ME=await api('/api/me')}catch(e){return}
+  const brand=ME.brand||'Raji Studio';
+  $('#brand-name').textContent=brand;$('#brand-crumb').textContent=brand;document.title=brand;
+  $('#brand-sub').textContent=ME.role==='super'&&!ME.viewing?'Super Admin':'Creator workspace';
+  $('#un').textContent=ME.viewing?ME.viewing.name:(ME.name||'admin');$('#uf').textContent=ME.viewing?'viewed by Super Admin':ME.role==='super'?'Super Admin':(ME.plan||'Customer');
+  $('#av').textContent=($('#un').textContent||'A')[0].toUpperCase();
+  $('#nav-users').classList.toggle('hide',ME.role!=='super');
+  if($('#pw-hint')&&ME.role==='user')$('#pw-hint').textContent='Forgot it? Ask the person who gave you access — they can give you a temporary password.';
+  let bar=$('#view-bar');if(ME.viewing){if(!bar){bar=document.createElement('div');bar.id='view-bar';bar.style.cssText='position:sticky;top:0;z-index:40;background:#f59e0b;color:#111;padding:8px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-weight:500';document.body.prepend(bar)}
+    bar.innerHTML=`You are looking at <b>${esc(ME.viewing.name)}</b>'s dashboard (${esc(ME.viewing.email)}). What you change here changes THEIR system. <button class="btn sm" id="view-exit">Back to my own dashboard</button>`;
+    $('#view-exit').onclick=()=>once(async()=>{await api('/api/admin/view/exit','POST');location.href='/'})}else if(bar)bar.remove();
+  if(ME.role==='super'&&!ME.viewing){try{const u=await api('/api/admin/users');const n=u.users.filter(x=>x.status==='pending'||x.upgrade).length;const b=$('#b-users');b.style.display=n?'':'none';b.textContent=n}catch(e){}}
+  renderPlan();
+}
+function renderPlan(){
+  const card=$('#plan-card');if(!card)return;const isUser=ME.role==='user'||ME.viewing;card.classList.toggle('hide',!isUser);
+  const claim=$('#wk-claim');if(claim)claim.classList.add('hide');
+  if(!isUser)return;
+  const lim=ME.channel_limit||1,pay=ME.pay||{},up=ME.upgrade;
+  $('#plan-badge').className='badge '+(ME.channels>=lim?'queued':'uploaded');$('#plan-badge').textContent=`${ME.channels} of ${lim} channel${lim===1?'':'s'} used`;
+  $('#plan-sub').textContent=`Your plan allows ${lim} YouTube channel${lim===1?'':'s'}. More channels are switched on after payment.`;
+  $('#plan-box').innerHTML=(up?`<div class="alert" style="margin-bottom:10px"><span>Your request for <b>${up.channels} channels</b> was sent on ${new Date(up.at).toLocaleDateString()}. It is switched on as soon as the payment has been checked.</span></div>`:'')
+    +`<details ${new URLSearchParams(location.search).has('limit')||window.PLANOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">More channels</summary>
+      <ol class="sm" style="margin:8px 0;padding-left:18px;line-height:1.8"><li>${pay.price?'Price: <b>'+esc(pay.price)+'</b>.':'Ask for the price.'}</li><li>${pay.upi?'Pay to <b>'+esc(pay.upi)+'</b>.':'Payment details will be sent to you.'} ${esc(pay.text||'')}</li><li>Write how many channels you want and the payment reference, then press Send.</li><li>When the payment has been checked, the extra channels are switched on and you can connect them here.</li></ol>
+      <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f">Channels wanted<input id="up-n" type="number" min="${lim+1}" max="50" value="${lim+1}" style="width:120px"></label><label class="f grow">Payment reference / message<input id="up-msg" maxlength="500" placeholder="UPI reference number"></label><button class="btn" id="up-send" style="align-self:flex-end">Send request</button></div></details>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Name of your system</summary><div class="row" style="margin-top:8px"><input id="br-name" class="grow" maxlength="60" value="${esc(ME.brand||'')}"><button class="btn outline" id="br-save">Rename</button></div></details>`;
+  $('#up-send').onclick=()=>once(async()=>{await api('/api/account/upgrade','POST',{channels:+$('#up-n').value,message:$('#up-msg').value});toast('Request sent — you get the extra channels after the payment is checked');await loadMe()},$('#up-send'));
+  $('#br-save').onclick=()=>once(async()=>{await api('/api/account/brand','POST',{brand:$('#br-name').value});toast('Renamed');await loadMe()},$('#br-save'));
+  api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
+    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
+    $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
+}
+async function loadUsers(){
+  const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
+  $('#pay-upi').value=pay.upi||'';$('#pay-price').value=pay.price||'';$('#pay-text').value=pay.text||'';
+  const pend=U.filter(u=>u.status==='pending').length,req=U.filter(u=>u.upgrade).length;
+  $('#us-sub').textContent=`${U.length} account${U.length===1?'':'s'} · ${pend} waiting for approval · ${req} asking for more channels. Your own system: ${d.owner.channels} channel(s), ${d.owner.clips} clips.`;
+  const lab={pending:['Waiting for approval','queued'],active:['Active','uploaded'],blocked:['Blocked','failed']};
+  $('#us-list').innerHTML=U.length?U.map(u=>{const g=u.usage||{};return `<div class="item" style="flex-wrap:wrap;align-items:flex-start"><div class="avatar">${esc((u.name||'?')[0].toUpperCase())}</div>
+    <div class="tx grow"><b>${esc(u.name)}</b> <span class="badge ${lab[u.status][1]}">${lab[u.status][0]}</span> <span class="mut sm">${esc(u.email)}</span>
+      <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
+      ${u.usage?`<span class="sm" style="display:block">${g.error?esc(g.error):`${g.channels} of ${u.channel_limit} channel(s) · ${g.sources} sources · ${g.clips} clips · ${g.uploaded} uploaded · helper ${g.helper?'online':'offline'}`}</span>`:''}
+      ${u.upgrade?`<div class="alert" style="margin-top:6px"><span>Asks for <b>${u.upgrade.channels} channels</b> (${new Date(u.upgrade.at).toLocaleDateString()}): ${esc(u.upgrade.message||'no message')}</span><div class="row" style="margin-top:6px"><button class="btn sm" data-uallow="${u.id}" data-n="${u.upgrade.channels}">Paid — allow ${u.upgrade.channels} channels</button><button class="btn ghost sm" data-uclose="${u.id}">Not paid — close request</button></div></div>`:''}
+      ${u.note?`<span class="mut sm" style="display:block">Note: ${esc(u.note)}</span>`:''}</div>
+    <div class="row" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">${u.status==='pending'?`<button class="btn sm" data-uok="${u.id}">Approve</button><button class="btn bad sm" data-udel="${u.id}">Reject</button>`:''}
+      ${u.status==='active'?`<label class="row sm" style="gap:6px">Channels<input type="number" min="1" max="50" value="${u.channel_limit}" data-ulim="${u.id}" style="width:70px"></label><button class="btn outline sm" data-uview="${u.id}">View as</button><button class="btn outline sm" data-unote="${u.id}">Note</button><button class="btn outline sm" data-upw="${u.id}">Reset password</button><button class="btn bad sm" data-ublock="${u.id}">Block</button>`:''}
+      ${u.status==='blocked'?`<button class="btn outline sm" data-uunblock="${u.id}">Unblock</button><button class="btn bad sm" data-udel="${u.id}">Delete login</button>`:''}</div></div>`}).join('')
+    :'<span class="mut sm">No accounts yet. People create one on the sign-up page; you approve them here.</span>';
+  const act=(sel,fn)=>$$(sel).forEach(b=>b.onclick=()=>once(()=>fn(b),b));const by=id=>U.find(u=>u.id===+id);
+  const edit=(id,body)=>api('/api/admin/users/'+id,'POST',body);
+  act('[data-uok]',async b=>{await api(`/api/admin/users/${b.dataset.uok}/approve`,'POST');toast('Approved — they can sign in now');loadUsers();loadMe()});
+  act('[data-uallow]',async b=>{await edit(b.dataset.uallow,{channel_limit:+b.dataset.n});toast('Allowed');loadUsers();loadMe()});
+  act('[data-uclose]',async b=>{await edit(b.dataset.uclose,{close_request:true});loadUsers();loadMe()});
+  act('[data-ublock]',async b=>{if(!confirm(`Block ${by(b.dataset.ublock).name}? They are signed out at once and their uploads stop. Their data is kept.`))return;await edit(b.dataset.ublock,{status:'blocked'});loadUsers()});
+  act('[data-uunblock]',async b=>{await edit(b.dataset.uunblock,{status:'active'});loadUsers()});
+  act('[data-udel]',async b=>{if(!confirm(`Remove the login of ${by(b.dataset.udel).name}? This cannot be undone.`))return;await api('/api/admin/users/'+b.dataset.udel,'DELETE');loadUsers();loadMe()});
+  act('[data-unote]',async b=>{const u=by(b.dataset.unote),t=prompt('Your note about this customer (payment, phone, …):',u.note||'');if(t===null)return;await edit(u.id,{note:t});loadUsers()});
+  act('[data-upw]',async b=>{const u=by(b.dataset.upw);if(!confirm(`Give ${u.name} a new temporary password? Their current password stops working.`))return;const r=await api(`/api/admin/users/${u.id}/reset-password`,'POST');prompt('Send this temporary password to the customer (shown only once). They change it after signing in:',r.password)});
+  act('[data-uview]',async b=>{await api(`/api/admin/users/${b.dataset.uview}/view`,'POST');location.href='/'});
+  $$('[data-ulim]').forEach(inp=>inp.onchange=()=>once(async()=>{await edit(inp.dataset.ulim,{channel_limit:+inp.value});toast('Channel limit saved');loadUsers()}));
+}
+$('#pay-save').onclick=()=>once(async()=>{await api('/api/admin/pay','POST',{upi:$('#pay-upi').value,price:$('#pay-price').value,text:$('#pay-text').value});toast('Saved — customers see this when they ask for more channels')},$('#pay-save'));
+$('#us-test').onclick=()=>once(async()=>{const r=await api('/api/admin/selftest');alert(r.ok?'OK — a customer\'s copy is separate from yours on this database ('+r.database+').\n\nA test record written in a customer copy was not visible in your own copy.':'PROBLEM — the copies are not separate. Do not approve customers; send these details for support:\n'+JSON.stringify(r))},$('#us-test'));
+
 paintIcons();
-(()=>{const q=new URLSearchParams(location.search);if(!q.has('connected')&&!q.has('connect_error')&&!q.has('gmail')&&!q.has('gmail_error'))return go('dashboard');
+loadMe();
+(()=>{const q=new URLSearchParams(location.search);if(q.has('limit')){history.replaceState(null,'',location.pathname);window.PLANOPEN=true;go('settings');setTimeout(()=>toast(q.get('limit'),true),500);return}
+  if(!q.has('connected')&&!q.has('connect_error')&&!q.has('gmail')&&!q.has('gmail_error'))return go('dashboard');
   history.replaceState(null,'',location.pathname);
   if(q.has('connect_error')){go('guide');window.GUIDEOPEN='youtube';setTimeout(()=>toast('The channel was not connected: '+q.get('connect_error')+' — see step “YouTube channel connected” for what to do',true),400);return}
   if(q.has('gmail_error')){window.GUIDEOPEN='gmail';go('guide');setTimeout(()=>toast('Gmail was not connected: '+q.get('gmail_error')+' — see step “Gmail connected”',true),400);return}
