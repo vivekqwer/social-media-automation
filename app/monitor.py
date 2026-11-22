@@ -51,6 +51,35 @@ def _state(item: dict | None) -> tuple[str, str, str]:
     return "ok", "", ""
 
 
+LOGIN_EXPIRED = "The channel's Google login expired. Press Connect a YouTube channel to log in again, then Resume."
+
+
+def _not_checked(dest_id, exc: BaseException):
+    """A channel's videos could not be checked: make that visible instead of only writing a log line.
+    Login gone -> the channel shows "reconnect" (uploads wait, exactly as when an upload finds the same);
+    anything else -> the System errors tab of the Alerts page."""
+    try:
+        from google.auth.exceptions import RefreshError
+
+        from .crypto import TokenError
+
+        gone = isinstance(exc, TokenError) or (isinstance(exc, RefreshError) and "invalid_grant" in str(exc))
+        if gone:  # expired or revoked for good (not a passing network fault)
+            with SessionLocal() as s:
+                d = s.get(Destination, dest_id) if dest_id is not None else None
+                if d and not d.paused:
+                    d.paused, d.paused_at, d.paused_reason = True, utcnow(), LOGIN_EXPIRED
+                    s.commit()
+            return
+        if "quotaExceeded" in str(exc):
+            return  # the daily limit has its own message; the check runs again after the reset
+        from .guide import record_error
+
+        record_error("Checking my videos on YouTube", exc)
+    except Exception:  # noqa: BLE001  (reporting a problem must never stop the check of the other channels)
+        pass
+
+
 def check_uploads() -> dict:
     """Check every uploaded clip once. Only changes in state create alerts."""
     with SessionLocal() as s:
@@ -65,6 +94,7 @@ def check_uploads() -> dict:
             found = youtube.video_status(did, [y for _, y in items])
         except Exception as e:  # noqa: BLE001  (login expired, quota...) -> never mark videos as deleted on an error
             log.warning("monitor: channel %s not checked: %s", did, str(e)[:200])
+            _not_checked(did, e)
             continue
         with SessionLocal() as s:
             dest = s.get(Destination, did)
@@ -83,7 +113,7 @@ def check_uploads() -> dict:
                         "publish_at": (c.publish_at.isoformat() + "Z") if c.publish_at else None,
                         "source_title": p.title if p else None, "source_channel": p.channel if p else None,
                         "source_url": p.url if p else None, "source_mode": p.mode if p else None,
-                        "clip_range": [c.start, c.end],
+                        "clip_range": [c.start, c.end], "state": state,  # the Alerts page sorts into tabs by this
                     }))
                     new += 1
                     try:

@@ -32,7 +32,7 @@ def _ass_time(t: float) -> str:
 
 
 def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: list | None = None, credit: str = "",
-              banner: dict | None = None):
+              banner: dict | None = None, cta: dict | None = None):
     size = {"S": 0.034, "M": 0.044, "L": 0.056}.get((style or {}).get("size"), 0.044)
     fs = int(H * size)
     m = COLOR_RE.match((style or {}).get("color") or "#ffffff")
@@ -80,6 +80,10 @@ def build_ass(cues: list, style: dict, W: int, H: int, path: Path, overlays: lis
         else:
             tags += f"\\pos({W // 2},{y0})" + ("\\fad(300,300)" if anim == "fade" else "")
         lines.append(f"Dialogue: 1,{_ass_time(t0)},{_ass_time(t1)},Default,,0,0,0,,{{{tags}}}{text}")
+    if cta:  # the small "like and subscribe" reminder near the end (see reminder.py)
+        from .reminder import ass_events
+
+        lines += ass_events(cta)
     path.write_text(chr(10).join(lines) + chr(10), encoding="utf-8")
 
 
@@ -141,7 +145,7 @@ def layout(clip: Clip, W: int, H: int, src_size: tuple | None) -> str:
 
 def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voice: bool, has_audio: bool = True,
                  credit: str = "", subject: float | None = None, src_size: tuple | None = None,
-                 voice_dur: float = 0.0, banner: dict | None = None) -> str:
+                 voice_dur: float = 0.0, banner: dict | None = None, cta: dict | None = None) -> str:
     mode = layout(clip, W, H, src_size)
     sx = f"max(0,min(iw-ow,{subject}*iw-ow/2))" if subject is not None else "(iw-ow)/2"
     if mode == "pad":
@@ -186,8 +190,8 @@ def build_filter(clip: Clip, W: int, H: int, dur: float, workdir: Path, has_voic
             chain.append(_drawtext(i, o, W, workdir))
     st = clip.caption_style or {}
     cues = clip.captions if (st.get("on") and clip.captions) else []
-    if cues or ass_ovs or credit or (banner and banner.get("lines")):
-        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit, banner)
+    if cues or ass_ovs or credit or (banner and banner.get("lines")) or cta:
+        build_ass(cues, st, W, H, workdir / "captions.ass", ass_ovs, credit, banner, cta)
         chain.append(f"ass=captions.ass:fontsdir='{_esc(FONTS_DIR)}'")
     vol = max(0.0, min(3.0, float(clip.orig_volume if clip.orig_volume is not None else 1.0)))
     fc = head + f"[{'base2' if banner else 'base'}]{','.join(chain)}[v];"
@@ -233,6 +237,13 @@ def own_source(clip_id: int) -> Path | None:
     return None
 
 
+def _note(where: str, exc: BaseException):
+    """An extra that was left out (the clip is still made): show it in the Alerts page -> System errors."""
+    from .alerts import note
+
+    note(where, exc)
+
+
 class NeedsHelper(RuntimeError):
     """The helper PC must make this (e.g. a ReelGen reel) before it can be rendered."""
 
@@ -275,16 +286,25 @@ def render_clip(project: Project, clip: Clip) -> Path:
             from .branding import make_banner
 
             banner = make_banner(clip, project, W, H, workdir)
-        except Exception:  # noqa: BLE001  (a missing photo or font must never stop the clip from being made)
+        except Exception as e:  # noqa: BLE001  (a missing photo or font must never stop the clip from being made)
             banner = None
+            _note("Putting the title band on a Short", e)
     if banner:
         banner["idx"] = 2 if has_voice else 1
         cmd += ["-loop", "1", "-i", banner["path"]]
+    cta = None
+    try:
+        from .reminder import plan
+
+        cta = plan(clip, W, H, dur)
+    except Exception as e:  # noqa: BLE001  (the reminder is an extra: it must never stop the clip from being made)
+        cta = None
+        _note("Putting the like-and-subscribe reminder on a video", e)
     cmd += [
         "-filter_complex", build_filter(clip, W, H, dur, workdir, has_voice, has_audio,
                                          f"Credit: {project.channel}" if clip.credit_on is not False and project.channel else "",
                                          _subject(clip, src, project, layout(clip, W, H, size)), size,
-                                         stream_seconds(Path(clip.voice_path), "a:0") if has_voice else 0.0, banner),
+                                         stream_seconds(Path(clip.voice_path), "a:0") if has_voice else 0.0, banner, cta),
         "-map", "[v]", "-map", "[a]",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-t", f"{dur:.2f}", "body.tmp.mp4",
@@ -323,6 +343,7 @@ def apply_short_cover(clip: Clip) -> bool:
                        cwd=workdir, capture_output=True, text=True)
     if r.returncode != 0:
         (workdir / "out.tmp.mp4").unlink(missing_ok=True)
+        _note("Showing the thumbnail at the start of a Short", RuntimeError("ffmpeg: " + r.stderr[-300:]))
         return False
     (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
     return True

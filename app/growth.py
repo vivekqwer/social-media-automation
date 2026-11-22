@@ -13,6 +13,7 @@ from .config import DATA_DIR
 from .db import Base, Clip, Destination, Project, SessionLocal, VideoStat, engine_for, utcnow
 
 log = logging.getLogger(__name__)
+from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
 
 
 def swap_weak_thumbnails(max_per_run: int = 2) -> list[int]:
@@ -52,6 +53,7 @@ def swap_weak_thumbnails(max_per_run: int = 2) -> list[int]:
                         s.commit()
                     except Exception as e:  # noqa: BLE001
                         log.warning("thumb swap %s: %s", c.id, str(e)[:200])
+                        _note("Trying a second thumbnail for a video with few views", e)
                         s.rollback()
     return done
 
@@ -106,6 +108,7 @@ def weekly_report() -> Path | None:
         return out
     except Exception as e:  # noqa: BLE001
         log.warning("weekly report: %s", str(e)[:200])
+        _note("Making the weekly report", e)
         return None
 
 

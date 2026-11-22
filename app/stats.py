@@ -9,6 +9,7 @@ from . import quota, youtube
 from .db import ChannelStat, Destination, SessionLocal, VideoStat, utcnow
 
 log = logging.getLogger(__name__)
+from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
 MAX_VIDEOS = 200  # newest videos per channel to track
 
 
@@ -69,6 +70,7 @@ def sync_all() -> dict:
             out[did] = sync_channel(did)
         except Exception as e:  # noqa: BLE001  (login expired etc.: keep the last numbers, try again next time)
             log.warning("stats: channel %s not synced: %s", did, str(e)[:200])
+            _note("Reading my channel's numbers from YouTube", e)
             out[did] = {"error": str(e)[:200]}
     return out
 
@@ -244,4 +246,6 @@ def sync_all_watch_time(max_age_minutes: int = 0) -> dict:
             set_setting(f"watchtime-status:{did}", "api_off" if "has not been used" in m or "is disabled" in m
                         else "reconnect" if "insufficient" in m.lower() or "403" in m else "error: " + m[:200])
             log.warning("watch time: channel %s: %s", did, m[:200])
+            if "has not been used" not in m and "is disabled" not in m and "insufficient" not in m.lower() and "403" not in m:
+                _note("Reading watch time from YouTube", e)  # the other cases have their own message in Analytics
     return out

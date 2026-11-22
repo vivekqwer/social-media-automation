@@ -11,6 +11,7 @@ import re
 from .db import Channel, Destination, SessionLocal, get_setting, set_setting, utcnow, main_destination
 
 log = logging.getLogger(__name__)
+from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
 KEY = "creators"
 PER_DAY = 5
 # music labels, film studios and TV networks: they never give fan pages permission and their Content ID strikes
@@ -98,6 +99,7 @@ def refresh_inbox() -> list[dict]:
         candidates += [v for v in trending("") if not v.get("cc")]
     except Exception as e:  # noqa: BLE001
         log.warning("permission inbox: trending: %s", str(e)[:150])
+        _note("Permission inbox: reading trending videos", e)
     candidates += [{**v, "channel_id": v["channel_url"].rsplit("/", 1)[-1]} for v in overview().get("outliers", [])]
     new = []
     for v in candidates:
@@ -150,6 +152,7 @@ def lookup_emails(channel_ids: list[str]) -> dict:
             quota.spend("read")
         except Exception as e:  # noqa: BLE001
             log.warning("email lookup: %s", str(e)[:150])
+            _note("Permission inbox: looking up creators' emails", e)
             return out
         for it in r.get("items", []):
             text = it.get("snippet", {}).get("description", "") + "\n" + it.get("brandingSettings", {}).get("channel", {}).get("description", "")
@@ -190,6 +193,7 @@ def find_emails(only: str | None = None) -> int:
             quota.spend("read")
         except Exception as e:  # noqa: BLE001
             log.warning("permission inbox: email lookup: %s", str(e)[:150])
+            _note("Permission inbox: looking up creators' emails", e)
             return found
         texts = {it["id"]: (it.get("snippet", {}).get("description", "") + "\n"
                             + it.get("brandingSettings", {}).get("channel", {}).get("description", "")) for it in r.get("items", [])}
@@ -329,6 +333,7 @@ def check_replies() -> int:
             r = gmail.reply_in_thread(c["thread_id"])
         except Exception as e:  # noqa: BLE001
             log.warning("gmail reply check: %s", str(e)[:150])
+            _note("Reading creators' replies in Gmail", e)
             continue
         if not r:
             continue
@@ -351,6 +356,7 @@ def check_replies() -> int:
                    [[{"text": "↩️ Undo", "callback_data": f"pu:{cid}"}]])
         except Exception as e:  # noqa: BLE001
             log.warning("auto-grant failed for %s: %s", cid, str(e)[:150])
+            _note("Starting clips after a creator said yes", e)
             ask.append(cid)
     d = _load()
     for cid in ask:
@@ -407,4 +413,5 @@ def grant(cid: str, proof: str) -> dict:
         on_granted(cid)
     except Exception as e:  # noqa: BLE001
         log.warning("viral on_granted: %s", str(e)[:150])
+        _note("Starting a viral pick after permission was given", e)
     return c

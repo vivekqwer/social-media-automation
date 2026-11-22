@@ -11,6 +11,7 @@ from . import quota, youtube
 from .db import get_setting, set_setting, utcnow
 
 log = logging.getLogger(__name__)
+from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
 KEY = "competitors"
 
 
@@ -78,6 +79,7 @@ def scan() -> dict:
             found += _scan_channel(c)
         except Exception as e:  # noqa: BLE001
             log.warning("competitors: %s: %s", c.get("name"), str(e)[:200])
+            _note("Ideas: checking a channel you follow", e)
     d["outliers"] = sorted(found, key=lambda v: -v["ratio"])[:60]
     d["checked_at"] = utcnow().isoformat() + "Z"
     _save(d)

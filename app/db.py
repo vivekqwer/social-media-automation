@@ -128,6 +128,7 @@ class Clip(Base):
     fit = Column(String(8))  # Shorts/square from a wide video: full (whole picture, blurred background; default) | wide | fill
     voice_fit = Column(String(8))  # speed = the voice-over is sped up/slowed down to end exactly with the clip
     frame_title = Column(Boolean)  # Shorts: title + small face at the top of every frame (None/True = on)
+    cta_on = Column(Boolean)  # small "like and subscribe" reminder near the end of the video (None/True = on)
     meta_done = Column(Boolean, default=False)  # also posted to Instagram / Facebook
     meta_result = Column(JSON)
     thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low

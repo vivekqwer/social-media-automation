@@ -128,6 +128,15 @@ HELP = [
     ("The thumbnail is not on YouTube",
      "A refused thumbnail is sent again every 30 minutes.",
      "Verify the channel's phone number at youtube.com/verify (needed once per channel)."),
+    ("Where do I see everything that went wrong?",
+     "Every problem is collected on the Alerts page, in tabs: Deleted, Strikes & copyright, Not working and System errors. "
+     "The red number in the menu counts the new serious ones.",
+     "Open Alerts, choose a tab and press the button on the item (Open clip, Retry, Resume uploads, Reconnect…). "
+     "Press Dismiss when you have seen it — it stays in the list as history."),
+    ("I want to change or remove “Like and subscribe” on my videos",
+     "A small line is shown once, for about 3 seconds near the end of every new video. It has no sound and does not blink.",
+     "My channels → “Like & subscribe reminder”: switch it off or choose other words. For one clip only: open it → Trim & look. "
+     "Clips that are already made keep their look until you press Save & re-render (or Clips → “Make all waiting clips again”)."),
     ("My thumbnail does not show on my Shorts",
      "YouTube shows a frame of the video for Shorts (on the channel's Shorts tab and in the feed), not the uploaded thumbnail — nobody can choose it through the API. So every Short carries the title and your small face at the top of every frame, and the thumbnail itself is shown for the first moment of the video.",
      "Nothing. To choose the exact picture yourself: YouTube app on your phone → the Short → Edit → thumbnail → pick the first frame. To switch the title band off for one clip: open it → Trim & look. Face size: My channels → “Size on thumbnails”."),
