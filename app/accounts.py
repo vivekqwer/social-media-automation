@@ -43,6 +43,8 @@ class Account(CoreBase):
     # what the Super Admin set for this account (see app/acl.py): {"plan": name, "perms": {key: bool}, "limits": {key: n},
     # "controls": {"uploads_paused": bool, "sources_stopped": bool}}. Empty/missing = the plan and the defaults decide.
     access = Column(JSON)
+    plan_expires = Column(DateTime)  # a paid plan with a period ends here (app/payments.py); empty = it does not end
+    expiry_warned = Column(DateTime)  # the end date the customer was already warned about (3 days before)
     session_gen = Column(String(20), default="0")  # changes on logout / password change: old cookies stop working
     terms_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
@@ -51,7 +53,7 @@ class Account(CoreBase):
 
 
 def init():
-    from . import acl  # noqa: F401  (its shared activity-log table must be known before the tables are made)
+    from . import acl, payments  # noqa: F401  (their shared tables must be known before the tables are made)
 
     CoreBase.metadata.create_all(engine)
     migrate(tenant.OWNER, CoreBase.metadata)
@@ -71,7 +73,8 @@ def public(a: Account) -> dict:
             "channel_limit": a.channel_limit or DEFAULT_CHANNELS, "plan": a.plan, "note": a.note or "", "upgrade": a.upgrade,
             "created_at": a.created_at.isoformat() + "Z" if a.created_at else None,
             "approved_at": a.approved_at.isoformat() + "Z" if a.approved_at else None,
-            "last_login": a.last_login.isoformat() + "Z" if a.last_login else None}
+            "last_login": a.last_login.isoformat() + "Z" if a.last_login else None,
+            "plan_expires": a.plan_expires.isoformat() + "Z" if a.plan_expires else None}
 
 
 def clean_brand(text: str) -> str:

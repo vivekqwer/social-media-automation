@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import accounts, acl, auth, quota, scheduler, tenant, workers, youtube
+from . import accounts, acl, auth, payments, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
@@ -48,6 +48,7 @@ PUBLIC_PATHS = {
     "/healthz", "/privacy", "/terms", "/about",
     "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password", "/register", "/api/register",
     "/auth/reset/start", "/auth/callback",
+    "/api/pay/razorpay/webhook",  # Razorpay's own call: checked with the webhook secret inside the route
 }
 SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
 _STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -201,10 +202,12 @@ async def auth_gate(request: Request, call_next):
     return RedirectResponse("/login?next=" + quote(path), status_code=302)
 
 
-CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-       "font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://i.ytimg.com; "
-       "media-src 'self' blob:; frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
-       "connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self' https://accounts.google.com")
+CSP = ("default-src 'self'; script-src 'self' 'unsafe-inline' https://checkout.razorpay.com; "
+       "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://i.ytimg.com https://*.razorpay.com; "
+       "media-src 'self' blob:; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://api.razorpay.com "
+       "https://checkout.razorpay.com; connect-src 'self' https://*.razorpay.com; frame-ancestors 'none'; base-uri 'self'; "
+       "form-action 'self' https://accounts.google.com https://api.razorpay.com")  # Razorpay Checkout (Pay button)
 
 
 def _secure(resp):
@@ -317,6 +320,7 @@ def api_me(request: Request):
     if who["role"] == "user":
         acc = accounts.get(who["account_id"])
         who["upgrade"] = acc.upgrade if acc else None
+        who["plan_expires"] = acc.plan_expires.isoformat() + "Z" if acc and acc.plan_expires else None
         who["access"] = acl.for_me(who)  # the dashboard hides what is switched off (the server refuses it anyway)
     who["pay"] = _pay_info() if who["role"] == "user" or who.get("viewing") else None
     if who["tenant"] != tenant.OWNER:
@@ -608,6 +612,105 @@ def admin_pay_set(body: PayIn):
     return _pay_info()
 
 
+# ---------- online payment (Razorpay): keys and the payments list for the Super Admin; plans and Pay for customers ----------
+class RazorpayKeysIn(BaseModel):
+    key_id: str = Field("", max_length=60)
+    key_secret: str = Field("", max_length=200)
+    webhook_secret: str = Field("", max_length=200)
+    clear: bool = False
+
+
+class PayOrderIn(BaseModel):
+    plan: str = Field(min_length=1, max_length=40)
+
+
+class PayVerifyIn(BaseModel):
+    razorpay_order_id: str = Field(min_length=6, max_length=60)
+    razorpay_payment_id: str = Field(min_length=6, max_length=60)
+    razorpay_signature: str = Field(min_length=10, max_length=200)
+
+
+def _webhook_url(request: Request) -> str:
+    base = BASE_URL if not IS_LOCAL else str(request.base_url).rstrip("/")
+    return base + "/api/pay/razorpay/webhook"
+
+
+@app.get("/api/admin/razorpay")
+def admin_razorpay_get(request: Request):
+    """Only whether the keys are saved, the last 4 characters of the Key ID, test or live — never a secret."""
+    return payments.keys_public(_webhook_url(request))
+
+
+@app.post("/api/admin/razorpay")
+def admin_razorpay_set(body: RazorpayKeysIn, request: Request):
+    _acl_call(payments.save_keys, body.key_id, body.key_secret, body.webhook_secret, body.clear)
+    acl.record(None, "super", "admin.payment", "Removed the Razorpay keys" if body.clear else "Saved Razorpay keys")
+    return payments.keys_public(_webhook_url(request))
+
+
+@app.post("/api/admin/razorpay/check")
+def admin_razorpay_check():
+    return payments.check_keys()
+
+
+@app.get("/api/admin/payments")
+def admin_payments(limit: int = Query(200, ge=1, le=1000)):
+    return {"payments": payments.listing(limit)}
+
+
+@app.get("/api/plans")
+def plans_for_me(request: Request):
+    """The plans a customer can buy, what each includes, their current plan and when it ends."""
+    who = getattr(request.state, "who", None) or {}
+    aid = who.get("account_id") or (who.get("viewing") or {}).get("account_id")
+    return {**payments.catalog(aid), "pay": _pay_info()}
+
+
+def _payer(request: Request) -> int:
+    who = getattr(request.state, "who", None) or {}
+    if who.get("role") != "user" or not who.get("account_id"):
+        raise HTTPException(400, "Only a customer account can pay for a plan (not the Super Admin, also not in “View as”).")
+    return who["account_id"]
+
+
+@app.post("/api/pay/order")
+def pay_order(body: PayOrderIn, request: Request):
+    """Start a payment: the server makes the Razorpay order with the plan's saved price."""
+    aid = _payer(request)
+    try:
+        return payments.create_order(aid, body.plan)
+    except PermissionError as e:
+        raise HTTPException(429, str(e))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except RuntimeError as e:
+        raise HTTPException(502, str(e))
+
+
+@app.post("/api/pay/verify")
+def pay_verify(body: PayVerifyIn, request: Request):
+    """After Razorpay Checkout: check its signature, then put the plan on the account."""
+    aid = _payer(request)
+    try:
+        return payments.verify_checkout(aid, body.razorpay_order_id, body.razorpay_payment_id, body.razorpay_signature)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/pay/razorpay/webhook")
+async def pay_webhook(request: Request):
+    """Razorpay tells us about a payment (no sign-in: the X-Razorpay-Signature over the raw body is the proof)."""
+    raw = await request.body()
+    if len(raw) > 256 * 1024:
+        return JSONResponse({"detail": "Too large"}, status_code=413)
+    import asyncio
+
+    try:
+        return await asyncio.to_thread(payments.webhook, raw, request.headers.get("x-razorpay-signature", ""))
+    except PermissionError:
+        return JSONResponse({"detail": "Invalid signature"}, status_code=400)
+
+
 @app.get("/api/admin/selftest")
 def admin_selftest():
     """Check on the live database that customers' copies are really separate."""
@@ -627,6 +730,9 @@ class PlanIn(BaseModel):
     perms: dict[str, bool] = Field(default_factory=dict)
     limits: dict[str, int | None] = Field(default_factory=dict)
     apply: bool = True  # accounts on this plan follow the change (False: they keep what they have now)
+    price: int | None = Field(None, ge=0, le=payments.MAX_PRICE)  # ₹; None = leave the price as it is, 0 = not for sale
+    period: Literal["monthly", "yearly", "once"] = "monthly"
+    description: str = Field("", max_length=200)
 
 
 class DefaultIn(BaseModel):
@@ -657,25 +763,34 @@ def _acl_call(fn, *args, **kw):
         raise HTTPException(400, str(e))
 
 
+def _plans_overview() -> dict:
+    return payments.with_prices(acl.overview())  # + each plan's price for online payment
+
+
 @app.get("/api/admin/acl")
 def admin_acl():
     """Every switch and limit there is, the plans, and what accounts without a plan get."""
-    return acl.overview()
+    return _plans_overview()
 
 
 @app.post("/api/admin/acl/default")
 def admin_acl_default(body: DefaultIn):
-    return {**_acl_call(acl.save_default, body.perms, body.limits, body.new_plan, body.apply), **acl.overview()}
+    return {**_acl_call(acl.save_default, body.perms, body.limits, body.new_plan, body.apply), **_plans_overview()}
 
 
 @app.post("/api/admin/plans")
 def admin_plan_save(body: PlanIn):
-    return {**_acl_call(acl.save_plan, body.name, body.perms, body.limits, body.apply), **acl.overview()}
+    out = _acl_call(acl.save_plan, body.name, body.perms, body.limits, body.apply)
+    if body.price is not None:
+        _acl_call(payments.set_price, out["name"], body.price, body.period, body.description)
+    return {**out, **_plans_overview()}
 
 
 @app.delete("/api/admin/plans/{name}")
 def admin_plan_delete(name: str):
-    return {**_acl_call(acl.delete_plan, name), **acl.overview()}
+    out = _acl_call(acl.delete_plan, name)
+    payments.drop_price(out["deleted"])
+    return {**out, **_plans_overview()}
 
 
 @app.get("/api/admin/activity")

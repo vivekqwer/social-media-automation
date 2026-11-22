@@ -177,6 +177,7 @@ def process_queue():
         since = _pacific_midnight(now)
         used = s.query(Clip).filter(Clip.attempted_at >= since).count()
         paused = {d.id for d in s.query(Destination).filter(Destination.paused.is_(True))}
+        paused |= acl.over_cap_channels(s)  # beyond the plan's channel limit: kept, but its uploads wait
         connected = s.query(Destination).count() > 0
         rows = s.query(Clip.id, Clip.destination_id, Clip.publish_at).filter(Clip.status == "queued").all()
         per_dest = {}
@@ -379,6 +380,14 @@ def start():
     from .learn import daily as learn_daily  # Ideas -> What works: auto-tune once a day (checked hourly, acts once)
     add(learn_daily, "interval", hours=1, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=12))
+    from .payments import expire_due
+
+    def plans_ending():  # over all accounts at once, so it runs a single time, in the owner's copy
+        from . import tenant
+
+        with tenant.use(tenant.OWNER):
+            expire_due()
+    sch.add_job(plans_ending, "cron", hour=3, minute=30, max_instances=1, coalesce=True)  # 9 AM IST: warn 3 days before, end paid plans
     from .phone import events as phone_events
     add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you
