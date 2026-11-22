@@ -316,7 +316,15 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="cb"><div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Your UPI ID / account<input id="pay-upi" maxlength="100" placeholder="name@upi"></label><label class="f grow">Price<input id="pay-price" maxlength="100" placeholder="₹499 per extra channel, per month"></label></div>
             <label class="f" style="margin-top:8px">What the customer should do<input id="pay-text" maxlength="1000" placeholder="Pay, then write the payment reference in the request."></label>
             <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn sm" id="pay-save">Save</button></div></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Plans &amp; defaults</h3><p>A plan is a ready set of switches and limits (for example “Starter” or “Pro”). Put a customer on a plan with one press in their Access panel. The default set is what customers without a plan get.</p></div><button class="btn outline sm" id="pl-new"><i data-ico="plus"></i>New plan</button></div><div class="cb" id="pl-list"><span class="mut sm">…</span></div></div>
         <div class="card"><div class="ch"><div><h3>Accounts</h3><p id="us-sub">…</p></div></div><div class="cb" id="us-list"></div></div>
+        <div class="card" style="margin-top:16px"><div class="ch"><div><h3>Activity log</h3><p>What customers did and what you changed for them, newest first.</p></div>
+          <div class="row" style="gap:8px"><select id="lg-acc" style="width:auto"><option value="">All customers</option></select><select id="lg-who" style="width:auto"><option value="">Everybody</option><option value="user">Customers</option><option value="super">Super Admin</option><option value="system">The system</option></select><input id="lg-q" maxlength="60" placeholder="Search words" style="width:150px"><button class="btn outline sm" id="lg-go">Show</button></div></div>
+          <div class="cb"><div id="lg-list"><span class="mut sm">…</span></div><div class="row" style="justify-content:center;margin-top:10px"><button class="btn ghost sm hide" id="lg-more">Show older</button></div></div></div>
+      </section>
+
+      <section id="p-none" class="hide">
+        <div class="empty"><b>No page is switched on for your account</b><span class="sm">Ask the person who gave you access to switch on what you need.</span></div>
       </section>
 
       <section id="p-guide" class="hide">
@@ -561,6 +569,13 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
   </div>
 </div></div>
 
+<div class="modal" id="m-plan"><div class="card" style="width:min(780px,100%)">
+  <div class="ch"><div><h3 id="pe-title">Plan</h3><p id="pe-sub"></p></div><button class="btn ghost icon" id="pe-close"><i data-ico="x"></i></button></div>
+  <div class="cb"><label class="f" id="pe-name-wrap" style="margin-bottom:10px">Name of the plan<input id="pe-name" maxlength="40" placeholder="Starter"></label>
+    <div id="pe-body"></div>
+    <div class="row" style="justify-content:flex-end;margin-top:16px;flex-wrap:wrap" id="pe-btns"></div></div>
+</div></div>
+
 <div class="toasts" id="toasts"></div>
 
 <script>
@@ -616,9 +631,10 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={start:'Get started',users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+const TITLES={none:'Nothing switched on',start:'Get started',users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
   if(window.OBLOCK&&p!=='start'){p='start';if(!window.OBSRC)toast('Finish “Get started” first — the rest opens when the setup is done');window.OBSRC=false}
+  if(!pageOn(p))p=firstPage();
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
@@ -1258,7 +1274,7 @@ function collect(){
     credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
-async function save(){const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
+async function save(){if(!can('clips.edit'))return CUR;const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
 function startPoll(id){clearInterval(POLL);let errs=0;POLL=setInterval(async()=>{let x;
   try{x=await api('/api/clips/'+id);errs=0}catch(e){if(++errs>5){clearInterval(POLL);fail(e)}return}
   if(!CUR||CUR.id!==id)return clearInterval(POLL);
@@ -1377,6 +1393,7 @@ async function qPoll(){
   const er=$('#q-err');const msg=d.state==='failed'?d.step:(st==='failed'?c.error:'');er.classList.toggle('hide',!msg);er.innerHTML=msg?ico('alert')+esc(msg):'';
   $('#q-open').classList.toggle('hide',!c);$('#q-open').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);openEditor(c.id)};
   if(failed||['queued','uploaded'].includes(st)){clearInterval(QPOLL);if(!failed)toast(st==='uploaded'?'Uploaded to YouTube':'All set — it will upload by itself')}
+  else if(st==='rendered'&&!can('uploads.auto')){clearInterval(QPOLL);toast('The clip is ready. Open Clips → Ready to review and approve it — automatic upload is switched off for your account.')}
 }
 
 ['m-add','m-new'].forEach(id=>$('#'+id).addEventListener('mousedown',e=>{if(e.target.id===id)$('#'+id).classList.remove('on')}));
@@ -1426,7 +1443,41 @@ async function loadMe(){
     bar.innerHTML=`You are looking at <b>${esc(ME.viewing.name)}</b>'s dashboard (${esc(ME.viewing.email)}). What you change here changes THEIR system. <button class="btn sm" id="view-exit">Back to my own dashboard</button>`;
     $('#view-exit').onclick=()=>once(async()=>{await api('/api/admin/view/exit','POST');location.href='/'})}else if(bar)bar.remove();
   if(ME.role==='super'&&!ME.viewing){try{const u=await api('/api/admin/users');const n=u.users.filter(x=>x.status==='pending'||x.upgrade).length;const b=$('#b-users');b.style.display=n?'':'none';b.textContent=n}catch(e){}}
+  applyAccess();
   renderPlan();
+}
+/* ---------- access control (customers): what the administrator switched off is hidden. The server refuses it anyway. ---------- */
+function can(k){return !(ME&&ME.access&&ME.access.perms&&ME.access.perms[k]===false)}
+const NAVPAGES=['dashboard','clips','sources','analytics','viral','ideas','alerts','settings','guide'];
+function pageOn(p){return !NAVPAGES.includes(p)||can('page.'+p)}
+function firstPage(){return NAVPAGES.find(pageOn)||'none'}
+const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
+  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"]',
+  'sources.edit':'[data-sedit],[data-tog],[data-scripts]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
+  'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
+  'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
+  'clips.create':'#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
+  'clips.edit':'#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-del,#e-rewrite',
+  'clips.rerender':'#re-all,#e-render,#e-refetch','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
+  'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
+  'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
+  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
+const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
+function applyAccess(){
+  let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}
+  const a=ME.access,off=a?Object.keys(a.perms).filter(k=>a.perms[k]===false):[];
+  st.textContent=off.map(k=>(PERM_HIDE[k]?PERM_HIDE[k]+'{display:none!important}':'')+(PERM_LOCK[k]?PERM_LOCK[k]+'{pointer-events:none;opacity:.5}':'')).join('');
+  $$('.nav[data-p]').forEach(n=>{if(NAVPAGES.includes(n.dataset.p))n.classList.toggle('hide',!pageOn(n.dataset.p))});
+  [['topic','source.topic'],['channel','source.channel'],['trending','source.trending'],['reel','source.reel']].forEach(([v,k])=>['#s-kind','#h-kind'].forEach(sel=>{const o=$(sel+' option[value="'+v+'"]');if(o)o.disabled=o.hidden=!can(k)}));
+  ['#s-kind','#h-kind'].forEach(sel=>{const el=$(sel),cur=el.selectedOptions[0];if(cur&&cur.disabled){const f=[...el.options].find(o=>!o.disabled);if(f){el.value=f.value;if(el.onchange)el.onchange()}}});
+  let note=$('#acl-note');const c=(a&&a.controls)||{},msgs=[];
+  if(c.uploads_paused)msgs.push('Uploads are paused by the administrator. Your clips stay queued; nothing is lost.');else if(!can('uploads.youtube'))msgs.push('Uploading to YouTube is switched off for your account.');
+  if(c.sources_stopped)msgs.push('All sources are stopped by the administrator. No new clips are made until they are started again.');
+  if(msgs.length){if(!note){note=document.createElement('div');note.id='acl-note';note.className='alert bad';$('main').prepend(note)}note.innerHTML=ico('alert')+'<span>'+msgs.map(esc).join(' ')+' Ask the person who gave you access.</span>'}else if(note)note.remove();
+  const cur=$$('main section').find(s=>!s.classList.contains('hide'));if(cur&&!pageOn(cur.id.slice(2)))go(firstPage());
 }
 function renderPlan(){
   const card=$('#plan-card');if(!card)return;const isUser=ME.role==='user'||ME.viewing;card.classList.toggle('hide',!isUser);
@@ -1486,6 +1537,87 @@ async function loadStart(){
     if($('#p-start').classList.contains('hide')||$('#m-add').classList.contains('on'))return;
     if(typing){window._obT=setTimeout(again,10000);return}loadStart().catch(()=>{})},10000);
 }
+/* ---------- Super Admin: access control (switches, limits, plans, direct controls, activity log) ---------- */
+let ACL=null,LGLAST=null;const UOPEN=new Set();
+async function loadAcl(){ACL=await api('/api/admin/acl');renderPlans();return ACL}
+const aclLine=a=>`${a.plan?'Plan: <b>'+esc(a.plan)+'</b>':'No plan (default switches)'} · ${a.off?a.off+' switched off':'everything switched on'}${a.controls.uploads_paused?' · <b style="color:var(--bad)">uploads paused</b>':''}${a.controls.sources_stopped?' · <b style="color:var(--bad)">sources stopped</b>':''}`;
+const swRow=(attr,key,on,label,mark)=>`<label class="row sm" style="gap:8px;padding:5px 0;flex-wrap:nowrap" ${mark?'title="Set for this customer only"':''}><span class="switch"><input type="checkbox" ${on?'checked':''} ${attr}="${esc(key)}"><i></i></span><span>${esc(label)}${mark?' <span class="mut">•</span>':''}</span></label>`;
+function permGrid(perms,attr,own){return ACL.catalog.groups.map(g=>`<div style="margin-top:14px"><b>${esc(g.title)}</b><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:0 18px;margin-top:4px">${ACL.catalog.perms.filter(p=>p.group===g.id).map(p=>swRow(attr,p.key,perms[p.key]!==false,p.label,own&&(p.key in own))).join('')}</div></div>`).join('')}
+function limitRow(limits,attr,usage,channels){return `<div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-start">${ACL.catalog.limits.filter(l=>channels||l.key!=='channels').map(l=>`<label class="f sm" title="${esc(l.hint)}">${esc(l.label)}<input type="number" min="0" ${attr}="${l.key}" value="${limits[l.key]??''}" placeholder="${l.key==='channels'?'':'no limit'}" style="width:140px">${usage&&usage[l.key]!=null?`<span class="mut" style="font-weight:400">used now: ${esc(usage[l.key])}</span>`:''}</label>`).join('')}</div>`}
+const actRow=(r,name)=>`<div class="item"><span class="badge ${r.actor==='super'?'queued':r.actor==='user'?'uploaded':'outline'}">${r.actor==='super'?'Super Admin':r.actor==='user'?'Customer':'System'}</span><div class="tx grow"><span>${esc(r.detail)}</span><span class="mut sm" style="display:block">${name&&r.name?esc(r.name)+' · ':''}${r.at?new Date(r.at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):''}</span></div></div>`;
+async function openAccess(id,fresh){
+  const box=$('#ua-'+id);if(!box)return;if(!ACL)await loadAcl();
+  const d=await api(`/api/admin/users/${id}/access`+(fresh?'?fresh=1':'')),u=d.usage||{},c=d.controls||{},a=d.account;
+  UOPEN.add(id);box.classList.remove('hide');
+  box.innerHTML=`<div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:10px;background:var(--muted)">
+    <div class="row" style="justify-content:space-between"><b>Access of ${esc(a.name)}</b><button class="btn ghost sm" data-aclose>Close</button></div>
+    <div class="mut sm">Every change applies at once — the customer does not have to sign in again. What is switched off is hidden in their dashboard and refused by the server.</div>
+    <div style="margin-top:14px"><b>Plan</b><div class="row" style="margin-top:4px"><select data-aplan style="width:auto"><option value="">No plan (default switches)</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${p.name===d.plan?'selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="btn outline sm" data-aplango>Put on this plan</button><span class="mut sm">This replaces the switches and limits set only for this customer (marked •).</span></div></div>
+    <div style="margin-top:14px"><b>Do now</b><div class="row" style="margin-top:4px;flex-wrap:wrap">
+      <button class="btn ${c.uploads_paused?'ok':'bad'} sm" data-actl="${c.uploads_paused?'resume_uploads':'pause_uploads'}">${c.uploads_paused?'Resume uploads':'Pause all uploads now'}</button>
+      <button class="btn ${c.sources_stopped?'ok':'bad'} sm" data-actl="${c.sources_stopped?'start_sources':'stop_sources'}">${c.sources_stopped?'Start sources again':'Stop all sources now'}</button>
+      <button class="btn outline sm" data-actl="sign_out">Sign out now</button>
+      ${(u.channel_list||[]).map(ch=>`<button class="btn outline sm" data-adisc="${ch.id}" data-n="${esc(ch.name)}">Disconnect channel “${esc(ch.name)}”</button>`).join('')}</div>
+      ${c.uploads_paused||c.sources_stopped?`<div class="sm" style="color:var(--bad);margin-top:6px">${c.uploads_paused?'Uploads are paused. ':''}${c.sources_stopped?'Sources are stopped. ':''}The customer sees this on their dashboard.</div>`:''}</div>
+    <div style="margin-top:14px"><b>Limits</b> <span class="mut sm">(empty = no limit; the day restarts with YouTube's, about 1:30 PM India time)</span><div style="margin-top:4px">${limitRow(d.limits,'data-alim',u,true)}</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-alimsave>Save limits</button><button class="btn ghost sm" data-afresh>Measure storage again</button></div>${u.error?`<div class="sm" style="color:var(--bad)">${esc(u.error)}</div>`:''}</div>
+    ${permGrid(d.perms,'data-ap',d.own_perms)}
+    <div style="margin-top:14px"><b>Recent activity</b><div style="margin-top:6px;max-height:260px;overflow:auto">${(d.activity||[]).length?d.activity.map(r=>actRow(r)).join(''):'<span class="mut sm">Nothing yet.</span>'}</div></div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px"><b style="color:var(--bad)">Delete everything</b><div class="row" style="margin-top:4px"><button class="btn bad sm" data-awipe>Delete all data of this account…</button><span class="mut sm">Removes their channels' connections, sources, clips, files and settings for good. Videos already on YouTube are not touched. The login stays, blocked.</span></div></div></div>`;
+  $('[data-aclose]',box).onclick=()=>{UOPEN.delete(id);box.classList.add('hide');box.innerHTML=''};
+  $$('[data-ap]',box).forEach(i=>i.onchange=async()=>{i.disabled=true;try{const r=await api(`/api/admin/users/${id}/access`,'POST',{perms:{[i.dataset.ap]:i.checked}});toast((r.changed||[]).join(' · ')||'Saved');
+      const l=$('#ual-'+id);if(l)l.innerHTML=aclLine({plan:r.plan,controls:r.controls,off:Object.values(r.perms).filter(v=>!v).length})}catch(e){i.checked=!i.checked;fail(e)}finally{i.disabled=false}});
+  $('[data-alimsave]',box).onclick=e=>once(async()=>{const limits={};$$('[data-alim]',box).forEach(i=>{const k=i.dataset.alim;if(String(d.limits[k]??'')===i.value)return;  // only what was changed becomes this customer's own
+      if(k==='channels'){if(i.value!=='')limits.channels=+i.value}else limits[k]=i.value===''?null:+i.value});
+    const r=await api(`/api/admin/users/${id}/access`,'POST',{limits});toast((r.changed||[]).join(' · ')||'No change');await loadUsers()},e.target);
+  $('[data-afresh]',box).onclick=e=>once(()=>openAccess(id,true),e.target);
+  $('[data-aplango]',box).onclick=e=>once(async()=>{const p=$('[data-aplan]',box).value;if(!confirm(p?`Put ${a.name} on the plan “${p}”? The switches and limits set only for this customer are replaced by the plan's.`:`Take ${a.name} off every plan? The default switches then apply.`))return;
+    await api(`/api/admin/users/${id}/plan`,'POST',{plan:p});toast(p?'Now on the plan “'+p+'”':'No plan — default switches');await loadUsers()},e.target);
+  $$('[data-actl]',box).forEach(b=>b.onclick=()=>once(async()=>{const act=b.dataset.actl;if(act==='sign_out'&&!confirm(`Sign ${a.name} out of every browser now? They can sign in again with their password.`))return;
+    await api(`/api/admin/users/${id}/control`,'POST',{action:act});toast({pause_uploads:'Uploads paused — nothing of theirs goes to YouTube',resume_uploads:'Uploads resumed',stop_sources:'Sources stopped — no new clips are made',start_sources:'Sources started again',sign_out:'Signed out'}[act]);await loadUsers()},b));
+  $$('[data-adisc]',box).forEach(b=>b.onclick=()=>once(async()=>{if(!confirm(`Disconnect the YouTube channel “${b.dataset.n}” from ${a.name}'s system? Their sources and waiting clips are kept; videos already on YouTube are not touched.`))return;
+    await api(`/api/admin/users/${id}/channels/${b.dataset.adisc}`,'DELETE');toast('Channel disconnected');await loadUsers()},b));
+  $('[data-awipe]',box).onclick=e=>once(async()=>{if(!confirm(`Delete ALL data of ${a.name}?\n\nTheir channels' connections, sources, clips, files and settings are removed for good. This cannot be undone. The account is blocked and signed out first.`))return;
+    const t=prompt('To confirm, type the e-mail address of this account:');if(t===null)return;
+    const r=await api(`/api/admin/users/${id}/delete-data`,'POST',{email:t});toast(r.deleted?'All data of this account was deleted':'Deleted, but: '+r.problems.join('; '),!r.deleted);UOPEN.delete(id);await loadUsers()},e.target);
+}
+function renderPlans(){
+  const el=$('#pl-list');if(!el||!ACL)return;
+  const sum=s=>{const off=Object.values(s.perms||{}).filter(v=>v===false).length,lim=ACL.catalog.limits.filter(l=>(s.limits||{})[l.key]).map(l=>l.label+': '+s.limits[l.key]).join(' · ');return (off?off+' switched off':'everything switched on')+' · '+(lim||'no limits')};
+  el.innerHTML=`<div class="item"><div class="tx grow"><b>Default</b> <span class="badge outline">${ACL.no_plan_users} without a plan</span><span class="mut sm" style="display:block">${esc(sum(ACL.default))}</span></div><button class="btn outline sm" data-pledit="">Edit</button></div>`
+    +ACL.plans.map(p=>`<div class="item"><div class="tx grow"><b>${esc(p.name)}</b> <span class="badge ${p.users?'uploaded':'outline'}">${p.users} customer${p.users===1?'':'s'}</span>${ACL.new_plan===p.name?' <span class="badge queued">new accounts start here</span>':''}<span class="mut sm" style="display:block">${esc(sum(p))}</span></div><button class="btn outline sm" data-pledit="${esc(p.name)}">Edit</button><button class="btn bad sm" data-pldel="${esc(p.name)}">Delete</button></div>`).join('')
+    +`<div class="row sm" style="margin-top:12px;gap:8px"><span>A new account starts on</span><select id="pl-start" style="width:auto"><option value="">the default switches</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${ACL.new_plan===p.name?'selected':''}>the plan “${esc(p.name)}”</option>`).join('')}</select></div>`;
+  $$('[data-pledit]',el).forEach(b=>b.onclick=()=>openPlan(b.dataset.pledit));
+  $$('[data-pldel]',el).forEach(b=>b.onclick=()=>once(async()=>{const p=ACL.plans.find(x=>x.name===b.dataset.pldel);if(!confirm(`Delete the plan “${p.name}”?`+(p.users?`\n\nThe ${p.users} customer(s) on it keep exactly the switches and limits they have now.`:'')))return;
+    await api('/api/admin/plans/'+encodeURIComponent(p.name),'DELETE');toast('Plan deleted');await loadUsers()},b));
+  $('#pl-start').onchange=()=>once(async()=>{await api('/api/admin/acl/default','POST',{perms:ACL.default.perms||{},limits:ACL.default.limits||{},new_plan:$('#pl-start').value,apply:true});toast('Saved — used for accounts that register from now on');await loadAcl()});
+}
+function openPlan(name){
+  const isNew=name===null,isDef=name==='',p=isNew?{perms:{},limits:{},users:0}:isDef?{...ACL.default,users:ACL.no_plan_users}:ACL.plans.find(x=>x.name===name);if(!p)return;
+  $('#pe-title').textContent=isNew?'New plan':isDef?'Default switches':'Plan “'+name+'”';
+  $('#pe-sub').textContent=isDef?'What customers without a plan may use. A customer\'s own switches (set in their Access panel) still win.':'A ready set of switches and limits. Put customers on it in their Access panel.';
+  $('#pe-name-wrap').classList.toggle('hide',!isNew);$('#pe-name').value='';
+  $('#pe-body').innerHTML=`<b>Limits</b> <span class="mut sm">(empty = no limit)</span><div style="margin-top:4px">${limitRow(p.limits||{},'data-pl',null,!isDef)}</div>${permGrid(p.perms||{},'data-pp')}`;
+  const body=apply=>({perms:Object.fromEntries($$('#pe-body [data-pp]').map(i=>[i.dataset.pp,i.checked])),
+    limits:Object.fromEntries($$('#pe-body [data-pl]').map(i=>[i.dataset.pl,i.value===''?(isDef||i.dataset.pl==='channels'?null:0):+i.value])),apply});
+  const send=async apply=>{if(isDef)await api('/api/admin/acl/default','POST',{...body(apply),new_plan:ACL.new_plan||''});
+    else{const nm=isNew?$('#pe-name').value.trim():name;if(!nm)throw new Error('Give the plan a name, for example Starter');await api('/api/admin/plans','POST',{...body(apply),name:nm})}
+    $('#m-plan').classList.remove('on');toast(apply&&p.users?'Saved and applied':'Saved');await loadUsers()};
+  const n=p.users||0;
+  $('#pe-btns').innerHTML=!isNew&&n?`<span class="mut sm grow">${n} customer${n===1?' uses':'s use'} ${isDef?'the default':'this plan'}.</span><button class="btn outline" id="pe-keep">Save — ${n===1?'that customer keeps':'those customers keep'} what they have now</button><button class="btn brand" id="pe-apply">Save and apply to ${n===1?'that customer':'those '+n+' customers'}</button>`:'<button class="btn brand" id="pe-apply">Save</button>';
+  $('#pe-apply').onclick=()=>once(()=>send(true),$('#pe-apply'));if($('#pe-keep'))$('#pe-keep').onclick=()=>once(()=>send(false),$('#pe-keep'));
+  $('#m-plan').classList.add('on');
+}
+$('#pl-new').onclick=()=>once(async()=>{if(!ACL)await loadAcl();openPlan(null)});
+$('#pe-close').onclick=()=>$('#m-plan').classList.remove('on');
+async function loadLog(more){
+  const p=new URLSearchParams({limit:'60'});if($('#lg-acc').value)p.set('account_id',$('#lg-acc').value);if($('#lg-who').value)p.set('actor',$('#lg-who').value);if($('#lg-q').value.trim())p.set('q',$('#lg-q').value.trim());if(more&&LGLAST)p.set('before',LGLAST);
+  const rows=(await api('/api/admin/activity?'+p)).rows,html=rows.map(r=>actRow(r,true)).join('');
+  if(more)$('#lg-list').insertAdjacentHTML('beforeend',html);else $('#lg-list').innerHTML=html||'<span class="mut sm">Nothing here yet.</span>';
+  if(rows.length)LGLAST=rows[rows.length-1].id;$('#lg-more').classList.toggle('hide',rows.length<60);
+}
+$('#lg-go').onclick=()=>once(()=>loadLog(false),$('#lg-go'));$('#lg-more').onclick=()=>once(()=>loadLog(true),$('#lg-more'));
+$('#lg-acc').onchange=$('#lg-who').onchange=()=>loadLog(false).catch(fail);$('#lg-q').onkeydown=e=>{if(e.key==='Enter')loadLog(false).catch(fail)};
 async function loadUsers(){
   const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
   $('#pay-upi').value=pay.upi||'';$('#pay-price').value=pay.price||'';$('#pay-text').value=pay.text||'';
@@ -1497,11 +1629,14 @@ async function loadUsers(){
       <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
       ${u.usage&&!g.error?`<span class="sm" style="display:block">Setup: ${g.setup_done?'finished':esc(g.setup||'')+' steps done'} · Google project: ${g.own_google?'their own':g.shared_google?'<b>yours (shared uploads)</b>':'none yet'}</span>`:''}
       ${u.usage?`<span class="sm" style="display:block">${g.error?esc(g.error):`${g.channels} of ${u.channel_limit} channel(s) · ${g.sources} sources · ${g.clips} clips · ${g.uploaded} uploaded · helper ${g.helper?'online':'offline'}`}</span>`:''}
+      ${u.acl?`<span class="sm" style="display:block" id="ual-${u.id}">${aclLine(u.acl)}</span>`:''}
       ${u.upgrade?`<div class="alert" style="margin-top:6px"><span>Asks for <b>${u.upgrade.channels} channels</b> (${new Date(u.upgrade.at).toLocaleDateString()}): ${esc(u.upgrade.message||'no message')}</span><div class="row" style="margin-top:6px"><button class="btn sm" data-uallow="${u.id}" data-n="${u.upgrade.channels}">Paid — allow ${u.upgrade.channels} channels</button><button class="btn ghost sm" data-uclose="${u.id}">Not paid — close request</button></div></div>`:''}
       ${u.note?`<span class="mut sm" style="display:block">Note: ${esc(u.note)}</span>`:''}</div>
     <div class="row" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">${u.status==='pending'?`<button class="btn sm" data-uok="${u.id}">Approve</button><button class="btn bad sm" data-udel="${u.id}">Reject</button>`:''}
+      ${u.status!=='pending'&&u.tenant_id?`<button class="btn sm" data-uacc="${u.id}" title="Every switch, limit and control for this customer">Access</button>`:''}
       ${u.status==='active'?`<label class="row sm" style="gap:6px">Channels<input type="number" min="1" max="50" value="${u.channel_limit}" data-ulim="${u.id}" style="width:70px"></label><button class="btn outline sm" data-uview="${u.id}">View as</button><button class="btn outline sm" data-unote="${u.id}">Note</button>${g.own_google?'':`<button class="btn outline sm" data-ushare="${u.id}" data-on="${g.shared_google?0:1}" title="Lets this customer skip step 1 and upload through YOUR Google project — they then use up your daily uploads">${g.shared_google?'Stop sharing my Google project':'Share my Google project'}</button>`}<button class="btn outline sm" data-upw="${u.id}">Reset password</button><button class="btn bad sm" data-ublock="${u.id}">Block</button>`:''}
-      ${u.status==='blocked'?`<button class="btn outline sm" data-uunblock="${u.id}">Unblock</button><button class="btn bad sm" data-udel="${u.id}">Delete login</button>`:''}</div></div>`}).join('')
+      ${u.status==='blocked'?`<button class="btn outline sm" data-uunblock="${u.id}">Unblock</button><button class="btn bad sm" data-udel="${u.id}">Delete login</button>`:''}</div>
+    <div id="ua-${u.id}" class="hide" style="flex-basis:100%;min-width:0"></div></div>`}).join('')
     :'<span class="mut sm">No accounts yet. People create one on the sign-up page; you approve them here.</span>';
   const act=(sel,fn)=>$$(sel).forEach(b=>b.onclick=()=>once(()=>fn(b),b));const by=id=>U.find(u=>u.id===+id);
   const edit=(id,body)=>api('/api/admin/users/'+id,'POST',body);
@@ -1516,6 +1651,11 @@ async function loadUsers(){
   act('[data-ushare]',async b=>{const on=b.dataset.on==='1';if(on&&!confirm('Let this customer upload through YOUR Google project?\n\nTheir uploads then count against your own daily allowance (about 6 a day in total). Use this only for testing or while they set up their own project.'))return;await api(`/api/admin/users/${b.dataset.ushare}/shared-google`,'POST',{on});loadUsers()});
   act('[data-uview]',async b=>{await api(`/api/admin/users/${b.dataset.uview}/view`,'POST');location.href='/'});
   $$('[data-ulim]').forEach(inp=>inp.onchange=()=>once(async()=>{await edit(inp.dataset.ulim,{channel_limit:+inp.value});toast('Channel limit saved');loadUsers()}));
+  $$('[data-uacc]').forEach(b=>b.onclick=()=>{const id=+b.dataset.uacc;if(UOPEN.has(id)){UOPEN.delete(id);$('#ua-'+id).classList.add('hide');$('#ua-'+id).innerHTML='';return}once(()=>openAccess(id),b)});
+  const pick=$('#lg-acc'),was=pick.value;pick.innerHTML='<option value="">All customers</option>'+U.map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.email)})</option>`).join('');if(U.some(u=>String(u.id)===was))pick.value=was;
+  try{await loadAcl()}catch(e){fail(e)}
+  [...UOPEN].forEach(id=>{if($('#ua-'+id))openAccess(id).catch(fail);else UOPEN.delete(id)});
+  loadLog(false).catch(()=>{});
 }
 $('#pay-save').onclick=()=>once(async()=>{await api('/api/admin/pay','POST',{upi:$('#pay-upi').value,price:$('#pay-price').value,text:$('#pay-text').value});toast('Saved — customers see this when they ask for more channels')},$('#pay-save'));
 $('#us-test').onclick=()=>once(async()=>{const r=await api('/api/admin/selftest');alert(r.ok?'OK — a customer\'s copy is separate from yours on this database ('+r.database+').\n\nA test record written in a customer copy was not visible in your own copy.':'PROBLEM — the copies are not separate. Do not approve customers; send these details for support:\n'+JSON.stringify(r))},$('#us-test'));

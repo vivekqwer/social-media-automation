@@ -264,8 +264,10 @@ def set_message(cid: str, subject: str, message: str) -> dict:
 
 def send_mail(cid: str) -> dict:
     """Send the ready message from the owner's Gmail (only when the owner presses Send)."""
-    from . import gmail
+    from . import acl, gmail
 
+    if not acl.allowed("gmail.send"):  # every way of sending (dashboard, Viral page, Telegram) comes through here
+        raise ValueError(acl.message("gmail.send"))
     d = _load()
     if cid not in d:
         raise KeyError(cid)
@@ -388,11 +390,19 @@ def grant(cid: str, proof: str) -> dict:
     if cid not in d:
         raise KeyError(cid)
     c = d[cid]
+    from . import acl
+
+    if not acl.allowed("source.channel"):  # a yes becomes a channel source: that kind must be allowed for the account
+        raise ValueError(acl.message("source.channel"))
     with SessionLocal() as s:
         dest = main_destination(s)
         if not dest:
             raise ValueError("Connect your YouTube channel first.")
         existing = s.query(Channel).filter(Channel.resolved_url == c["url"]).first()
+        cap = acl.limit("sources")
+        if not existing and cap is not None and acl.source_count() >= cap:
+            raise ValueError(f"Your account can have {cap} source(s) and they are all used. Delete one first, "
+                             "or ask the person who gave you access for more.")
         if existing:
             existing.mode, existing.permission_note, existing.auto = "permission", proof, True
             src_id = existing.id

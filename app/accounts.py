@@ -37,9 +37,12 @@ class Account(CoreBase):
     status = Column(String(12), default="pending")  # pending | active | blocked
     tenant_id = Column(Integer, unique=True)  # their private copy (2, 3, ...)
     channel_limit = Column(Integer, default=DEFAULT_CHANNELS)  # how many YouTube channels they may connect
-    plan = Column(String(40), default="starter")
+    plan = Column(String(40), default="starter")  # only the name shown to the customer; the plan that counts is in `access`
     note = Column(Text)  # the Super Admin's own notes (payment reference, phone, ...)
     upgrade = Column(JSON)  # the customer's open request: {"channels": 3, "message": "...", "at": "..."}
+    # what the Super Admin set for this account (see app/acl.py): {"plan": name, "perms": {key: bool}, "limits": {key: n},
+    # "controls": {"uploads_paused": bool, "sources_stopped": bool}}. Empty/missing = the plan and the defaults decide.
+    access = Column(JSON)
     session_gen = Column(String(20), default="0")  # changes on logout / password change: old cookies stop working
     terms_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
@@ -48,6 +51,8 @@ class Account(CoreBase):
 
 
 def init():
+    from . import acl  # noqa: F401  (its shared activity-log table must be known before the tables are made)
+
     CoreBase.metadata.create_all(engine)
     migrate(tenant.OWNER, CoreBase.metadata)
     with CoreSession() as s:  # every active customer's tables exist and are up to date
@@ -97,6 +102,15 @@ def register(email: str, name: str, brand: str, password: str, accepted_terms: b
             raise ValueError("Registration is paused for the moment. Please try again later.")
         a = Account(email=email, name=name, brand=brand, pw_hash=hash_password(password), status="pending",
                     channel_limit=DEFAULT_CHANNELS, terms_at=utcnow())
+        try:  # the plan new accounts start on (Users → Plans & defaults); without one the default switches apply
+            from . import acl
+
+            start = acl.new_account_plan()
+            if start:
+                a.plan, a.access = start, {"plan": start}
+                a.channel_limit = acl.config()["plans"][start]["limits"].get("channels") or DEFAULT_CHANNELS
+        except Exception:  # noqa: BLE001  (a problem with plans must never stop a registration)
+            pass
         s.add(a)
         s.commit()
         return a
@@ -175,6 +189,16 @@ def set_password(account_id: int, new: str):
 
 
 # ---------- Super Admin actions ----------
+def _changed():
+    """An account row changed: what it may do (app/acl.py keeps a short-lived copy) is read again at once."""
+    try:
+        from . import acl
+
+        acl.invalidate()
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def listing() -> list[dict]:
     with CoreSession() as s:
         order = {"pending": 0, "active": 1, "blocked": 2}
@@ -199,6 +223,7 @@ def approve(account_id: int) -> dict:
         a = s.get(Account, account_id)
         a.status, a.approved_at = "active", a.approved_at or utcnow()
         s.commit()
+        _changed()
         return public(a)
 
 
@@ -222,6 +247,7 @@ def update(account_id: int, **changes) -> dict:
         if "upgrade" in changes:
             a.upgrade = changes["upgrade"]
         s.commit()
+        _changed()
         return public(a)
 
 
@@ -242,6 +268,7 @@ def delete(account_id: int):
             raise ValueError("Block the account first.")
         s.delete(a)
         s.commit()
+    _changed()
 
 
 def active_tenants() -> list[int]:

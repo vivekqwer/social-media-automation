@@ -31,7 +31,10 @@ def chat_id() -> str | None:
 
 
 def enabled() -> bool:
-    return bool(_token() and chat_id() and get_setting("tg_on") != "0")
+    from . import acl
+
+    # "Telegram" switched off for this account by the administrator: messages go to the owner's Gmail instead
+    return bool(_token() and chat_id() and get_setting("tg_on") != "0") and acl.feature("telegram.use")
 
 
 def _call(method: str, **params):
@@ -194,10 +197,12 @@ def _handle_text(text: str):
         return notify(_cmd_status())
     if cmd == "/stats":
         return notify(_cmd_stats())
-    if cmd == "/pause":
-        return notify(_set_pause(True))
-    if cmd == "/resume":
-        return notify(_set_pause(False))
+    if cmd in ("/pause", "/resume"):
+        from . import acl
+
+        if not acl.feature("channels.pause"):  # the same switches as in the dashboard
+            return notify(acl.message("channels.pause"))
+        return notify(_set_pause(cmd == "/pause"))
     if cmd == "/review":
         items = _review_list()
         if not items:
@@ -209,12 +214,22 @@ def _handle_text(text: str):
     return notify("Unknown command. Send /help")
 
 
+BUTTON_NEEDS = {"ap": "clips.approve", "dc": "clips.discard", "pm": "gmail.send", "pe": "permissions.manage",
+                "pg": "permissions.manage", "pn": "permissions.manage", "pu": "permissions.manage",
+                "pa": "permissions.manage", "ps": "permissions.manage", "py": "permissions.manage"}
+
+
 def _handle_callback(data: str) -> str:
     from fastapi import HTTPException
 
     from . import main
 
     kind, _, cid = (data or "").partition(":")
+    from . import acl
+
+    key = BUTTON_NEEDS.get(kind)  # a button does what the dashboard does, so it needs the same switch
+    if key and not acl.feature(key):
+        return acl.message(key)
     if kind == "pe":
         set_setting("tg_pending_email", cid)
         return "Send me the creator's email address (from their channel About page or Instagram bio). I'll mail them from your Gmail."
@@ -254,9 +269,11 @@ def _handle_callback(data: str) -> str:
     try:
         if kind == "ap":
             c = main.approve_clip(int(cid), main.ApproveIn())
+            acl.record_here("clips.approve", f"Approved a clip for upload, from Telegram (#{cid})", "user")
             return f"Approved — goes live {c.get('publish_at') or 'soon'} (UTC)."
         if kind == "dc":
             main.discard_clip(int(cid))
+            acl.record_here("clips.discard", f"Discarded a clip, from Telegram (#{cid})", "user")
             return "Discarded."
     except HTTPException as e:
         return f"Could not do that: {e.detail}"

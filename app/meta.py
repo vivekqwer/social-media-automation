@@ -88,6 +88,10 @@ def crosspost(cid: int) -> dict:
     st = status()
     if not (st["connected"] and st["on"]):
         return {"skipped": "not connected"}
+    from . import acl
+
+    if not acl.allowed("meta.use"):  # "Instagram + Facebook" is switched off for this account
+        return {"skipped": "switched off for this account"}
     cfg = json.loads(get_setting("meta_cfg") or "{}")
     tok = _token()
     with SessionLocal() as s:

@@ -12,7 +12,7 @@ import logging
 import re
 from datetime import datetime, timedelta
 
-from . import quota, youtube
+from . import acl, quota, youtube
 from .db import Channel, Clip, Destination, Project, SessionLocal, get_setting, set_setting, utcnow, main_destination
 
 log = logging.getLogger(__name__)
@@ -79,6 +79,8 @@ def refresh(force: bool = False) -> dict:
     board = _get("viral:" + day, {"videos": {}, "shorts": {}, "updated": None, "shorts_at": None})
     if not youtube.configured():
         return board
+    if not (acl.allowed("page.viral") or acl.allowed("source.viral")):  # both switched off for this account: nothing to do
+        return board
     try:
         rows = _chart()
     except Exception as e:  # noqa: BLE001
@@ -108,6 +110,12 @@ def refresh(force: bool = False) -> dict:
         set_setting("viral:" + old_day, "")
     set_setting("viral_days", json.dumps(days))
     pick_today()
+    if not acl.source_block("viral"):  # picks that had to wait (sources stopped, a limit reached) start now
+        from .jobs import executor
+
+        for p in _picks().get(day, []):
+            if p.get("held") and not p.get("project_id") and p["why"] in ("cc", "allowed"):
+                executor.submit(clip_pick, day, p["video_id"])
     return board
 
 
@@ -153,6 +161,8 @@ def pick_today(extra: str | None = None) -> list:
                 permissions.set_status(p["channel_id"], "skipped")  # their inbox mail was only for this pick
         allp[day] = picks = keep
         _save_picks(allp)
+    if not acl.allowed("source.viral"):  # "Viral picks" is switched off for this account: the board is shown, nothing is picked
+        return picks
     if len(picks) >= PER_DAY and not extra:
         return picks
     board = _get("viral:" + day, {}).get("videos", {})
@@ -230,6 +240,11 @@ def clip_pick(day: str, video_id: str):
     mode = "cc" if pick["cc"] else "permission"
     if mode == "permission" and c.get("status") != "granted":
         return
+    blocked = acl.source_block("viral")  # sources stopped / viral picks off / a limit reached: wait, try again later
+    if blocked:
+        pick["note"], pick["held"] = f"waiting: {blocked}", True
+        _save_picks(allp)
+        return
     out = []
     with SessionLocal() as s:
         ch = _source(s)
@@ -243,6 +258,7 @@ def clip_pick(day: str, video_id: str):
     for x in allp.get(day, []):
         if x["video_id"] == video_id:
             x["project_id"], x["note"] = pid, "; ".join(out)[-300:]
+            x.pop("held", None)
     _save_picks(allp)
 
 
@@ -285,7 +301,7 @@ def _status(s, p: dict, creators: dict) -> dict:
         return {"step": "clip", "text": "Downloading on the helper PC" if c.status == "fetching" else "Editing the clip",
                 "clip_id": c.id}
     if p["why"] in ("cc", "allowed"):
-        return {"step": "clip", "text": "Starting the clip"}
+        return {"step": "clip", "text": (p.get("note") or "Waiting") if p.get("held") else "Starting the clip"}
     c = creators.get(p["channel_id"], {})
     st = c.get("status")
     if st == "granted":
