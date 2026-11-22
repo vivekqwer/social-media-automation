@@ -1145,11 +1145,11 @@ function bkPreview(p){
     <table class="tbl sm" style="margin-top:8px"><thead><tr><th>What</th><th style="text-align:right">In the backup</th><th style="text-align:right">Now</th></tr></thead><tbody>${rows}<tr><td>Face photos</td><td style="text-align:right">${p.faces}</td><td></td></tr></tbody></table>
     ${(p.notes||[]).map(n=>`<div class="mut sm" style="margin-top:6px">${esc(n)}</div>`).join('')}
     <div class="sm" style="margin-top:8px">Restoring <b>replaces everything</b> in ${whose} system with this backup. A safety backup of what is there now is made first — it appears in the list below, so you can go back.</div>
-    ${p.same_account?'':`<label class="row sm" style="gap:8px;margin-top:8px"><input type="checkbox" id="bk-other">Yes, put another account’s backup here</label>`}
+    ${p.same_account&&p.signed?'':`<label class="row sm" style="gap:8px;margin-top:8px"><input type="checkbox" id="bk-other">Yes, put this backup here anyway</label>`}
     <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><input id="bk-confirm" placeholder="Type RESTORE" maxlength="20" style="width:160px" autocomplete="off"><button class="btn bad" id="bk-go">Restore</button><button class="btn ghost" id="bk-cancel">Cancel</button></div></div>`;
   $('#bk-cancel').onclick=()=>{$('#bk-prev').innerHTML=''};
   $('#bk-go').onclick=()=>once(async()=>{const c=$('#bk-confirm').value.trim();if(c!=='RESTORE')throw new Error('Type RESTORE (in capital letters) to confirm.');
-    const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put another account’s backup here” first.');
+    const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put this backup here anyway” first.');
     const r=await api('/api/backup/restore','POST',{ref:p.ref,sha:p.sha||'',confirm:c,other_account:!!(o&&o.checked)});const n=r.restored||{};
     $('#bk-prev').innerHTML='';toast(`Restored: ${n.clips||0} clips, ${n.channels||0} sources, ${n.destinations||0} channels. Reloading…`);setTimeout(()=>location.reload(),1800)},$('#bk-go'));
 }
