@@ -364,7 +364,7 @@ def _clean_script(raw: str) -> str:
     text = " ".join(line.strip().lstrip("-*0123456789.) ") for line in (raw or "").splitlines() if line.strip())
     text = re.sub(r"(?i)\b(true )?fact (one|two|three|1|2|3)[:.,]\s*|\b(first|second|third|final)(ly)?,\s*", "", text)
     text = re.sub(r"\s+", " ", text).strip()
-    text = re.sub(r"(?i)^(hey|hi|hello|namaste)( there| guys| friends| everyone| dosto)?[!.,]+\s*", "", text)  # no greeting
+    text = re.sub(r"(?i)^(hey|hi|hello|namaste)( [a-z]+){0,2}[!.,]+\s*", "", text)  # no greeting ("Hey you!", "Hi guys,")
     text = re.sub(r"([.!?]\s+)([a-z])", lambda m: m.group(1) + m.group(2).upper(), text)  # after removed "First," etc.
     return text[:1].upper() + text[1:]
 
