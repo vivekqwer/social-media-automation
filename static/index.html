@@ -475,6 +475,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     <button class="btn outline" id="e-now"><i data-ico="upload"></i>Upload now</button>
     <button class="btn outline hide" id="e-unq" title="Take it out of the upload queue">Back to review</button>
     <button class="btn brand hide" id="e-again"><i data-ico="refresh"></i>Upload again (new copy)</button>
+    <button class="btn outline hide" id="e-gone-rm" title="Takes this video off the dashboard lists. Its history stays in Alerts.">Remove</button>
+    <span class="mut sm hide" id="e-gone-done"></span>
     <span style="flex:1"></span>
     <button class="btn outline hide" id="e-rewrite" title="Throws this reel away; the local AI writes a new one on another topic">Reject — write a new one</button>
     <button class="btn bad" id="e-del"><i data-ico="trash"></i>Discard</button>
@@ -856,6 +858,8 @@ async function alAct(a,b){
   if(b.do==='open_clip'){openEditor(+b.id);return}
   if(b.do==='go'){go(b.page);return}
   if(b.do==='again'){await uploadAgain(+b.id,b.ys);return}
+  if(b.do==='remove'){await removeGone(+b.id);loadAlerts();return}
+  if(b.do==='restore'){await api(`/api/clips/${+b.id}/restore`,'POST');toast('It shows in the lists again');loadAlerts();return}
   if(b.do==='retry_clip'){await api(`/api/clips/${+b.id}/render`,'POST');toast('The clip is being made again — it leaves this list when it works')}
   else if(b.do==='dismiss'){await api('/api/alerts/board/seen','POST',{tab:'all',id:a.id});toast('Marked as seen — it stays in the list as history')}
   else if(b.do==='fix'){
@@ -1225,7 +1229,13 @@ function setStatus(c){
   if(VIEW==='out'&&has){fr.style.display='none';fr.src='about:blank';vid.style.display='';vid.src=`/api/clips/${c.id}/video?t=${Date.now()}`}
   else{vid.pause();vid.style.display='none';fr.style.display='';if(c.video_id)fr.src=`https://www.youtube.com/embed/${c.video_id}?start=${Math.floor(c.start)}`}
   const done=c.status==='uploaded',busy=['rendering','fetching','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
-  $('#e-again').classList.toggle('hide',!(c.status==='uploaded'&&c.yt_state&&c.yt_state!=='ok'));
+  const gone=c.status==='uploaded'&&c.yt_state&&c.yt_state!=='ok'&&['removed','deleted','rejected','blocked','private'].includes(String(c.yt_state).split(':')[0]);
+  $('#e-again').classList.toggle('hide',!(c.status==='uploaded'&&c.yt_state&&c.yt_state!=='ok')||!!c.reuploaded_as||!!c.removed_at);
+  $('#e-gone-rm').classList.toggle('hide',!gone||!!c.reuploaded_as||!!c.removed_at);
+  const gd=$('#e-gone-done');gd.classList.toggle('hide',!(c.reuploaded_as||c.removed_at));
+  gd.innerHTML=c.reuploaded_as?`Uploaded again as <a href="#" id="e-gone-new">clip #${+c.reuploaded_as}</a>`:c.removed_at?'Removed from the dashboard — <a href="#" id="e-gone-back">show it again</a>':'';
+  if($('#e-gone-new'))$('#e-gone-new').onclick=ev=>{ev.preventDefault();openEditor(+c.reuploaded_as)};
+  if($('#e-gone-back'))$('#e-gone-back').onclick=ev=>{ev.preventDefault();once(async()=>{await api(`/api/clips/${c.id}/restore`,'POST');fill(await api('/api/clips/'+c.id));toast('It shows in the lists again')})};
   $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!['rendered','queued'].includes(c.status);
   $('#e-del').disabled=$('#e-refetch').disabled=done||busy;$('#e-unq').classList.toggle('hide',c.status!=='queued');
   $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
@@ -1286,6 +1296,9 @@ async function saveKeep(){const was=CUR.status;await save();if(was!=='draft'&&CU
 const sameClip=id=>CUR&&CUR.id===id;
 $('#e-render').onclick=()=>once(async()=>{const id=CUR.id;await save();await api(`/api/clips/${id}/render`,'POST');const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
 $('#e-again').onclick=()=>once(()=>uploadAgain(CUR.id,CUR.yt_state),$('#e-again'));
+async function removeGone(id){if(!confirm('Remove this video from the dashboard?\n\nIt is no longer on YouTube. Its history stays in Alerts, and you can show it again later.'))return;
+  await api(`/api/clips/${id}/remove`,'POST');toast('Removed from the dashboard');}
+$('#e-gone-rm').onclick=()=>once(async()=>{const id=CUR.id;await removeGone(id);if(sameClip(id))fill(await api('/api/clips/'+id));refreshAfter()},$('#e-gone-rm'));
 $('#e-approve').onclick=()=>once(async()=>{const id=CUR.id;const at=$('#e-when').value?new Date($('#e-when').value):null;
   if(at&&at<Date.now()+15*60e3)throw new Error('That time is in the past or less than 15 minutes away — the video would go public immediately. Pick a later time, or clear the field for the next free slot.');
   await saveKeep();const c=await api(`/api/clips/${id}/approve`,'POST',{publish_at:at?at.toISOString():null,destination_id:+$('#e-dest').value||null});if(sameClip(id))fill(await api('/api/clips/'+id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
@@ -1622,6 +1635,7 @@ async function loadUsers(){
   const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
   $('#pay-upi').value=pay.upi||'';$('#pay-price').value=pay.price||'';$('#pay-text').value=pay.text||'';
   const pend=U.filter(u=>u.status==='pending').length,req=U.filter(u=>u.upgrade).length;
+  {const bu=$('#b-users');if(bu){bu.style.display=pend+req?'':'none';bu.textContent=pend+req}}  // the sidebar number follows this list
   $('#us-sub').textContent=`${U.length} account${U.length===1?'':'s'} · ${pend} waiting for approval · ${req} asking for more channels. Your own system: ${d.owner.channels} channel(s), ${d.owner.clips} clips.`;
   const lab={pending:['Waiting for approval','queued'],active:['Active','uploaded'],blocked:['Blocked','failed']};
   $('#us-list').innerHTML=U.length?U.map(u=>{const g=u.usage||{};return `<div class="item" style="flex-wrap:wrap;align-items:flex-start"><div class="avatar">${esc((u.name||'?')[0].toUpperCase())}</div>

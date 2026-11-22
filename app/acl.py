@@ -205,6 +205,8 @@ ROUTES = [
     ("GET", "/api/alerts", "page.alerts", None),
     ("POST", "/api/alerts/seen", "page.alerts", None),
     ("POST", "/api/alerts/check", "page.alerts", None),
+    ("GET", "/api/alerts/board", "page.alerts", None),
+    ("POST", "/api/alerts/board/seen", "page.alerts", None),
     ("*", "/api/alerts/{rest:path}", "page.alerts", None),  # anything else the Alerts page gets later
     ("GET", "/api/destinations", "page.settings", None),
     ("GET", "/api/guide", "page.guide", None),
@@ -245,6 +247,9 @@ ROUTES = [
     ("GET", "/api/clips/{cid}/thumbnail", SIGNED, None),
     ("GET", "/api/queue", SIGNED, None),
     ("GET", "/api/keywords", SIGNED, None),
+    ("POST", "/api/keywords/clip/{cid}", "clips.edit", None),  # a preview only: nothing is saved
+    ("POST", "/api/clips/{cid}/remove", "clips.discard", "Removed a deleted video from the dashboard"),
+    ("POST", "/api/clips/{cid}/restore", "clips.discard", "Showed a removed video again"),
     ("GET", "/api/voices", SIGNED, None),
     ("PUT", "/api/clips/{cid}", "clips.edit", None),
     ("POST", "/api/clips/{cid}/sync", "clips.edit", None),
@@ -266,6 +271,8 @@ ROUTES = [
     ("GET", "/api/faces/{did}", SIGNED, None),
     ("GET", "/api/settings/face-size", SIGNED, None),
     ("POST", "/api/settings/face-size", "clips.face", None),
+    ("GET", "/api/settings/reminder", SIGNED, None),
+    ("POST", "/api/settings/reminder", "clips.edit", "Changed the like & subscribe reminder"),
     ("POST", "/api/clips/{cid}/captions", "clips.captions", None),
     ("POST", "/api/clips/{cid}/tts", "clips.voice", None),
     ("POST", "/api/clips/{cid}/voice-upload", "clips.voice", None),

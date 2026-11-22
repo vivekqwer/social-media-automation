@@ -105,18 +105,29 @@ def _alert_items(s) -> list:
         acts = []
         if yid:
             acts.append({"do": "link", "href": f"https://studio.youtube.com/video/{yid}/copyright", "label": "Open in YouTube Studio"})
+        done = ""
         if c is not None:
-            acts.append({"do": "open_clip", "id": c.id, "label": "Open clip"})
             state = c.yt_state or ""
-            if kind in ("removed", "failed") and c.status == "uploaded" and state not in NO_REUPLOAD and not state.startswith("blocked"):
-                acts.append({"do": "again", "id": c.id, "ys": kind, "label": "Upload again"})
+            if c.reuploaded_as:  # the same answer as in the clip itself
+                done = f"Uploaded again as clip #{c.reuploaded_as}."
+                acts.append({"do": "open_clip", "id": c.reuploaded_as, "label": "Open the new copy"})
+            elif c.removed_at:
+                done = "Removed from the dashboard."
+                acts.append({"do": "restore", "id": c.id, "label": "Show it again"})
+            else:
+                acts.append({"do": "open_clip", "id": c.id, "label": "Open clip"})
+                if kind in ("removed", "failed") and c.status == "uploaded" and state not in NO_REUPLOAD and not state.startswith("blocked"):
+                    acts.append({"do": "again", "id": c.id, "ys": kind, "label": "Upload again"})
+                if kind in ("removed", "rejected", "blocked") and c.status == "uploaded" and kind != "restored":
+                    acts.append({"do": "remove", "id": c.id, "label": "Remove"})
         seen = bool(a.seen)
         if not seen:
             acts.append({"do": "dismiss", "label": "Dismiss"})
         out.append({
             "id": f"alert:{a.id}", "tab": alert_tab(kind, d, earlier), "level": "info" if kind == "restored" else "bad",
             "kind": kind, "label": LABEL.get(kind, kind or "Problem"), "at": _iso(a.created_at),
-            "title": d.get("title") or f"Clip #{a.clip_id}", "text": a.message or "", "seen": seen, "clip_id": a.clip_id,
+            "title": d.get("title") or f"Clip #{a.clip_id}", "text": (a.message or "") + (f" {done}" if done else ""),
+            "seen": seen, "clip_id": a.clip_id, "done": done,
             "details": {k: d.get(k) for k in ("my_channel", "uploaded_at", "publish_at", "source_title", "source_channel",
                                               "source_url", "source_mode", "clip_range")} | {"youtube_id": yid},
             "actions": acts,

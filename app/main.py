@@ -1412,7 +1412,7 @@ def _cards(s, rows) -> list[dict]:
 @app.get("/api/clips")
 def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
     with SessionLocal() as s:
-        q = s.query(Clip)
+        q = s.query(Clip).filter(Clip.removed_at.is_(None))
         if status:
             q = q.filter(Clip.status.in_(status.split(",")))
         return _cards(s, q.order_by(Clip.id.desc()).limit(limit).all())
@@ -1425,7 +1425,7 @@ def overview():
         statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
         counts = {k: s.query(Clip).filter(Clip.status == k).count() for k in statuses}
         upcoming = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(8).all()
-        recent = s.query(Clip).filter(Clip.status == "uploaded").order_by(Clip.id.desc()).limit(6).all()
+        recent = s.query(Clip).filter(Clip.status == "uploaded", Clip.removed_at.is_(None)).order_by(Clip.id.desc()).limit(6).all()
         failed = s.query(Clip).filter(Clip.status == "failed").order_by(Clip.id.desc()).limit(5).all()
         review = s.query(Clip).filter(Clip.status == "rendered").order_by(Clip.id.desc()).limit(6).all()
         return {
@@ -1566,6 +1566,43 @@ class ReuploadIn(BaseModel):
 NO_REUPLOAD = ("rejected:copyright", "rejected:claim", "rejected:trademark", "rejected:legal")
 
 
+GONE_STATES = ("removed", "deleted", "rejected", "blocked", "private")
+
+
+def _gone(c: Clip) -> bool:
+    """The video is no longer (publicly) on YouTube — only then may it be uploaded again or removed here."""
+    st = (c.yt_state or "").split(":", 1)[0]
+    return c.status == "uploaded" and st in GONE_STATES
+
+
+def _answer_alerts(s, clip_id: int):
+    """The owner dealt with this clip (uploaded again / removed): its alerts are marked seen, the same in every view."""
+    s.query(Alert).filter(Alert.clip_id == clip_id, Alert.seen.isnot(True)).update({"seen": True}, synchronize_session=False)
+
+
+@app.post("/api/clips/{cid}/remove")
+def remove_gone_clip(cid: int):
+    """A video that was deleted from YouTube: take it off the dashboard lists. Its history stays in Alerts."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if not _gone(c):
+            raise HTTPException(409, "Only a video that is no longer on YouTube can be removed here. To take down a live video, delete it in YouTube Studio first.")
+        c.removed_at = utcnow()
+        _answer_alerts(s, cid)
+        s.commit()
+        return to_dict(c)
+
+
+@app.post("/api/clips/{cid}/restore")
+def restore_removed_clip(cid: int):
+    """Undo "Remove": the clip shows in the lists again."""
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        c.removed_at = None
+        s.commit()
+        return to_dict(c)
+
+
 @app.post("/api/clips/{cid}/reupload")
 def reupload_clip(cid: int, body: ReuploadIn):
     """Copy an uploaded clip (all edits, voice, captions, title, thumbnail) into a new clip that can be uploaded again."""
@@ -1573,6 +1610,8 @@ def reupload_clip(cid: int, body: ReuploadIn):
         c = _get(s, Clip, cid)
         if c.status != "uploaded":
             raise HTTPException(409, "Only uploaded clips can be uploaded again — this one can still be edited.")
+        if c.reuploaded_as and s.get(Clip, c.reuploaded_as):
+            raise HTTPException(409, f"This video was already uploaded again as clip #{c.reuploaded_as}. Open that one instead.")
         if (c.yt_state or "") in NO_REUPLOAD or (c.yt_state or "").startswith("blocked"):
             raise HTTPException(409, "YouTube removed or blocked this video for copyright. Uploading the same content again "
                                      "can bring another strike (3 strikes close the channel), so it is blocked.")
@@ -1584,6 +1623,9 @@ def reupload_clip(cid: int, body: ReuploadIn):
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
             "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on")}, status="draft")
         s.add(new)
+        s.commit()
+        c.reuploaded_as = new.id
+        _answer_alerts(s, c.id)
         s.commit()
         old_dir, new_dir = DATA_DIR / "clips" / str(c.id), DATA_DIR / "clips" / str(new.id)
         new_dir.mkdir(parents=True, exist_ok=True)
