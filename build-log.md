@@ -399,3 +399,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Final full run on the merged code (48 files): 1228 pass, 3 fail — the 3 known stale test assertions (test_mailnotify "alert mailed to the owner, plain text"; test_trend3 "ready message with their name", "script -> reel job created automatically"), not product bugs.
 - Merged integrate-final into main (fast-forward) and pushed; Railway deploys from main.
 - Queued clips were re-made with the new "Like, share and subscribe for more" line (owner's request): one by one through POST /api/clips/{id}/render, upload times kept.
+
+## 2026-11-22 — Task 64: a deploy shows without a hard refresh
+- Seen right after the deploy: the browser showed its remembered copy of the dashboard (the page had an ETag but no Cache-Control), so the new cards were missing until a forced reload.
+- app/main.py `_Pages` (StaticFiles): every HTML page is sent with `Cache-Control: no-cache` — the browser asks each time and gets a short "not changed" (304) when nothing changed.
+- Test: test_pages_cache.py 3/3.

@@ -4026,4 +4026,15 @@ def stats():
         }
 
 
-app.mount("/", StaticFiles(directory=Path(__file__).resolve().parent.parent / "static", html=True), name="static")
+class _Pages(StaticFiles):
+    """The dashboard and the other pages are re-checked with the server on every load (a cheap "not changed" answer
+    when nothing changed), so a new version shows at once instead of the browser's remembered copy."""
+
+    async def get_response(self, path: str, scope):
+        r = await super().get_response(path, scope)
+        if path in (".", "") or path.endswith(".html") or r.headers.get("content-type", "").startswith("text/html"):
+            r.headers["Cache-Control"] = "no-cache"
+        return r
+
+
+app.mount("/", _Pages(directory=Path(__file__).resolve().parent.parent / "static", html=True), name="static")
