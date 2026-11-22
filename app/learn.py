@@ -132,7 +132,7 @@ def gather(s, now: datetime | None = None) -> tuple[list, list]:
                       "source": (ch.name or ch.query) if ch else None,
                       "words": words_of(c.title, c.tags, (c.kw or {}).get("items"), "" if p.mode == "original" else p.channel or ""),
                       "length": max(0.0, float(c.end or 0) - float(c.start or 0)),
-                      "tz": ch.tz_offset if ch and ch.tz_offset else None, "layout": layout})
+                      "tz": ch.tz_offset if ch and ch.tz_offset is not None else None, "layout": layout})
     return stats, clips
 
 
