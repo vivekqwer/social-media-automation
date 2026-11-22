@@ -19,6 +19,7 @@ from .render import run_render
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog (the usual number; see queue_cap)
 QUEUE_CAP_RANGE = (10, 300)
 MIN_FREE_GB = 0.7  # the sources wait while the server's disk has less free space than this
+OLDER_DEPTH = 300  # a channel source with nothing new goes back through this many of the channel's uploads
 
 
 def queue_cap() -> int:
@@ -319,6 +320,10 @@ def run_channel(channel_id: int):
                                else "search skipped: today's YouTube quota is kept for uploads")
             else:
                 ids = [i for i in list_video_ids(ch.resolved_url, ch.videos_per_run * 4) if i not in seen]
+                if not ids:  # the newest videos are all used: go back through the channel's older uploads
+                    ids = [i for i in list_video_ids(ch.resolved_url, OLDER_DEPTH) if i not in seen]
+                    if ids:
+                        log.append("nothing new: taking older videos of this channel")
             made = 0
             for vid in ids:
                 if made >= ch.videos_per_run:

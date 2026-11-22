@@ -347,9 +347,16 @@ def api_list_video_ids(channel_url: str, n: int) -> list[str]:
     m = re.search(r"/channel/(UC[\w-]{20,})", channel_url)
     if not m:
         raise ValueError("not a channel-id url")
-    r = client().playlistItems().list(part="contentDetails", playlistId="UU" + m.group(1)[2:], maxResults=min(n, 50)).execute()
-    quota.spend("read")
-    return [i["contentDetails"]["videoId"] for i in r.get("items", [])]
+    yt, out, token = client(), [], None
+    while len(out) < n:  # newest first, 50 a page (1 quota unit each)
+        r = yt.playlistItems().list(part="contentDetails", playlistId="UU" + m.group(1)[2:], maxResults=min(n - len(out), 50),
+                                    pageToken=token).execute()
+        quota.spend("read")
+        out += [i["contentDetails"]["videoId"] for i in r.get("items", [])]
+        token = r.get("nextPageToken")
+        if not token or not r.get("items"):
+            break
+    return out[:n]
 
 
 # titles that are often re-uploads wrongly marked Creative Commons (music, films, TV): never use them
