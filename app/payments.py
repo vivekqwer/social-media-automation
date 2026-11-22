@@ -56,6 +56,7 @@ class Payment(CoreBase):
     status = Column(String(10), default="created")  # created | paid | failed
     payment_id = Column(String(60))
     via = Column(String(10))  # checkout | webhook (which confirmation came first)
+    mode = Column(String(4))  # test | live — which Razorpay keys made the order (test = no real money)
     note = Column(String(300))  # e.g. "the plan was deleted before the payment — apply it by hand"
     created_at = Column(DateTime, default=utcnow, index=True)
     paid_at = Column(DateTime)
@@ -281,7 +282,7 @@ def create_order(account_id: int, plan: str) -> dict:
         raise RuntimeError("Razorpay answered something unexpected. Try again later.")
     with CoreSession() as s:
         s.add(Payment(account_id=a.id, plan=name, amount=amount, currency="INR", period=pr.get("period") or "monthly",
-                      order_id=oid, status="created", created_at=utcnow()))
+                      order_id=oid, status="created", mode=mode(kid), created_at=utcnow()))
         s.commit()
     return {"order_id": oid, "amount": amount, "currency": "INR", "key_id": kid, "plan": name,
             "name": a.brand or "Raji Studio", "description": f"Plan “{name}” — {PERIODS[pr.get('period') or 'monthly'][0]}",
@@ -304,7 +305,46 @@ def verify_checkout(account_id: int, order_id: str, payment_id: str, signature: 
     good = _sign(secret, f"{order_id}|{payment_id}".encode())
     if not hmac.compare_digest(good, (signature or "").strip().lower()):
         raise ValueError("The payment could not be confirmed. If money was taken, it is applied by itself within minutes.")
+    if row.status == "paid":
+        return {"ok": True, "already": True, "plan": row.plan}
+    # the signature proves Razorpay made this payment id; whether the money is really taken is asked from Razorpay
+    pay = _captured(payment_id, row)
+    if pay is None:  # Razorpay not reachable now: the row stays "created", the webhook finishes it
+        return {"ok": True, "pending": True, "plan": row.plan,
+                "message": "Payment received — your plan will switch on in a minute."}
+    if not pay:
+        raise ValueError("Razorpay has not confirmed this payment. If money was taken, it is applied by itself within minutes, "
+                         "or refunded by Razorpay.")
     return mark_paid(order_id, payment_id, "checkout")
+
+
+def _captured(payment_id: str, row: "Payment") -> bool | None:
+    """Ask Razorpay about the payment: True = captured for exactly this order, amount and currency (an authorized one is
+    captured here first); False = not (failed, other order, other amount); None = Razorpay could not be asked."""
+    kid, secret, _w = _keys()
+    if not re.match(r"^pay_[A-Za-z0-9]{6,40}$", payment_id or ""):
+        return False
+    try:
+        r = httpx.get(f"{API}/payments/{payment_id}", auth=(kid, secret), timeout=15)
+        if r.status_code >= 500 or r.status_code == 429:
+            return None
+        if r.status_code != 200:
+            return False
+        p = r.json()
+        if p.get("order_id") != row.order_id or int(p.get("amount") or 0) != row.amount or p.get("currency") != "INR":
+            log.warning("razorpay payment %s does not match order %s", payment_id, row.order_id)
+            return False
+        if p.get("status") == "authorized":
+            r = httpx.post(f"{API}/payments/{payment_id}/capture", json={"amount": row.amount, "currency": "INR"},
+                           auth=(kid, secret), timeout=20)
+            if r.status_code >= 500 or r.status_code == 429:
+                return None
+            if r.status_code != 200:
+                return False
+            p = r.json()
+        return p.get("status") == "captured" and p.get("order_id") == row.order_id and int(p.get("amount") or 0) == row.amount
+    except (httpx.HTTPError, ValueError):
+        return None
 
 
 def webhook(raw: bytes, signature: str) -> dict:
@@ -334,8 +374,11 @@ def webhook(raw: bytes, signature: str) -> dict:
             s.execute(update(Payment).where(Payment.order_id == oid, Payment.status == "created").values(status="failed", payment_id=pid))
             s.commit()
         return {"ok": True, "status": "failed"}
-    if kind not in ("payment.captured", "order.paid"):
+    if kind not in ("payment.captured", "order.paid"):  # the only events that put a plan on an account
         return {"ok": True, "ignored": kind}
+    if (kind == "payment.captured" and pay.get("status", "captured") != "captured") or \
+            (kind == "order.paid" and order and order.get("status", "paid") != "paid"):
+        return {"ok": True, "ignored": "not captured"}
     paid = int(pay.get("amount") or order.get("amount_paid") or 0)
     if paid != row.amount or str(pay.get("currency") or order.get("currency") or "INR") != row.currency:
         log.warning("razorpay webhook: amount %s for order %s (expected %s)", paid, oid, row.amount)
@@ -350,7 +393,7 @@ def _expiry(a: Account, plan: str, period: str):
     from . import acl
 
     now = utcnow()
-    same = (acl._plan_of(a) or "").lower() == plan.lower()
+    same = (a.paid_plan or "").lower() == plan.lower() and (acl._plan_of(a) or "").lower() == plan.lower()
     start = a.plan_expires if same and a.plan_expires and a.plan_expires > now else now  # renewing adds to what is left
     return start + timedelta(days=days)
 
@@ -373,23 +416,28 @@ def mark_paid(order_id: str, payment_id: str, via: str) -> dict:
         _tell_owner(f"💰 ₹{row.amount / 100:,.0f} received for an account that no longer exists (order {order_id}). Refund it in Razorpay.")
         return {"ok": True, "applied": False}
     expires = _expiry(a, row.plan, row.period)
+    test = "[TEST — no real money] " if row.mode == "test" else ""
+    # the channel limit given back when this paid period ends: the one from before the FIRST payment of the period
+    running = bool(a.paid_plan and (a.plan_expires is None or a.plan_expires > utcnow()))
+    before = a.limit_before_pay if running and a.limit_before_pay else (a.channel_limit or 1)
     try:
-        acl.apply_plan(a.id, row.plan)
+        acl.apply_plan(a.id, row.plan, keep_restrictions=True)  # what the Super Admin switched off stays off
     except (ValueError, KeyError):
         _note(order_id, "the plan was deleted before the payment — put the customer on a plan by hand")
-        _tell_owner(f"💰 ₹{row.amount / 100:,.0f} received from {a.brand or a.name} ({a.email}), but the plan “{row.plan}” "
+        _tell_owner(f"💰 {test}₹{row.amount / 100:,.0f} received from {a.brand or a.name} ({a.email}), but the plan “{row.plan}” "
                     "no longer exists. Put them on a plan by hand (Users → Access).")
         return {"ok": True, "applied": False}
     with CoreSession() as s:
         acc = s.get(Account, a.id)
         acc.plan_expires, acc.expiry_warned = expires, None
+        acc.paid_plan, acc.limit_before_pay = row.plan, before
         if acc.upgrade:
             acc.upgrade = None  # an open "I have paid" request is answered by this payment
         s.commit()
     acl.invalidate()
     until = f" until {expires:%d %b %Y}" if expires else ""
-    acl.record(a.id, "system", "payment", f"Paid ₹{row.amount / 100:,.0f} online — plan “{row.plan}”{until}", a.tenant_id)
-    _tell_owner(f"💰 ₹{row.amount / 100:,.0f} received from {_e(a.brand or a.name)} — plan “{_e(row.plan)}” applied{until}.")
+    acl.record(a.id, "system", "payment", f"{test}Paid ₹{row.amount / 100:,.0f} online — plan “{row.plan}”{until}", a.tenant_id)
+    _tell_owner(f"💰 {test}₹{row.amount / 100:,.0f} received from {_e(a.brand or a.name)} — plan “{_e(row.plan)}” applied{until}.")
     _tell_customer(a, f"✅ Payment received: ₹{row.amount / 100:,.0f}. Your plan “{_e(row.plan)}” is active{until}. Thank you!")
     return {"ok": True, "applied": True, "plan": row.plan, "expires": expires.isoformat() + "Z" if expires else None}
 
@@ -437,7 +485,7 @@ def listing(limit: int = 200) -> list[dict]:
     return [{"id": r.id, "account_id": r.account_id, "name": (who.get(r.account_id).name if who.get(r.account_id) else "(deleted)"),
              "email": who.get(r.account_id).email if who.get(r.account_id) else "", "brand": who.get(r.account_id).brand if who.get(r.account_id) else "",
              "plan": r.plan, "amount": r.amount / 100, "status": r.status, "order_id": r.order_id, "payment_id": r.payment_id or "",
-             "via": r.via or "", "note": r.note or "", "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
+             "via": r.via or "", "note": r.note or "", "mode": r.mode or "", "created_at": r.created_at.isoformat() + "Z" if r.created_at else None,
              "paid_at": r.paid_at.isoformat() + "Z" if r.paid_at else None} for r in rows]
 
 
@@ -450,9 +498,34 @@ def _free_plan() -> str:
     return "" if not start or price_of(start) else start
 
 
+def _clear_paid(s, acc: Account):
+    acc.plan_expires = acc.expiry_warned = acc.paid_plan = acc.limit_before_pay = None
+
+
+def taken_over(account_id: int):
+    """The Super Admin put the account on a plan by hand: a running paid plan no longer ends by itself."""
+    with CoreSession() as s:
+        acc = s.get(Account, int(account_id))
+        if acc:
+            _clear_paid(s, acc)
+            acc.limit_by_hand = False  # the plan they chose decides the channel limit
+            s.commit()
+
+
+def limit_set_by_hand(account_id: int):
+    """The Super Admin changed the channel limit by hand: a paid plan's end leaves it exactly as they set it."""
+    with CoreSession() as s:
+        acc = s.get(Account, int(account_id))
+        if acc:
+            acc.limit_by_hand = True
+            s.commit()
+
+
 def expire_due() -> dict:
-    """Warn 3 days before a plan ends; after the end put the account back on the free plan with 1 channel.
-    Nothing is deleted: extra channels stay connected, their uploads just wait (acl.channel_cap)."""
+    """Warn 3 days before a paid plan ends; after the end put the account back on the free plan and give back the
+    channel limit it had before paying (a limit the Super Admin set by hand stays as they set it).
+    Acts only while the account is still on the plan that was paid for. Nothing is deleted: channels over the limit
+    stay connected, their uploads just wait (acl.over_cap_channels). What the Super Admin switched off stays off."""
     from . import acl
 
     now, warned, ended = utcnow(), 0, 0
@@ -462,18 +535,31 @@ def expire_due() -> dict:
     for aid, exp, warned_for in rows:
         try:
             a = _account(aid)
+            old = acl._plan_of(a)
+            if not a.paid_plan or old.lower() != a.paid_plan.lower():
+                with CoreSession() as s:  # the account is on another plan now (changed by hand): not ours to end
+                    _clear_paid(s, s.get(Account, aid))
+                    s.commit()
+                continue
             if exp <= now:
                 free = _free_plan()
-                old = acl._plan_of(a)
-                acl.apply_plan(aid, free)
+                by_hand, before = bool(a.limit_by_hand), a.limit_before_pay or 1
+                acl.apply_plan(aid, free, keep_restrictions=True)
                 with CoreSession() as s:
                     acc = s.get(Account, aid)
-                    acc.channel_limit, acc.plan_expires, acc.expiry_warned = 1, None, None
+                    if by_hand:
+                        acc.channel_limit, acc.limit_by_hand = a.channel_limit, True  # exactly as the Super Admin set it
+                    else:
+                        acc.channel_limit = before
+                    _clear_paid(s, acc)
                     s.commit()
+                    lim = acc.channel_limit or 1
                 acl.invalidate()
-                acl.record(aid, "system", "payment", f"The plan “{old}” ended — back to {('the plan “' + free + '”') if free else 'the free switches'} with 1 channel", a.tenant_id)
-                _tell_customer(a, f"⏰ Your plan “{_e(old)}” has ended. Your account is back on the free plan with 1 YouTube channel. "
-                                  "Nothing was deleted — renew on My channels → Your plan to switch everything on again.")
+                acl.record(aid, "system", "payment", f"The plan “{old}” ended — back to {('the plan “' + free + '”') if free else 'the free switches'} "
+                                                     f"with {lim} channel(s)", a.tenant_id)
+                _tell_customer(a, f"⏰ Your plan “{_e(old)}” has ended. Your account is back on the free plan with {lim} YouTube "
+                                  f"channel{'' if lim == 1 else 's'}. Nothing was deleted — renew on My channels → Your plan to switch "
+                                  "everything on again.")
                 _tell_owner(f"⏰ The plan “{_e(old)}” of {_e(a.brand or a.name)} ({_e(a.email)}) ended — moved back to the free plan.")
                 ended += 1
             elif exp - now <= timedelta(days=WARN_DAYS) and warned_for != exp:

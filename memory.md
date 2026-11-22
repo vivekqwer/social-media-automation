@@ -130,3 +130,4 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 
 ## Payments (Razorpay, 2026-11-22)
 - app/payments.py. Keys in owner setting `razorpay` (secrets encrypted), prices in `plan_prices`; shared table `payments`; Account.plan_expires / expiry_warned. Webhook URL: BASE_URL/api/pay/razorpay/webhook (events payment.captured, order.paid). Expiry job daily 3:30 UTC. Channels over the limit don't upload (never deleted). No keys = manual UPI flow. Real keys must be pasted by the user.
+- Rules: a payment never lifts Super Admin restrictions (acl.apply_plan keep_restrictions); plan put on by hand = Super Admin took over (paid end cleared); end gives back limit_before_pay unless limit_by_hand. Checkout applies only after Razorpay says captured. Test-mode payments tagged TEST + owner warning.

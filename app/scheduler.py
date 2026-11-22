@@ -383,7 +383,10 @@ def start():
 
         with tenant.use(tenant.OWNER):
             expire_due()
-    sch.add_job(plans_ending, "cron", hour=3, minute=30, max_instances=1, coalesce=True)  # 9 AM IST: warn 3 days before, end paid plans
+    # 9 AM IST: warn 3 days before, end paid plans. Safe to repeat, so it also runs 5 minutes after every start, and a
+    # run missed by a restart at 3:30 still happens within the hour
+    sch.add_job(plans_ending, "cron", hour=3, minute=30, max_instances=1, coalesce=True, misfire_grace_time=3600)
+    sch.add_job(plans_ending, "date", run_date=datetime.now(timezone.utc) + timedelta(minutes=5), misfire_grace_time=3600)
     from .phone import events as phone_events
     add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you

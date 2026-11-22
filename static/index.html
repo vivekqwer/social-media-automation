@@ -1562,7 +1562,7 @@ async function payPlan(name){
   const o=await api('/api/pay/order','POST',{plan:name});await rzScript();
   const rz=new Razorpay({key:o.key_id,amount:o.amount,currency:o.currency,order_id:o.order_id,name:o.name,description:o.description,prefill:o.prefill,notes:{plan:o.plan},
     handler:r=>once(async()=>{const v=await api('/api/pay/verify','POST',{razorpay_order_id:r.razorpay_order_id,razorpay_payment_id:r.razorpay_payment_id,razorpay_signature:r.razorpay_signature});
-      toast('Payment received — your plan “'+(v.plan||o.plan)+'” is active');await loadMe()}),
+      toast(v.pending?v.message:'Payment received — your plan “'+(v.plan||o.plan)+'” is active');await loadMe();if(v.pending)setTimeout(()=>loadMe().catch(()=>{}),60000)}),
     modal:{ondismiss:()=>toast('The payment window was closed. If money was taken, the plan is switched on by itself within a few minutes.')}});
   rz.on('payment.failed',r=>toast('The payment did not go through: '+((r&&r.error&&r.error.description)||'try again'),true));
   rz.open();
@@ -1741,7 +1741,7 @@ function rzPaint(k){
 async function loadRazorpay(){
   rzPaint(await api('/api/admin/razorpay'));
   const rows=(await api('/api/admin/payments')).payments,st={paid:['Paid','uploaded'],created:['Started','queued'],failed:['Failed','failed']};
-  $('#rz-pays').innerHTML=rows.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(new Date(r.paid_at||r.created_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}))}</td><td><b>${esc(r.brand||r.name)}</b> <span class="mut sm">${esc(r.email)}</span></td><td>${esc(r.plan)}</td><td>₹${esc(r.amount.toLocaleString('en-IN'))}</td><td><span class="badge ${(st[r.status]||['',''])[1]}">${esc((st[r.status]||[r.status])[0])}</span>${r.note?`<span class="mut sm" style="display:block">${esc(r.note)}</span>`:''}${r.payment_id?`<span class="mut sm" style="display:block">${esc(r.payment_id)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`
+  $('#rz-pays').innerHTML=rows.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(new Date(r.paid_at||r.created_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}))}</td><td><b>${esc(r.brand||r.name)}</b> <span class="mut sm">${esc(r.email)}</span></td><td>${esc(r.plan)}</td><td>₹${esc(r.amount.toLocaleString('en-IN'))}${r.mode==='test'?' <span class="badge queued" title="Made with test keys — no real money">TEST</span>':''}</td><td><span class="badge ${(st[r.status]||['',''])[1]}">${esc((st[r.status]||[r.status])[0])}</span>${r.note?`<span class="mut sm" style="display:block">${esc(r.note)}</span>`:''}${r.payment_id?`<span class="mut sm" style="display:block">${esc(r.payment_id)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`
     :'<span class="mut sm">No online payments yet.</span>';
 }
 $('#rz-save').onclick=()=>once(async()=>{const b={key_id:$('#rz-id').value.trim(),key_secret:$('#rz-secret').value.trim(),webhook_secret:$('#rz-wh').value.trim()};

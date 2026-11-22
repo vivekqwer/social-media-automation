@@ -1018,7 +1018,7 @@ def set_access(aid: int, perms: dict | None = None, limits: dict | None = None) 
             n = _int(v)
             if k == "channels":
                 if n is not None and n >= 1:
-                    row.channel_limit = min(n, 50)
+                    row.channel_limit, row.limit_by_hand = min(n, 50), True  # a paid plan's end leaves it alone
             elif n is not None and n < 0:
                 acc["limits"].pop(k, None)  # follow the plan again
             else:
@@ -1057,24 +1057,47 @@ def set_control(aid: int, name: str, on: bool) -> dict:
     return _eff_of(_account(aid))["controls"]
 
 
-def apply_plan(aid: int, name: str) -> dict:
+def apply_plan(aid: int, name: str, keep_restrictions: bool = False) -> dict:
     """Put an account on a plan in one step: its own switches and limits are cleared, so the plan decides everything.
-    '' = no plan (the default for everybody)."""
+    '' = no plan (the default for everybody).
+    keep_restrictions (a plan put on by a payment or by a paid plan's end, not by the Super Admin): every switch the
+    Super Admin set OFF for this account, and every own limit stricter than the plan's, stay. A channel limit the
+    Super Admin set by hand stays when it is lower than the plan's. Direct controls are never touched here."""
     cfg = config()
     pname = _plan_name(cfg, name) if name else ""
     if name and pname is None:
         raise ValueError("There is no plan with this name.")
     a = _account(aid)
     plan_set = cfg["plans"].get(pname) or {"limits": {}}
+    plan_limits = _resolve({"plan": pname}, cfg)["limits"]
+    kept = []
 
     def change(acc, row):
-        acc["perms"], acc["limits"], acc["plan"] = {}, {}, pname or ""
+        perms, limits = {}, {}
+        if keep_restrictions:
+            perms = {k: False for k, v in acc["perms"].items() if v is False and k in DEFAULT}
+            for k, v in acc["limits"].items():
+                n, cap = _int(v), plan_limits.get(k)
+                if k in LIMIT_KEYS and n and (cap is None or n < cap):  # 0 = "no limit": never stricter
+                    limits[k] = n
+            kept.extend([LABEL[k] for k in perms] + [k for k in limits])
+        acc["perms"], acc["limits"], acc["plan"] = perms, limits, pname or ""
         row.plan = pname or ""  # the old column is only the name shown under the customer's name
-        if plan_set["limits"].get("channels"):
-            row.channel_limit = plan_set["limits"]["channels"]
+        ch = plan_set["limits"].get("channels")
+        if ch:
+            if keep_restrictions and row.limit_by_hand and (row.channel_limit or accounts.DEFAULT_CHANNELS) < ch:
+                kept.append("channels")  # the Super Admin's lower channel limit stays
+            else:
+                row.channel_limit = ch
+                if keep_restrictions:
+                    row.limit_by_hand = False  # the plan decides the channel limit now
 
     _write_access(aid, change)
-    record(aid, "super", "admin.plan", f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)", a.tenant_id)
+    if keep_restrictions:
+        record(aid, "system", "admin.plan", (f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)")
+               + (f" — kept what the Super Admin restricted: {', '.join(kept)}" if kept else ""), a.tenant_id)
+    else:
+        record(aid, "super", "admin.plan", f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)", a.tenant_id)
     return public_access(aid)
 
 
