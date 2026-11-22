@@ -228,6 +228,13 @@ def watch_time(dest_id: int) -> dict | None:
     return json.loads(raw) if raw else None
 
 
+def _google_busy(message: str) -> bool:
+    """A temporary failure on Google's side (not ours, nothing to fix): server errors, time-outs, dropped connections."""
+    m = message.lower()
+    return any(x in m for x in ("httperror 500", "httperror 502", "httperror 503", "httperror 504", "backenderror", "internal error",
+                                "timed out", "timeout", "connection reset", "connection aborted", "temporarily unavailable"))
+
+
 def sync_all_watch_time(max_age_minutes: int = 0) -> dict:
     out = {}
     with SessionLocal() as s:
@@ -239,10 +246,17 @@ def sync_all_watch_time(max_age_minutes: int = 0) -> dict:
         try:
             sync_watch_time(did)
             set_setting(f"watchtime-status:{did}", "ok")
+            set_setting(f"watchtime-fails:{did}", "0")
         except youtube.NeedsReconnect:
             set_setting(f"watchtime-status:{did}", "reconnect")
         except Exception as e:  # noqa: BLE001
             m = str(e)
+            if _google_busy(m):  # Google's own hiccup: keep the last numbers, try again at the next run
+                fails = int(get_setting(f"watchtime-fails:{did}") or 0) + 1
+                set_setting(f"watchtime-fails:{did}", str(fails))
+                log.warning("watch time: channel %s: YouTube busy (%s in a row): %s", did, fails, m[:120])
+                if fails < 4:  # ~12 hours of failures before it is worth showing
+                    continue
             set_setting(f"watchtime-status:{did}", "api_off" if "has not been used" in m or "is disabled" in m
                         else "reconnect" if "insufficient" in m.lower() or "403" in m else "error: " + m[:200])
             log.warning("watch time: channel %s: %s", did, m[:200])

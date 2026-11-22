@@ -328,3 +328,8 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - app/workers.py: ONLINE_WINDOW 2 → 10 minutes.
 - app/phone.py: a "needs you" problem goes to the phone/mail only if it is still there at the next 10-minute check (short blips never wake the owner); remembered once per problem.
 - Tests: phone 13, health, setup, gaps pass.
+
+## 2026-11-22 — Task 59: Google's own hiccups are not shown as "System errors"
+- Seen live: Alerts → System errors showed "Something went wrong: Reading watch time from YouTube" for one HTTP 500 "backendError" from the YouTube Analytics API (Google's side; the next run 3 hours later works).
+- app/stats.py: temporary Google failures (500/502/503/504, backendError, time-outs, dropped connections) keep the last numbers and are retried at the next run; an alert appears only after 4 failures in a row (~12 hours). Our own errors still show at once.
+- Test: scratchpad test_watch_busy.py 4/4.
