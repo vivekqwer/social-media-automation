@@ -10,7 +10,7 @@ from datetime import timedelta
 from pathlib import Path
 
 from .config import DATA_DIR
-from .db import Base, Clip, Destination, Project, SessionLocal, VideoStat, engine_for, utcnow
+from .db import Clip, Destination, Project, SessionLocal, VideoStat, utcnow
 
 log = logging.getLogger(__name__)
 from .alerts import note as _note  # a failure that is only logged also shows in Alerts -> System errors (never raises)
@@ -113,17 +113,8 @@ def weekly_report() -> Path | None:
 
 
 def backup_data() -> dict:
-    """Everything needed to rebuild the dashboard (channel logins stay encrypted; videos are on YouTube)."""
-    data = {"made_at": utcnow().isoformat() + "Z", "tables": {}}
-    with engine_for().connect() as conn:
-        for t in Base.metadata.sorted_tables:
-            if t.name in ("video_stats", "channel_stats"):
-                continue  # can be read from YouTube again
-            rows = conn.execute(t.select()).mappings().all()
-            data["tables"][t.name] = [{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in r.items()} for r in rows]
-    faces = DATA_DIR / "faces"
-    if faces.exists():
-        import base64
+    """Everything needed to rebuild the dashboard of the copy the running code works in (channel logins stay
+    encrypted; videos are on YouTube). Same contents as Download backup now (app/backup.py)."""
+    from .backup import make
 
-        data["faces"] = {f.name: base64.b64encode(f.read_bytes()).decode() for f in faces.glob("*.png") if f.stat().st_size < 3_000_000}
-    return data
+    return make()

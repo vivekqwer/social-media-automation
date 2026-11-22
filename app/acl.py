@@ -220,6 +220,12 @@ ROUTES = [
     ("POST", "/api/alerts/board/seen", "page.alerts", None),
     ("*", "/api/alerts/{rest:path}", "page.alerts", None),  # anything else the Alerts page gets later
     ("GET", "/api/destinations", "page.settings", None),
+    ("GET", "/api/backup", "page.settings", None),  # Backup & restore (My channels): only ever this account's own copy
+    ("GET", "/api/backup/download", "page.settings", "Downloaded a backup"),
+    ("GET", "/api/backup/files/{name}", "page.settings", None),
+    ("POST", "/api/backup/check", "page.settings", None),  # reads the file and shows what is in it; nothing changes
+    ("POST", "/api/backup/files/{name}/check", "page.settings", None),
+    ("POST", "/api/backup/restore", "page.settings", "Restored a backup (all data of this copy replaced)"),
     ("GET", "/api/guide", "page.guide", None),
     ("POST", "/api/guide/errors/clear", "page.guide", None),
     ("POST", "/api/quick", "page.quick", "Started a quick upload"),

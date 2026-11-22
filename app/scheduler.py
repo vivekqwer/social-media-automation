@@ -295,7 +295,11 @@ def for_each_customer(fn):
             ids = active_tenants()
         except Exception:  # noqa: BLE001  (accounts table unreachable: still serve the owner)
             ids = [tenant.OWNER]
+        from .jobs import enter, leave
+
         for tid in ids:
+            if not enter(tid):  # this copy is being restored from a backup right now: next round
+                continue
             try:
                 with tenant.use(tid):
                     fn()
@@ -308,6 +312,8 @@ def for_each_customer(fn):
                         record_error("timed job: " + getattr(fn, "__name__", "job"), e)
                 except Exception:  # noqa: BLE001
                     pass
+            finally:
+                leave(tid)
     run.__name__ = getattr(fn, "__name__", "job")
     return run
 
@@ -345,7 +351,7 @@ def start():
     #   daily_summary        Telegram (telegram.enabled)
     #   learn_daily          auto-tune switch of the account; sources only when "Change sources" is on -> learn.daily
     #   post_comments        "First comment under new videos" (and the account's own on/off in My channels)
-    #   always: sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
+    #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
     add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
@@ -397,6 +403,9 @@ def start():
         with tenant.use(tenant.OWNER):
             expire_due()
     sch.add_job(plans_ending, "cron", hour=3, minute=30, max_instances=1, coalesce=True)  # 9 AM IST: warn 3 days before, end paid plans
+    from .backup import daily as daily_backup
+    add(daily_backup, "interval", hours=6, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15))  # one backup a day per account (skips when today's exists)
     from .phone import events as phone_events
     add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you
