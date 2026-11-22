@@ -146,6 +146,15 @@ HELP = [
     ("An AI reel is bad",
      "The reel is thrown away and the local AI writes a new one on another topic.",
      "Open the reel → “Reject — write a new one”."),
+    ("How are keywords chosen?",
+     "For every clip the system looks up what people really type into YouTube search about that video (YouTube's own "
+     "search suggestions, most typed first), adds the original video's own tags, and marks what is on today's trending "
+     "lists. The strongest phrase leads the title, the next ones stand in the first two lines of the description, "
+     "then 3–5 hashtags and the tags (YouTube allows 500 characters). Credit lines are never changed. Clips that wait "
+     "more than a day get fresh keywords before they go up. YouTube does not publish search numbers, so none are shown.",
+     "Nothing. To look or change: open a clip → Details → Keywords. Click a keyword to add or remove it, or press "
+     "“Find better keywords” → “Use these”. If you change the title, description or tags yourself, the system "
+     "leaves that clip alone. To research a topic: Ideas → Keyword research."),
     ("I want to upload my own video file",
      "It becomes a clip with every tool: sound, text, captions, thumbnail, schedule.",
      "Clips → “Upload my video” (MP4 or MOV, up to 300 MB). A wide video is uploaded as a full video, a tall one as a Short."),

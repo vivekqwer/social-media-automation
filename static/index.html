@@ -144,6 +144,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 .ov{border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--card)}
 .chips span{display:inline-block;border:1px solid var(--border);border-radius:99px;padding:2px 10px;margin:3px 3px 0 0;cursor:pointer;font-size:12px}
 .chips span:hover{border-color:var(--brand);color:var(--brand)}
+.chips span.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand)}
+.kwbox{border:1px solid var(--border);border-radius:var(--r);padding:12px;display:flex;flex-direction:column;gap:8px}
+.kd{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px;vertical-align:middle;background:var(--mfg)}
+.kd.t{background:var(--info)}.kd.v{background:var(--ok)}.kd.h{background:var(--warn)}.kd.x{background:var(--brand2)}
+.kwg{margin-top:12px}.kwg b{font-size:13px}
 .modal{position:fixed;inset:0;z-index:60;display:none;place-items:center;background:rgba(0,0,0,.55);backdrop-filter:blur(2px);padding:16px}
 .modal.on{display:grid}
 .modal .card{width:min(640px,100%);max-height:90vh;overflow:auto;box-shadow:var(--shadow-lg)}
@@ -280,6 +285,9 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 
       <section id="p-ideas" class="hide">
         <div class="page-h"><div><h1>Ideas</h1><div class="desc">What is working right now — use it for topics and titles (make your own version; don't re-upload other people's videos).</div></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Keyword research</h3><p>Type a topic and see what people type into YouTube search about it, most typed first. YouTube does not publish search numbers, so none are shown. The same research is done by itself for every clip.</p></div></div>
+          <div class="cb"><div class="row"><input id="kr-q" class="grow" maxlength="120" autocomplete="off" placeholder="Topic, e.g. street food india · butter chicken recipe · gta 6"><button class="btn" id="kr-go">Find keywords</button></div>
+            <div id="kr-out"></div></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Competitor tracker</h3><p id="id-desc">Channels you watch. Every day the system finds their videos doing 3× or more better than usual.</p></div><button class="btn outline sm" id="id-scan">Check now</button></div>
           <div class="cb"><div class="row"><input id="id-q" class="grow" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" placeholder="Channel link or @handle, e.g. @kabitaskitchen"><button class="btn" id="id-add">Track</button></div><div id="id-chans" class="row" style="gap:6px;margin-top:10px"></div></div>
           <div class="tw" id="id-out"></div></div>
@@ -423,11 +431,17 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
     </div>
 
     <div class="panel" data-t="meta">
-      <div class="row"><input id="e-kq" class="grow" placeholder="Keyword research (e.g. topic)"><button class="btn outline" id="e-kw">Find keywords</button><button class="btn sec" id="e-meta"><i data-ico="sparkles"></i>Auto-fill everything</button></div>
-      <div class="chips" id="e-chips"></div>
-      <label class="f">Title<input id="e-mt" placeholder="Title"></label>
+      <div class="kwbox">
+        <div style="font-size:13px;font-weight:500">Keywords</div>
+        <div class="mut sm" id="e-knote"></div>
+        <div class="chips" id="e-chips"></div>
+        <div class="mut sm" id="e-klegend">Click a keyword to put it in the tags or take it out. <span class="kd t"></span>typed by people in YouTube search &nbsp;<span class="kd v"></span>from the original video &nbsp;<span class="kd h"></span>trending now. Most typed first — YouTube does not publish search numbers.</div>
+        <div class="row" id="e-krow"><input id="e-kq" class="grow" maxlength="120" placeholder="Optional: your own topic words, e.g. street food delhi"><button class="btn outline" id="e-kw">Find better keywords</button><button class="btn sec hide" id="e-meta"><i data-ico="sparkles"></i>Use these</button></div>
+        <div class="mut sm hide" id="e-kprev"></div>
+      </div>
+      <label class="f"><span>Title <span class="mut sm" id="e-mtn" style="font-weight:400"></span></span><input id="e-mt" placeholder="Title"></label>
       <label class="f">Description<textarea id="e-md" style="min-height:160px" placeholder="Description (credit to the original channel is added automatically)"></textarea></label>
-      <label class="f">Tags<input id="e-mg" placeholder="comma separated"></label>
+      <label class="f"><span>Tags <span class="mut sm" id="e-mgn" style="font-weight:400"></span></span><input id="e-mg" placeholder="comma separated"></label>
     </div>
     <div class="panel" data-t="thumb">
       <div class="f"><span class="mut sm" style="font-weight:400">Made automatically after every render and sent to YouTube with the video.</span>
@@ -686,6 +700,22 @@ async function loadIdeas(){
     once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
 }
 $('#id-cat').onchange=()=>once(loadIdeas);
+// ---------- Ideas -> Keyword research (same engine and saved results as the editor's keyword helper) ----------
+const KRG=[['top','Most typed'],['questions','Questions people ask'],['long','Long phrases (more exact)'],['hindi','Hindi / Hinglish'],['trending','On today’s trending lists']];
+const krPicked=()=>$$('#kr-out .chips span.on').map(s=>s.dataset.k).filter((k,i,a)=>a.indexOf(k)===i);
+async function krRun(){const q=$('#kr-q').value.trim();if(!q)throw new Error('Type a topic first, for example: street food india');
+  $('#kr-out').innerHTML=skel(2);let r;try{r=await api('/api/keywords?q='+encodeURIComponent(q))}catch(e){$('#kr-out').innerHTML='';throw e}
+  const g={...r.groups,trending:r.trending||[]};
+  const groups=KRG.filter(([k])=>(g[k]||[]).length).map(([k,name])=>`<div class="kwg"><b>${name}</b><div class="chips">${g[k].map(x=>`<span data-k="${esc(x)}">${esc(x)}</span>`).join('')}</div></div>`).join('');
+  $('#kr-out').innerHTML=(r.note?`<div class="mut sm" style="margin-top:10px">${esc(r.note)}</div>`:'')+(groups?groups+`<div class="mut sm" style="margin-top:12px">Most typed first in every group. Click the phrases you want, then:</div>
+    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="kr-src">Use for a new topic source</button><button class="btn outline sm" id="kr-copy">Copy</button><span class="mut sm" id="kr-n"></span></div>`:'')}
+$('#kr-go').onclick=()=>once(krRun,$('#kr-go'));
+$('#kr-q').onkeydown=e=>{if(e.key==='Enter')$('#kr-go').click()};
+$('#kr-out').onclick=e=>{const chip=e.target.closest('.chips span[data-k]'),btn=e.target.closest('button');
+  if(chip){const on=!chip.classList.contains('on');$$('#kr-out .chips span[data-k]').filter(s=>s.dataset.k===chip.dataset.k).forEach(s=>s.classList.toggle('on',on));const n=krPicked().length;$('#kr-n').textContent=n?n+' chosen':'';return}
+  if(!btn)return;const picked=krPicked();if(!picked.length){toast('Click the phrases you want first',true);return}
+  if(btn.id==='kr-copy'){const t=picked.join(', ');navigator.clipboard.writeText(t).then(()=>toast('Copied')).catch(()=>prompt('Copy these keywords:',t))}
+  if(btn.id==='kr-src'){openAdd();$('#s-kind').value='topic';$('#s-kind').onchange();$('#s-q').value=picked.join(String.fromCharCode(10));toast('Check the topics, then press Add sources — only Creative Commons videos are used')}};
 let VRT=null,VRDAY='';
 const STEPC={done:'uploaded',queued:'uploaded',clip:'queued',review:'queued',mail:'queued',wait:'outline',reply:'queued',no:'outline',failed:'failed'};
 const STEPL={done:'On YouTube',queued:'Scheduled',clip:'Clipping',review:'Review',mail:'Needs you',wait:'Waiting',reply:'Replied',no:'Not used',failed:'Failed'};
@@ -1107,7 +1137,7 @@ function fill(c){
   $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
   $('#e-when').value=c.status==='queued'&&c.publish_at&&new Date(c.publish_at)>new Date()?localInput(new Date(c.publish_at)):'';
-  $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');
+  $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');kwFill(c);
   setStatus(c);
 }
 function setStatus(c){
@@ -1192,10 +1222,31 @@ $('#e-rewrite').onclick=()=>once(async()=>{if(!confirm('Throw this reel away and
 $('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
 $('#e-tts').onclick=()=>once(async()=>{const id=CUR.id;await save();await api(`/api/clips/${id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});const c2=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c2);etab('voice');if(c2.tts_pending){startPoll(c2.id);toast('Your helper PC is making the voice…')}else toast('Voice generated — press Save & re-render')},$('#e-tts'));
 $('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice uploaded — press Save & re-render')});
-$('#e-kw').onclick=()=>once(async()=>{const q=$('#e-kq').value||(CUR&&CUR.source_title)||'';const r=await api('/api/keywords?q='+encodeURIComponent(q));
-  $('#e-chips').innerHTML=r.keywords.map(k=>`<span data-k="${esc(k)}">${esc(k)}</span>`).join('')||'<span>no suggestions</span>';},$('#e-kw'));
-$('#e-chips').onclick=e=>{const k=e.target.dataset&&e.target.dataset.k;if(!k)return;const t=$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean);if(!t.includes(k))t.push(k);$('#e-mg').value=t.join(', ')};
-$('#e-meta').onclick=()=>once(async()=>{await save();const extra=$$('#e-chips span').map(s=>s.dataset.k).filter(Boolean).slice(0,10);const m=await api(`/api/clips/${CUR.id}/metadata`,'POST',{extra_keywords:extra});$('#e-mt').value=m.title;$('#e-md').value=m.description;$('#e-mg').value=m.tags.join(', ');toast('Metadata filled (credit + original tags + keywords)')},$('#e-meta'));
+// ---------- keyword helper (editor -> Details) ----------
+const KSRC={typed:['t','typed by people in YouTube search'],video:['v','from the original video'],trending:['h','trending now'],extra:['x','added by you']};
+const tagList=()=>$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean);
+const tagChars=t=>t.reduce((n,x)=>n+[...x].length+(x.includes(' ')?2:0),0)+Math.max(0,t.length-1);/* the way YouTube counts its 500 limit: commas count, a tag with a space counts 2 more */
+function kwCount(){const t=tagList(),n=tagChars(t),tl=[...$('#e-mt').value].length,hs=(($('#e-mt').value+' '+$('#e-md').value).match(/#[\p{L}\p{N}]/gu)||[]).length;
+  $('#e-mgn').textContent=`· ${n} of 500 characters, ${t.length} tags`+(n>500?' — too many: YouTube refuses the upload, take some out':'')+(hs>15?` · ${hs} hashtags in the title and description: with more than 15 YouTube ignores them all`:'');
+  $('#e-mgn').style.color=n>500||hs>15?'var(--bad)':'';
+  $('#e-mtn').textContent=`· ${tl} of 100 characters`+(tl>100?' — too long: YouTube cuts the end off':tl>60?' — search results show about the first 60':'');$('#e-mtn').style.color=tl>100?'var(--bad)':'';
+  const on=new Set(t.map(x=>x.toLowerCase()));$$('#e-chips span[data-k]').forEach(s=>s.classList.toggle('on',on.has(s.dataset.k.toLowerCase())))}
+function kwChips(items){
+  $('#e-chips').innerHTML=(items||[]).map(i=>{const s=(i.src||[]).filter(x=>KSRC[x]);if(i.hot&&!s.includes('trending'))s.push('trending');
+    return `<span data-k="${esc(i.k)}" title="${esc(s.map(x=>KSRC[x][1]).join(' · '))}">${s.map(x=>`<i class="kd ${KSRC[x][0]}"></i>`).join('')}${esc(i.k)}</span>`}).join('');
+  $('#e-klegend').classList.toggle('hide',!(items&&items.length));kwCount()}
+function kwFill(c){const k=c.kw||{},locked=['uploaded','uploading'].includes(c.status);
+  $('#e-kq').value=k.hint||'';$('#e-kprev').classList.add('hide');$('#e-meta').classList.add('hide');$('#e-krow').classList.toggle('hide',locked);
+  kwChips(k.items);
+  $('#e-knote').textContent=!k.items?(locked?'No keyword research was saved for this video.':'No keyword research is saved for this clip yet. Press “Find better keywords” to see what people search for.')
+    :(k.note||'')+(k.at?' Looked up '+when(k.at)+'.':'')+(locked?'':c.meta_edited?' You changed the title, description or tags yourself, so the system will not rewrite them. To let it write them again, press “Find better keywords” and then “Use these”.':' If this clip waits more than a day, the system looks again by itself before the upload.')}
+$('#e-kw').onclick=()=>once(async()=>{const id=CUR.id;const r=await api(`/api/keywords/clip/${id}`,'POST',{topic:$('#e-kq').value.trim()});if(!sameClip(id))return;
+  kwChips(r.kw.items);$('#e-knote').textContent=r.kw.note;
+  $('#e-kprev').innerHTML=`<b>Nothing is changed yet.</b> New title: “${esc(r.title)}”. Press “Use these” to write the title, description and tags from these keywords — or click single keywords to put them in your own tags.`;
+  $('#e-kprev').classList.remove('hide');$('#e-meta').classList.remove('hide')},$('#e-kw'));
+$('#e-chips').onclick=e=>{const el=e.target.closest('span[data-k]');if(!el)return;const k=el.dataset.k,t=tagList(),i=t.findIndex(x=>x.toLowerCase()===k.toLowerCase());if(i>=0)t.splice(i,1);else t.push(k);$('#e-mg').value=t.join(', ');kwCount()};
+$('#e-mt').oninput=$('#e-mg').oninput=$('#e-md').oninput=kwCount;
+$('#e-meta').onclick=()=>once(async()=>{const id=CUR.id,topic=$('#e-kq').value.trim();await save();await api(`/api/clips/${id}/metadata`,'POST',{topic});const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);etab('meta');toast('Title, description and tags are written from the keywords')},$('#e-meta'));
 
 
 /* ---------- thumbnail ---------- */

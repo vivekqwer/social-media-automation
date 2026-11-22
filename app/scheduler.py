@@ -331,5 +331,6 @@ def start():
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     add(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
                 coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1))
+    from .metadata import freshen_due; add(freshen_due, "interval", minutes=20, max_instances=1, coalesce=True)  # noqa: E702  fresh keywords before upload
     sch.start()
     return sch
