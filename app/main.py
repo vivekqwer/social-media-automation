@@ -1649,11 +1649,20 @@ def _uploads_today(s) -> dict:
 
 def _helper_state(s) -> dict:
     """Is a helper PC online, and is work waiting for it?"""
-    ws = [workers.as_dict(w) for w in s.query(Worker).filter(Worker.approved.is_(True))]
+    rows = s.query(Worker).filter(Worker.approved.is_(True)).all()
+    ws = [workers.as_dict(w) for w in rows]
     waiting = (s.query(Clip).filter(Clip.status == "fetching").count()
                + s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").count()
                + s.query(Project).filter(Project.analysis_pending.is_(True)).count())
-    return {"approved": len(ws), "online": sum(1 for w in ws if w["online"]), "waiting": waiting,
+    online = sum(1 for w in ws if w["online"])
+    if not online:
+        # a helper in the middle of a long job (slow download, captions on the PC) does not call in until it is done:
+        # it took a job a short while ago and was seen within the time a job may take -> it is working, not offline
+        now = utcnow()
+        busy = s.query(Clip).filter(Clip.job_lease.isnot(None), Clip.job_lease > now - JOB_LEASE).count()
+        if busy and any(w.last_seen and w.last_seen > now - JOB_LEASE for w in rows):
+            online = 1
+    return {"approved": len(ws), "online": online, "waiting": waiting,
             "last_seen": max((w["last_seen"] for w in ws if w["last_seen"]), default=None)}
 
 

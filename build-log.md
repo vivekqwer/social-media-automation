@@ -362,3 +362,13 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - While a copy is restored (jobs.RESTORING): its timed jobs skip, its executor jobs wait, the restore waits ≤2 min for running work, its changes get 423, its helper gets 503. Other accounts unaffected.
 - My channels → "Backup & restore" card. ACL: GET /api/backup, /api/backup/download, /api/backup/files/{name}, POST /api/backup/check, /api/backup/files/{name}/check, /api/backup/restore → page.settings (restore + download logged).
 - Tests: test_backup 91/91; acl_routes, acl, tenant_core, accounts and other suites pass.
+
+## 2026-11-22 — Task 59: Google's own hiccups are not shown as "System errors"
+- Seen live: Alerts → System errors showed "Something went wrong: Reading watch time from YouTube" for one HTTP 500 "backendError" from the YouTube Analytics API (Google's side; the next run 3 hours later works).
+- app/stats.py: temporary Google failures (500/502/503/504, backendError, time-outs, dropped connections) keep the last numbers and are retried at the next run; an alert appears only after 4 failures in a row (~12 hours). Our own errors still show at once.
+- Test: scratchpad test_watch_busy.py 4/4.
+
+## 2026-11-22 — Task 60: a helper busy with a long job is not "offline"
+- Seen live again: download 3.5 min + captions on the PC (Whisper) = 12 minutes without calling in → "Helper PC is offline".
+- app/main.py `_helper_state`: when no helper called in lately but one took a job within the job time (40 min) and was seen within that time, it counts as online (working). No job in hand, or silent for longer → offline as before.
+- Test: scratchpad test_helper_busy.py 4/4.
