@@ -30,7 +30,7 @@ from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal,
                  Setting, adopt_orphans, main_destination, set_setting, to_dict, utcnow)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
-from .jobs import executor
+from .jobs import RESTORING, executor
 from .keywords import suggest
 from .metadata import auto_metadata
 from .metadata import build as build_meta
@@ -144,6 +144,8 @@ async def auth_gate(request: Request, call_next):
             tid = workers.tenant_of(tok)
             if tid != tenant.OWNER and tid not in accounts.active_tenants():
                 return JSONResponse({"detail": "Unknown helper"}, status_code=401)
+        if tid in RESTORING and path != "/api/worker/register":  # the copy is being restored from a backup: come back later
+            return JSONResponse({"detail": "A backup is being restored. Try again in a minute."}, status_code=503)
         with tenant.use(tid):  # the helper sees and serves only its own customer's copy
             if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
                 found = workers.authenticate(tok)
@@ -155,6 +157,9 @@ async def auth_gate(request: Request, call_next):
     if path == "/api/upload-video" and request.method == "POST":
         if size > MAX_VIDEO_BYTES + 1024 * 1024:
             return JSONResponse({"detail": "Video too large (max 300 MB)"}, status_code=413)
+    elif path == "/api/backup/check" and request.method == "POST":
+        if size > 101 * 1024 * 1024:
+            return JSONResponse({"detail": "The file is larger than 100 MB. A backup of Raji Studio is normally a few MB."}, status_code=413)
     elif size > 50 * 1024 * 1024:  # the largest other dashboard upload is a 25 MB voice file
         return JSONResponse({"detail": "File too large"}, status_code=413)
     if path in PUBLIC_PATHS:
@@ -183,6 +188,9 @@ async def auth_gate(request: Request, call_next):
             return JSONResponse({"detail": "This page was showing another account's dashboard. It is being reloaded.",
                                  "reload": True}, status_code=409)
         real = request.scope.get("path") or path  # exactly what the router matches
+        if who["tenant"] in RESTORING and request.method not in ("GET", "HEAD") and not path.startswith("/api/backup"):
+            return JSONResponse({"detail": "A backup is being restored for this account right now. Try again in a minute."},
+                                status_code=423)
         denied = acl.check_request(request.method, real, who)  # what the Super Admin switched off for this account
         if denied:
             return JSONResponse({"detail": denied}, status_code=403)
@@ -1919,6 +1927,125 @@ def worker_backup(request: Request):
     from .growth import backup_data
 
     return backup_data()
+
+
+# ---------- backup & restore of this copy (My channels -> Backup & restore) ----------
+class RestoreIn(BaseModel):
+    ref: str = Field(max_length=80)  # "upload" = the file just checked, else the name of a backup kept on the server
+    confirm: str = Field("", max_length=20)
+    sha: str = Field("", max_length=64)
+    other_account: bool = False
+
+
+def _is_super(request: Request) -> bool:
+    return (getattr(request.state, "who", None) or {}).get("role", "super") == "super"
+
+
+def _pending_upload() -> Path:
+    from .backup import folder
+
+    return Path(os.fspath(folder())) / "upload-pending.json.gz"
+
+
+@app.get("/api/backup")
+def backup_list(request: Request):
+    from . import backup
+
+    return {"files": backup.listing(), "keep": backup.KEEP_AUTO, "tenant": tenant.current(), "is_super": _is_super(request),
+            "restoring": tenant.current() in RESTORING}
+
+
+@app.get("/api/backup/download")
+def backup_download():
+    from . import backup
+    from .alerts import note
+
+    try:
+        data = backup.make()
+        blob = backup.pack(data)
+    except Exception as e:  # noqa: BLE001
+        note("Download a backup", e)
+        raise HTTPException(500, "The backup could not be made right now. Try again in a minute.")
+    return Response(blob, media_type="application/gzip",
+                    headers={"Content-Disposition": f'attachment; filename="{backup.file_name(data)}"'})
+
+
+@app.get("/api/backup/files/{name}")
+def backup_file(name: str):
+    from . import backup
+
+    try:
+        p = backup.path_of(name)
+    except backup.BackupError as e:
+        raise HTTPException(404, str(e))
+    return FileResponse(p, media_type="application/gzip", filename=name)
+
+
+@app.post("/api/backup/check")
+def backup_check(request: Request, file: UploadFile = File(...)):
+    """Step 1 of a restore from a file: check it and show what is in it. Nothing is changed yet."""
+    import hashlib
+
+    from . import backup
+
+    blob = file.file.read(backup.MAX_UPLOAD + 1)
+    try:
+        data = backup.unpack(blob)
+        out = backup.preview(data, _is_super(request))
+    except backup.BackupError as e:
+        raise HTTPException(400, str(e))
+    p = _pending_upload()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(blob)  # kept for step 2 (one per account, removed after the restore or after an hour)
+    out.update(ref="upload", sha=hashlib.sha256(blob).hexdigest())
+    return out
+
+
+@app.post("/api/backup/files/{name}/check")
+def backup_check_kept(name: str, request: Request):
+    from . import backup
+
+    try:
+        out = backup.preview(backup.unpack(backup.path_of(name).read_bytes()), _is_super(request))
+    except backup.BackupError as e:
+        raise HTTPException(400, str(e))
+    out["ref"] = name
+    return out
+
+
+@app.post("/api/backup/restore")
+def backup_restore(body: RestoreIn, request: Request):
+    """Step 2: replace ALL data of this copy with the backup (a safety backup of the current state is made first)."""
+    import hashlib
+
+    from . import backup
+    from .alerts import note
+
+    if body.confirm.strip() != "RESTORE":
+        raise HTTPException(400, "Type RESTORE (in capital letters) to confirm.")
+    try:
+        if body.ref == "upload":
+            p = _pending_upload()
+            if not p.exists():
+                raise backup.BackupError("The file you chose is no longer here (more than an hour old). Choose it again.")
+            blob = p.read_bytes()
+            if body.sha and hashlib.sha256(blob).hexdigest() != body.sha:
+                raise backup.BackupError("Another file was chosen in the meantime. Choose the file again and check it.")
+        else:
+            blob = backup.path_of(body.ref).read_bytes()
+        data = backup.unpack(blob)
+        if data.get("tenant") != tenant.current() and _is_super(request) and not body.other_account:
+            raise backup.BackupError("This backup was made for another account. Tick “Yes, put another account's backup here” to go on.")
+        out = backup.restore(data, _is_super(request))
+    except backup.BackupError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:  # noqa: BLE001
+        note("Restore a backup", e)
+        raise HTTPException(500, "The restore did not finish, so your data was not replaced. Details are in Alerts → System errors.")
+    if body.ref == "upload":
+        _pending_upload().unlink(missing_ok=True)
+    _badge_cache.pop(tenant.current(), None)
+    return out
 
 
 # ---------- small settings: affiliate rules, Pexels key ----------

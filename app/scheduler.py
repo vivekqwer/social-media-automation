@@ -286,7 +286,11 @@ def for_each_customer(fn):
             ids = active_tenants()
         except Exception:  # noqa: BLE001  (accounts table unreachable: still serve the owner)
             ids = [tenant.OWNER]
+        from .jobs import enter, leave
+
         for tid in ids:
+            if not enter(tid):  # this copy is being restored from a backup right now: next round
+                continue
             try:
                 with tenant.use(tid):
                     fn()
@@ -299,6 +303,8 @@ def for_each_customer(fn):
                         record_error("timed job: " + getattr(fn, "__name__", "job"), e)
                 except Exception:  # noqa: BLE001
                     pass
+            finally:
+                leave(tid)
     run.__name__ = getattr(fn, "__name__", "job")
     return run
 
@@ -334,7 +340,7 @@ def start():
     #   viral_refresh        "Viral today page" or "Viral picks" (viral.refresh; picks only with "Viral picks")
     #   scan_if_due          "Competitor tracker"
     #   daily_summary        Telegram (telegram.enabled)
-    #   always: sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
+    #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
     add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
@@ -375,6 +381,9 @@ def start():
     add(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
                 coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1))
     from .metadata import freshen_due; add(freshen_due, "interval", minutes=20, max_instances=1, coalesce=True)  # noqa: E702  fresh keywords before upload
+    from .backup import daily as daily_backup
+    add(daily_backup, "interval", hours=6, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15))  # one backup a day per account (skips when today's exists)
     from .phone import events as phone_events
     add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you

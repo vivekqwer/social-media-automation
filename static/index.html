@@ -374,6 +374,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Change password</h3><p>Minimum 12 characters.</p></div></div><div class="cb">
               <div class="grid" style="gap:10px"><input id="cp-old" type="password" placeholder="Current password" autocomplete="current-password"><input id="cp-new" type="password" placeholder="New password" autocomplete="new-password"><button class="btn" id="cp-go">Update password</button></div>
               <div class="sm mut" style="margin-top:10px" id="pw-hint">Forgot it? Use “Forgot password?” on the sign-in page — it verifies you through Google.</div></div></div>
+            <div class="card" id="bk-card"><div class="ch"><div><h3>Backup &amp; restore</h3><p>A copy of your settings, sources, clip list and channel links — not the videos. One is made by itself every day; the last 7 are kept here.</p></div></div><div class="cb">
+              <div class="row" style="gap:8px;flex-wrap:wrap"><a class="btn" href="/api/backup/download" id="bk-dl">Download backup now</a><label class="btn outline">Restore from a file<input type="file" id="bk-file" accept=".gz,.json,application/gzip,application/json" hidden></label></div>
+              <div id="bk-prev"></div>
+              <div id="bk-list" style="margin-top:12px"><span class="mut sm">…</span></div>
+              <div class="mut sm" style="margin-top:10px;line-height:1.7">Keep the downloaded file somewhere safe (Google Drive, a pen drive). <b>Channel logins in a backup only work on this same server</b> — after restoring on a new server, press <b>Reconnect</b> on each channel. Restoring replaces everything with the backup; a safety backup of what is there now is made first.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
               <div id="wk-claim" class="hide" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"></div>
               <div id="wk-list"></div>
@@ -1049,7 +1054,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadFaceSize();loadPhone();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
+  loadFace();loadFaceSize();loadPhone();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -1066,6 +1071,33 @@ async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');
   if($('#mt-save'))$('#mt-save').onclick=()=>once(async()=>{const r=await api('/api/meta/setup','POST',{token:$('#mt-token').value});toast('Connected: '+(r.page||'')+(r.instagram?' + @'+r.instagram:''));loadMeta()},$('#mt-save'));
   if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
+}
+const BKNAMES={projects:'Videos opened',clips:'Clips',channels:'Sources',destinations:'YouTube channels',workers:'Helper PCs',alerts:'Alerts',settings:'Settings'};
+const bkSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';
+async function loadBackup(){let b;try{b=await api('/api/backup')}catch(e){return}
+  $('#bk-list').innerHTML=b.files.length?'<div class="sm" style="font-weight:500;margin-bottom:4px">Kept on the server</div>'+b.files.map(f=>`<div class="row" style="justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--border)"><span class="sm">${esc(new Date(f.at).toLocaleString())} · ${f.kind==='safety'?'made before a restore':'daily'} · ${bkSize(f.size)}</span><span class="row" style="gap:6px"><a class="btn ghost sm" href="/api/backup/files/${encodeURIComponent(f.name)}">Download</a><button class="btn outline sm" data-bkr="${esc(f.name)}">Restore</button></span></div>`).join('')
+    :'<span class="mut sm">No backup kept on the server yet — the first one is made by itself today.</span>';
+  $$('[data-bkr]').forEach(x=>x.onclick=()=>once(async()=>{bkPreview(await api('/api/backup/files/'+encodeURIComponent(x.dataset.bkr)+'/check','POST'))},x));
+}
+$('#bk-file').onchange=()=>once(async()=>{const inp=$('#bk-file'),f=inp.files[0];if(!f)return;
+  try{if(f.size>100*1048576)throw new Error('The file is larger than 100 MB. A backup of Raji Studio is normally a few MB — is this the right file?');
+    const fd=new FormData();fd.append('file',f);bkPreview(await api('/api/backup/check','POST',fd))}finally{inp.value=''}});
+function bkPreview(p){
+  const rows=Object.keys(p.counts).map(k=>`<tr><td>${esc(BKNAMES[k]||k)}</td><td style="text-align:right">${p.counts[k]}</td><td style="text-align:right" class="mut">${p.current[k]??0}</td></tr>`).join('');
+  const whose=ME&&ME.viewing?'this customer’s':'your';
+  $('#bk-prev').innerHTML=`<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px">
+    <b>What is in this backup</b><div class="sm mut">Made ${p.made_at?esc(new Date(p.made_at).toLocaleString()):'(date unknown)'}${p.brand?' · '+esc(p.brand):''}</div>
+    ${(p.warnings||[]).map(w=>`<div class="alert bad" style="margin-top:8px">${ico('alert')}<span>${esc(w)}</span></div>`).join('')}
+    <table class="tbl sm" style="margin-top:8px"><thead><tr><th>What</th><th style="text-align:right">In the backup</th><th style="text-align:right">Now</th></tr></thead><tbody>${rows}<tr><td>Face photos</td><td style="text-align:right">${p.faces}</td><td></td></tr></tbody></table>
+    ${(p.notes||[]).map(n=>`<div class="mut sm" style="margin-top:6px">${esc(n)}</div>`).join('')}
+    <div class="sm" style="margin-top:8px">Restoring <b>replaces everything</b> in ${whose} system with this backup. A safety backup of what is there now is made first — it appears in the list below, so you can go back.</div>
+    ${p.same_account?'':`<label class="row sm" style="gap:8px;margin-top:8px"><input type="checkbox" id="bk-other">Yes, put another account’s backup here</label>`}
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><input id="bk-confirm" placeholder="Type RESTORE" maxlength="20" style="width:160px" autocomplete="off"><button class="btn bad" id="bk-go">Restore</button><button class="btn ghost" id="bk-cancel">Cancel</button></div></div>`;
+  $('#bk-cancel').onclick=()=>{$('#bk-prev').innerHTML=''};
+  $('#bk-go').onclick=()=>once(async()=>{const c=$('#bk-confirm').value.trim();if(c!=='RESTORE')throw new Error('Type RESTORE (in capital letters) to confirm.');
+    const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put another account’s backup here” first.');
+    const r=await api('/api/backup/restore','POST',{ref:p.ref,sha:p.sha||'',confirm:c,other_account:!!(o&&o.checked)});const n=r.restored||{};
+    $('#bk-prev').innerHTML='';toast(`Restored: ${n.clips||0} clips, ${n.channels||0} sources, ${n.destinations||0} channels. Reloading…`);setTimeout(()=>location.reload(),1800)},$('#bk-go'));
 }
 async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}const b=$('#ph-badge');b.className='badge '+(p.on?'uploaded':p.set?'queued':'outline');b.textContent=p.on?'On':p.set?'Off':'Not set up';
   $('#ph-box').innerHTML=!p.set?`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Press <b>Set up</b>. A QR code appears.</li><li>On your phone install <b>ntfy</b> (free, Play Store / App Store).</li><li>Scan the QR code with the phone camera and open the link, then press <b>Subscribe</b> (or in the ntfy app press + and type the topic name).</li></ol><button class="btn" id="ph-setup">Set up</button>`

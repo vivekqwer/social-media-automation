@@ -1,7 +1,54 @@
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 
 log = logging.getLogger("clipstudio.jobs")
+
+# A copy being restored from a backup (app/backup.py): its background work waits until the restore is over, and the
+# restore waits until the work already running for that copy has finished. Keyed by customer, never mixed.
+RESTORING: set[int] = set()
+_running: dict[int, int] = {}
+_rlock = threading.Lock()
+
+
+def enter(tid: int) -> bool:
+    """Background work for a copy starts (False = that copy is being restored right now: skip or wait)."""
+    with _rlock:
+        if tid in RESTORING:
+            return False
+        _running[tid] = _running.get(tid, 0) + 1
+        return True
+
+
+def leave(tid: int):
+    with _rlock:
+        _running[tid] = max(0, _running.get(tid, 0) - 1)
+
+
+def start_restore(tid: int) -> bool:
+    with _rlock:
+        if tid in RESTORING:
+            return False
+        RESTORING.add(tid)
+        return True
+
+
+def end_restore(tid: int):
+    with _rlock:
+        RESTORING.discard(tid)
+
+
+def wait_idle(tid: int, seconds: float) -> bool:
+    """After start_restore: wait until nothing runs for this copy any more."""
+    until = time.time() + seconds
+    while True:
+        with _rlock:
+            if not _running.get(tid):
+                return True
+        if time.time() > until:
+            return False
+        time.sleep(0.5)
 
 
 class _LoggingExecutor(ThreadPoolExecutor):
@@ -13,8 +60,17 @@ class _LoggingExecutor(ThreadPoolExecutor):
         tid, name = tenant.current(), getattr(fn, "__name__", repr(fn))
 
         def as_tenant():  # the job sees the same customer's database and files as the code that queued it
-            with tenant.use(tid):
-                return fn(*args, **kwargs)
+            waited = 0
+            while not enter(tid):  # that copy is being restored from a backup: run on the restored data afterwards
+                time.sleep(1)
+                waited += 1
+                if waited > 1800:
+                    raise RuntimeError("waited too long for a restore to finish")
+            try:
+                with tenant.use(tid):
+                    return fn(*args, **kwargs)
+            finally:
+                leave(tid)
 
         fut = super().submit(as_tenant)
         fut.add_done_callback(lambda f: not f.cancelled() and f.exception()
