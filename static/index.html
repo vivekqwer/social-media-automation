@@ -285,6 +285,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 
       <section id="p-ideas" class="hide">
         <div class="page-h"><div><h1>Ideas</h1><div class="desc">What is working right now — use it for topics and titles (make your own version; don't re-upload other people's videos).</div></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>What works on your channel</h3><p>Your uploaded clips that are older than 2 days, compared with your channel's usual views per day. Checked again every day.</p></div></div>
+          <div class="cb" id="ww-out"></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Keyword research</h3><p>Type a topic and see what people type into YouTube search about it, most typed first. YouTube does not publish search numbers, so none are shown. The same research is done by itself for every clip.</p></div></div>
           <div class="cb"><div class="row"><input id="kr-q" class="grow" maxlength="120" autocomplete="off" placeholder="Topic, e.g. street food india · butter chicken recipe · gta 6"><button class="btn" id="kr-go">Find keywords</button></div>
             <div id="kr-out"></div></div></div>
@@ -710,7 +712,32 @@ $('#an-sort').onchange=renderAnalytics;
 $('#an-report').onclick=()=>once(async()=>{const r=await api('/api/reports/weekly','POST');window.open('/api/reports/'+r.file,'_blank');toast('Report made — also sent to Telegram if connected')},$('#an-report'));
 $('#an-sync').onclick=()=>once(async()=>{const r=await api('/api/analytics/sync','POST');AN=r;renderAnalytics();toast(r.errors&&r.errors.length?'Some channels could not be read: '+r.errors[0]:'Updated from YouTube',!!(r.errors&&r.errors.length))},$('#an-sync'));
 function ideaRow(v,extra){return `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(v.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(v.title)}</span></a></td><td class="mut sm">${esc(v.channel||'')}</td>${extra}<td style="text-align:right"><button class="btn outline sm" data-topic="${esc(v.title)}">Add as topic</button></td></tr>`}
+// ---------- Ideas -> What works (app/learn.py): what the channel's numbers say, and auto-tune ----------
+let WW=null;
+const wwPct=r=>`<b style="color:${r.verdict==='win'?'var(--ok)':r.verdict==='weak'?'var(--bad)':'inherit'}">${r.ratio}×</b>`;
+function wwTable(title,rows,name){if(!rows||!rows.length)return'';return `<div class="kwg"><b>${title}</b><table class="tbl" style="margin-top:6px"><thead><tr><th>${name}</th><th style="text-align:right">Videos</th><th style="text-align:right">Views a day</th><th style="text-align:right">vs your usual</th><th style="text-align:right">Likes</th></tr></thead><tbody>${rows.slice(0,8).map(r=>`<tr><td>${esc(r.label)}</td><td style="text-align:right">${r.n}</td><td style="text-align:right">${num(r.vpd)}</td><td style="text-align:right">${wwPct(r)}</td><td style="text-align:right" class="mut sm">${r.like_rate==null?'—':r.like_rate+'%'}</td></tr>`).join('')}</tbody></table></div>`}
+function renderWW(){const w=WW,a=w.autotune,box=$('#ww-out');
+  const tune=`<div style="margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r);background:${a.on?'var(--brand-soft)':'transparent'}"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="ww-tune" ${a.on?'checked':''}><i></i></span>Auto-tune: make more of what works</label>
+    <div class="mut sm" style="margin-top:6px">Once a day: a source whose clips do 1.5× better than your usual makes <b>one more video per run</b> (at most twice its own setting, never above your account's limits); one that does much worse makes one fewer (never below 1). Nothing is paused or deleted and upload times are never changed. Words that do best get a little extra weight in titles and tags. Needs at least 5 videos per source before it changes anything.</div>
+    ${a.changed.length?`<div class="sm" style="margin-top:8px"><b>Changed now:</b> ${a.changed.map(c=>`“${esc(c.source)}” ${c.now} video${c.now===1?'':'s'} per run (its own setting: ${c.orig})`).join(' · ')}</div>`:''}
+    ${(a.held||[]).map(h=>`<div class="mut sm" style="margin-top:4px">${esc(h)}</div>`).join('')}
+    ${a.log.length?`<div class="sm" style="margin-top:8px"><b>What auto-tune did</b>${a.log.slice(0,6).map(l=>`<div class="mut sm">${esc(when(l.at))} — ${esc(l.text)}</div>`).join('')}</div>`:''}
+    ${a.changed.length?`<button class="btn outline sm" id="ww-undo" style="margin-top:10px">Undo auto-tune</button> <span class="mut sm">puts every source back to its own setting and switches auto-tune off</span>`:''}</div>`;
+  if(!w.enough){box.innerHTML=`<div class="mut sm">Not enough to judge yet: ${w.videos} of ${w.needed} uploaded clips are older than 2 days and have numbers from YouTube${w.channel_videos<w.needed?' (your channel needs at least '+w.needed+' public videos older than 2 days)':''}. This card fills in by itself — nothing is changed until then.</div>`+tune;bindWW();return}
+  const lines=w.lines.length?`<ul style="margin:0;padding-left:18px">${w.lines.map(l=>`<li style="margin:4px 0">${esc(l)}</li>`).join('')}</ul>`:'<div class="mut sm">No clear winner or loser yet — every group is close to your usual.</div>';
+  const topics=w.topics.length?`<div class="kwg"><b>Topic ideas from what works</b><div class="mut sm">Made from your best words, what people search and today's trending lists.</div>${w.topics.map((t,i)=>`<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><span class="grow"><b>${esc(t.topic)}</b> <span class="mut sm">· ${esc(t.why)}</span></span><button class="btn outline sm" data-wwkw="${i}">Keywords</button><button class="btn outline sm" data-wwsrc="${i}">Find sources for this</button></div>`).join('')}</div>`:'';
+  box.innerHTML=`<div class="mut sm" style="margin-bottom:8px">${w.videos} clips judged · your usual: ${num(w.usual)} views a day per video${w.stale?' · <b>numbers from YouTube are more than 2 days old — auto-tune waits</b>':''}</div>`+lines
+    +(w.hour_tip?`<div class="mut sm" style="margin-top:6px">${esc(w.hour_tip)}</div>`:'')+tune+topics
+    +`<details style="margin-top:12px"><summary class="sm" style="cursor:pointer">The numbers behind it</summary>${wwTable('Sources',w.sources,'Source')}${wwTable('Words in titles and tags',w.words,'Word')}${wwTable('Clip length',w.lengths,'Length')}${wwTable('Upload hour (your time)',w.hours,'Hour')}${wwTable('Shorts picture',w.layouts,'Picture')}<div class="mut sm" style="margin-top:8px">Only groups with 5 or more videos are shown. “vs your usual” = the middle video of the group compared with the middle video of your channel (views per day).</div></details>`;
+  bindWW()}
+function bindWW(){
+  const t=$('#ww-tune');if(t)t.onchange=()=>once(async()=>{const r=await api('/api/insights/autotune','POST',{on:t.checked});WW=r.card;renderWW();toast(r.on?'Auto-tune is on — it acts once a day':'Auto-tune is off — sources keep their current numbers')}).then(()=>{if(WW)t.checked=WW.autotune.on});
+  const u=$('#ww-undo');if(u)u.onclick=()=>{if(!confirm('Put every source back to its own setting and switch auto-tune off?'))return;once(async()=>{const r=await api('/api/insights/undo','POST');WW=r.card;renderWW();toast(r.restored?r.restored+' source(s) put back':'Nothing to put back')},u)};
+  $$('[data-wwkw]').forEach(b=>b.onclick=()=>{$('#kr-q').value=WW.topics[+b.dataset.wwkw].topic;$('#kr-q').scrollIntoView({behavior:'smooth',block:'center'});$('#kr-go').click()});
+  $$('[data-wwsrc]').forEach(b=>b.onclick=()=>{openAdd();$('#s-kind').value='topic';$('#s-kind').onchange();$('#s-q').value=WW.topics[+b.dataset.wwsrc].topic;toast('Check the topic, then press Add sources — only Creative Commons videos are used')})}
+async function loadWW(){if(!WW)$('#ww-out').innerHTML=skel(2);WW=await api('/api/insights');renderWW()}
 async function loadIdeas(){
+  loadWW().catch(e=>{$('#ww-out').innerHTML='';fail(e)});
   $('#id-out').innerHTML=$('#id-trend').innerHTML='<div class="cb">'+skel(2)+'</div>';loadPerms().catch(fail);
   const d=await api('/api/ideas?category='+$('#id-cat').value);
   $('#id-desc').textContent='Channels you watch. Every day the system finds their videos doing 3× or more better than usual'+(d.checked_at?' · last check '+when(d.checked_at):'')+'.';
@@ -1478,8 +1505,8 @@ const NAVPAGES=['dashboard','clips','sources','analytics','viral','ideas','alert
 function pageOn(p){return !NAVPAGES.includes(p)||can('page.'+p)}
 function firstPage(){return NAVPAGES.find(pageOn)||'none'}
 const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
-  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"]',
-  'sources.edit':'[data-sedit],[data-tog],[data-scripts]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
+  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc]',
+  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',

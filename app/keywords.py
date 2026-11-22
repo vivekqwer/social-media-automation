@@ -500,6 +500,17 @@ def plan(title: str, tags=None, description: str = "", channel: str = "", extra=
             e["score"] = e["score"] * 1.25 + 0.3
             if "trending" not in e["src"]:
                 e["src"].append("trending")
+    try:  # words that do best on this channel (Ideas -> What works, auto-tune) count a little more; only phrases
+        from .learn import win_words  # already chosen for this video are touched, so nothing off-topic comes in
+
+        best = set(win_words())
+    except Exception:  # noqa: BLE001
+        best = set()
+    if best:
+        for e in table.values():
+            if topic_stems(e["k"]) & best:
+                e["score"] *= 1.2
+                e["typed"] *= 1.2
     for i, k in enumerate(extra or []):  # the owner's own picks always lead
         k = _tidy(k)
         if k and not _bad(k, own_words | set(tokens(k))):

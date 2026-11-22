@@ -1885,6 +1885,32 @@ def scan_competitors():
     return competitors.scan()
 
 
+# ---------- Ideas -> What works: the system learns from the channel's numbers (app/learn.py) ----------
+class AutotuneIn(BaseModel):
+    on: bool
+
+
+@app.get("/api/insights")
+def insights():
+    from . import learn
+
+    return learn.insights()
+
+
+@app.post("/api/insights/autotune")
+def insights_autotune(body: AutotuneIn):
+    from . import learn
+
+    return {**learn.switch(body.on), "card": learn.insights()}
+
+
+@app.post("/api/insights/undo")
+def insights_undo():
+    from . import learn
+
+    return {**learn.undo(), "card": learn.insights()}
+
+
 # ---------- weekly report + backup ----------
 @app.post("/api/reports/weekly")
 def make_weekly():
