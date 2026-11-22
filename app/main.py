@@ -2293,7 +2293,7 @@ def face_size_set(body: FaceSizeIn):
 
 class ReminderIn(BaseModel):
     on: bool = True
-    preset: str = Field("en", max_length=20)
+    preset: str = Field("share", max_length=20)
     custom: str = Field("", max_length=200)
 
 

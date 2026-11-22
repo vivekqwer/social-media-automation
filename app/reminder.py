@@ -23,12 +23,15 @@ FIRST_AT = 5.0  # never in the first seconds
 SHOW_FOR = 3.2
 FADE_MS = 400
 PRESETS = [
+    ("share", "Like, share and subscribe for more"),
+    ("share_hinglish", "Like, share aur subscribe karein"),
+    ("share_hi", "लाइक, शेयर और सब्सक्राइब करें"),
     ("en", "Like and subscribe for more"),
     ("en2", "Enjoyed it? Like and subscribe"),
     ("hinglish", "Pasand aaya? Like aur subscribe karein"),
     ("hi", "पसंद आया? लाइक और सब्सक्राइब करें"),
 ]
-DEFAULT = "en"
+DEFAULT = "share"  # a fresh account, or one that never chose: like, share and subscribe
 # letters (English, accented, Hindi), digits and simple punctuation; everything else (emoji, symbols) cannot be drawn
 _NOT_ALLOWED = re.compile("[^0-9A-Za-zÀ-ɏऀ-ॿ‌‍ .,!?'&:-]")
 _SPACES = re.compile(" {2,}")
@@ -42,7 +45,7 @@ def clean(text) -> str:
 
 
 def settings() -> dict:
-    """The account's choice, with defaults filled in (a fresh account: on, English)."""
+    """The account's choice, with defaults filled in (a fresh account: on, English, "like, share and subscribe")."""
     from .db import get_setting
 
     try:
