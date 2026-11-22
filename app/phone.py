@@ -176,12 +176,16 @@ def events():
     try:
         from .main import health
 
-        told_bad = set(_get_json("phone_bad", []))
+        told_bad = set(_get_json("phone_bad", []))  # announced and still there
+        seen_before = set(_get_json("phone_bad_prev", []))  # there at the previous check (10 minutes ago)
         bad = {(i.get("key") or i["text"][:60]): i["text"] for i in health()["items"] if i.get("level") == "bad"}
         for k, text in bad.items():
-            if k not in told_bad and not first_run:
+            # only a problem that is still there 10 minutes later: a short blip never wakes the owner
+            if k not in told_bad and k in seen_before and not first_run:
                 _say(f"Needs you: {text}\nOpen the dashboard: Setup guide → Problems right now.", title="Raji Studio needs you", tags="warning", mail=True)
-        set_setting("phone_bad", json.dumps(sorted(bad)))
+                told_bad.add(k)
+        set_setting("phone_bad", json.dumps(sorted(told_bad & set(bad))))
+        set_setting("phone_bad_prev", json.dumps(sorted(bad)))
     except Exception as e:  # noqa: BLE001
         log.warning("phone needs-you: %s", str(e)[:150])
     if first_run:

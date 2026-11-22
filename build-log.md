@@ -322,3 +322,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - app/phone.py: the free ntfy app. My channels → "Phone notifications": Set up → QR code (secret topic per account), Send a test, Turn off, New QR code. Every existing alert (telegram.notify) is also pushed to the phone; Gmail stays the fallback when neither Telegram nor the phone is set up.
 - events() every 10 minutes per account: video went live (phone + always mail), every 10 new clips scheduled, view milestones (100 … 10M), new subscribers, a new "bad" Dashboard problem (phone + mail, once). The first run only records the current state.
 - New column Clip.live_noted; segno (QR) added to requirements. ACL lines for /api/phone*. Tests 13/13; related suites pass.
+
+## 2026-11-22 — Task 54: no false "Helper PC offline" alarms
+- Seen live: the helper was working (downloading at ~80 KB/s, 2–4 min per clip) but the Problems list said "Helper PC is offline" because a helper counted as online only if it called in within 2 minutes.
+- app/workers.py: ONLINE_WINDOW 2 → 10 minutes.
+- app/phone.py: a "needs you" problem goes to the phone/mail only if it is still there at the next 10-minute check (short blips never wake the owner); remembered once per problem.
+- Tests: phone 13, health, setup, gaps pass.

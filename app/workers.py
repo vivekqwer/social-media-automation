@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from .db import SessionLocal, Worker, utcnow
 
-ONLINE_WINDOW = timedelta(minutes=2)
+ONLINE_WINDOW = timedelta(minutes=10)  # a slow home connection can spend several minutes on one download without calling in
 
 
 def token_hash(token: str) -> str:
