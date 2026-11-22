@@ -2609,7 +2609,7 @@ def guide_page():
     problems = safe(health, "problems", {"ok": False, "items": [{
         "level": "bad", "text": "The system could not check itself just now. Try “Check again” in a minute; "
                                 "if it stays, press Copy details below.", "fix": None}]})
-    return {"setup": setup, "problems": problems, "help": [{"q": q, "auto": a, "do": d} for q, a, d in guide.HELP],
+    return {"setup": setup, "problems": problems, "help": guide.help_items(),
             "errors": guide.recent_errors(), "version": SERVER_VERSION[:7]}
 
 

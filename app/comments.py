@@ -38,6 +38,8 @@ log = logging.getLogger(__name__)
 MAX_LEN = 500
 MAX_TRIES = 5
 GIVE_UP_DAYS = 14  # a video that is still not public (or a channel not reconnected) after this gets no comment
+# asked by hand in the editor (Save comment) for an uploaded video: one go even when the video is older than 14 days
+BY_HAND = "waiting: posted within about 10 minutes, once the video is public"
 PRESETS = [
     ("ask", "Which one would you try first? 👇"),
     ("full", "Full video on the channel ❤️"),
@@ -161,7 +163,7 @@ def set_for_clip(c, on: bool | None, text: str | None) -> None:
         if (c.comment_state or "").startswith(("waiting", "no permission")):
             c.comment_state = "off"
     elif on and (not c.comment_state or c.comment_state == "off" or c.comment_state.startswith(("failed", "no permission"))):
-        c.comment_state, c.comment_tries, c.comment_next = "waiting", 0, None
+        c.comment_state, c.comment_tries, c.comment_next = BY_HAND, 0, None
 
 
 def _reason(e) -> tuple[int, str, str]:
@@ -311,7 +313,7 @@ def post_due(only: int | None = None) -> dict:
     for c in rows:
         # 14 days from when the video goes public (a video scheduled weeks ahead must not run out before then)
         start = max(x for x in (c.attempted_at or c.created_at or now, c.publish_at) if x is not None)
-        if start < oldest:
+        if start < oldest and (c.comment_state != BY_HAND or not cfg["on"]):
             if not cfg["on"]:  # held only because the account switched comments off: simply none for this video
                 _set(c.id, comment_state="off")
                 continue
