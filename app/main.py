@@ -420,7 +420,8 @@ def _tell_owner(text: str):
 
 
 class UpgradeIn(BaseModel):
-    channels: int = Field(ge=2, le=50)
+    channels: int | None = Field(None, ge=1, le=50)  # the old "more channels" request
+    plan: str = Field("", max_length=60)  # "I have paid ₹X" for this plan (channels then come from the plan)
     message: str = Field("", max_length=500)
 
 
@@ -434,14 +435,29 @@ def account_upgrade(body: UpgradeIn, request: Request):
     who = getattr(request.state, "who", None) or {}
     if who.get("role") != "user":
         raise HTTPException(400, "Only customer accounts have a plan.")
-    if body.channels <= (who.get("channel_limit") or 1):
-        raise HTTPException(400, f"Your plan already allows {who.get('channel_limit') or 1} channel(s).")
-    req = {"channels": body.channels, "message": accounts.clean_brand(body.message)[:500], "at": utcnow().isoformat() + "Z"}
-    acc = accounts.update(who["account_id"], upgrade=req)
+    lim = who.get("channel_limit") or 1
+    msg = accounts.clean_brand(body.message)[:500]
     from .telegram import esc
 
-    _tell_owner(f"💳 <b>{esc(acc['name'])}</b> ({esc(acc['email'])}) asks for {body.channels} channels.\n"
-                f"{esc(req['message'])}\nOpen Users in the dashboard to allow it.")
+    if body.plan.strip():
+        name = acl._plan_name(acl.config(), body.plan.strip())
+        pr = payments.price_of(name or "")
+        if not name or not pr:
+            raise HTTPException(400, "This plan is not for sale. Choose another one.")
+        ch = payments._includes(name)["channels"] or lim
+        req = {"plan": name, "price": int(pr["price"]), "period": pr.get("period") or "monthly", "channels": ch,
+               "message": msg, "at": utcnow().isoformat() + "Z"}
+        what = f"the plan “{esc(name)}” ({payments.inr(pr['price'])} {payments.PERIODS[req['period']][0]}) — says they have paid"
+    else:
+        if not body.channels:
+            raise HTTPException(400, "Choose a plan, or write how many channels you want.")
+        if body.channels <= lim:
+            raise HTTPException(400, f"Your plan already allows {lim} channel{'' if lim == 1 else 's'}. Write a bigger number.")
+        req = {"channels": body.channels, "message": msg, "at": utcnow().isoformat() + "Z"}
+        what = f"{body.channels} channels"
+    acc = accounts.update(who["account_id"], upgrade=req)
+    _tell_owner(f"💳 <b>{esc(acc['name'])}</b> ({esc(acc['email'])}) asks for {what}.\n"
+                f"{esc(req['message'] or 'no payment reference')}\nOpen Users in the dashboard to allow it.")
     return {"ok": True, "upgrade": req}
 
 
@@ -528,7 +544,8 @@ def admin_edit(aid: int, body: UserEdit):
         raise HTTPException(404, "Account not found")
     if data.get("status") == "active" and not acc.tenant_id:
         raise HTTPException(400, "Approve the account first.")
-    if body.close_request or (data.get("channel_limit") and acc.upgrade and data["channel_limit"] >= int(acc.upgrade.get("channels") or 0)):
+    if body.close_request or (data.get("channel_limit") and acc.upgrade and not acc.upgrade.get("plan")
+                              and data["channel_limit"] >= int(acc.upgrade.get("channels") or 0)):
         data["upgrade"] = None  # the request is answered
     try:
         out = accounts.update(aid, **data)
@@ -541,8 +558,20 @@ def admin_edit(aid: int, body: UserEdit):
         payments.limit_set_by_hand(aid)  # a paid plan's end leaves this limit as the Super Admin set it
         acl.record(aid, "super", "admin.switch", f"YouTube channels: {acc.channel_limit or 1} → {data['channel_limit']}", acc.tenant_id)
     if body.close_request:
-        acl.record(aid, "super", "admin.account", "Closed the request for more channels", acc.tenant_id)
+        asked = (acc.upgrade or {}).get("plan")
+        acl.record(aid, "super", "admin.account", f"Closed the request for the plan “{asked}” (not paid)" if asked
+                   else "Closed the request for more channels", acc.tenant_id)
     return out
+
+
+@app.post("/api/admin/users/{aid}/allow-plan")
+def admin_allow_plan(aid: int):
+    """'Paid — allow': the customer's UPI payment for the plan they asked for was checked; the plan is put on like an
+    online payment (what the Super Admin restricted stays, and it ends on time)."""
+    try:
+        return payments.allow_manual(aid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.post("/api/admin/users/{aid}/reset-password")
