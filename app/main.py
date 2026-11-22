@@ -301,6 +301,11 @@ def api_me(request: Request):
         acc = accounts.get(who["account_id"])
         who["upgrade"] = acc.upgrade if acc else None
     who["pay"] = _pay_info() if who["role"] == "user" or who.get("viewing") else None
+    if who["tenant"] != tenant.OWNER:
+        from . import onboarding
+
+        st = onboarding.state()
+        who["onboarding"] = {"active": st["active"], "done": st["done"], "total": st["total"], "current": st["current"]}
     return who
 
 
@@ -319,11 +324,12 @@ def api_logout(request: Request):
 
 @app.get("/auth/reset/start")
 def reset_start():
-    if not youtube.configured():
-        return RedirectResponse("/forgot?err=" + quote("Google sign-in is not set up on this server."), status_code=302)
-    if not auth.allowed_reset_emails():
-        return RedirectResponse("/forgot?err=" + quote("No recovery account is registered yet. The hosting owner must set ADMIN_EMAIL."), status_code=302)
-    return RedirectResponse(youtube.reset_url())
+    with tenant.use(tenant.OWNER):
+        if not youtube.configured():
+            return RedirectResponse("/forgot?err=" + quote("Google sign-in is not set up on this server."), status_code=302)
+        if not auth.allowed_reset_emails():
+            return RedirectResponse("/forgot?err=" + quote("No recovery account is registered yet. The hosting owner must set ADMIN_EMAIL."), status_code=302)
+        return RedirectResponse(youtube.reset_url())
 
 
 @app.post("/api/reset-password")
@@ -441,7 +447,12 @@ def _usage(tid: int) -> dict:
     try:
         with tenant.use(tid):
             with SessionLocal() as s:
-                return {"channels": s.query(Destination).count(), "sources": s.query(Channel).count(),
+                from . import onboarding
+
+                ob = onboarding.state()
+                return {"setup": f"{ob['done']}/{ob['total']}" if ob["total"] else "", "setup_done": not ob["active"],
+                        "own_google": bool(get_setting("google_client_id")), "shared_google": get_setting("shared_google") == "1",
+                        "channels": s.query(Destination).count(), "sources": s.query(Channel).count(),
                         "clips": s.query(Clip).count(), "uploaded": s.query(Clip).filter(Clip.status == "uploaded").count(),
                         "helper": _helper_state(s)["online"]}
     except Exception as e:  # noqa: BLE001
@@ -529,6 +540,21 @@ def admin_view_exit():
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(auth.AS_COOKIE, path="/")
     return resp
+
+
+class SharedGoogleIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/admin/users/{aid}/shared-google")
+def admin_shared_google(aid: int, body: SharedGoogleIn):
+    """Let this customer use the server's own Google project (they then share the owner's daily upload allowance)."""
+    acc = accounts.get(aid)
+    if not acc or not acc.tenant_id:
+        raise HTTPException(400, "Approve the account first.")
+    with tenant.use(acc.tenant_id):
+        set_setting("shared_google", "1" if body.on else "")
+    return {"shared_google": body.on}
 
 
 @app.get("/api/admin/pay")
@@ -1119,7 +1145,8 @@ def queue():
 def _dest_dict(d: Destination) -> dict:
     out = to_dict(d)
     try:
-        decrypt(d.token)
+        out["needs_reconnect"] = not youtube.token_client_ok(json.loads(decrypt(d.token)))  # e.g. keys changed / sharing ended
+    except ValueError:
         out["needs_reconnect"] = False
     except TokenError:
         out["needs_reconnect"] = True  # stored login unreadable (e.g. key changed): press Connect again
@@ -1375,6 +1402,7 @@ def discard_clip(cid: int):
 # ---------- autopilot channels ----------
 @app.post("/api/channels")
 def add_channel(body: ChannelIn):
+    _need_step("source")
     if body.kind in ("topic", "reel", "trending"):  # topics are always CC; reels are my own content
         body.mode, body.permission_note = "cc", ""
     if body.mode not in ("cc", "permission", "own"):
@@ -1868,8 +1896,14 @@ def gmail_status():
 
 @app.get("/auth/gmail")
 def gmail_login():
-    from . import gmail
+    from . import gmail, onboarding
 
+    if not onboarding.allows("gmail"):
+        return RedirectResponse("/?gmail_error=" + quote("Finish the earlier setup steps first."), status_code=302)
+    if not youtube.configured():
+        msg = ("Google sign-in is not set up on this server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET)." if tenant.current() == tenant.OWNER
+               else "Save your Google project's keys first (My channels → Google project keys).")
+        return RedirectResponse("/?gmail_error=" + quote(msg), status_code=302)
     return RedirectResponse(gmail.login_url(), status_code=302)
 
 
@@ -2100,6 +2134,16 @@ def health():
             elif d.paused:
                 items.append({"level": "bad", "text": f"{d.name}: uploads are paused — {d.paused_reason or ''}",
                               "fix": "resume", "id": d.id})
+        if tenant.current() != tenant.OWNER and not youtube.configured():
+            items.append({"level": "bad", "text": "Your Google project keys are missing (or sharing was switched off). Uploads and sign-ins "
+                                                 "with Google cannot work until you save your own keys.", "fix": "keys"})
+        stuck = s.query(Clip).filter(Clip.status == "uploaded", Clip.yt_state == "private", Clip.publish_at.isnot(None),
+                                     Clip.publish_at < now - timedelta(hours=6)).count()
+        if stuck:
+            items.append({"level": "warn", "text": f"{stuck} uploaded video(s) are still Private hours after their publish time. YouTube locks "
+                                                  "uploads from a Google project that has not passed its “API compliance audit”. Fill in "
+                                                  "the “YouTube API Services - Audit and Quota Extension Form” for your Google project; "
+                                                  "until then, set each video to Public by hand in YouTube Studio.", "fix": None})
         hp = _helper_state(s)
         if hp["waiting"] and not hp["online"]:
             items.append({"level": "bad", "text": f"Helper PC is offline and {hp['waiting']} job(s) are waiting for it.",
@@ -2286,8 +2330,103 @@ def delete_channel(chid: int):
 @app.get("/auth/login")
 def auth_login():
     if not youtube.configured():
+        if tenant.current() != tenant.OWNER:
+            return RedirectResponse("/?connect_error=" + quote("Save your Google project's keys first (Get started → step 1, or My channels → Google project keys)."), status_code=302)
         raise HTTPException(400, "Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET first.")
     return RedirectResponse(youtube.login_url())
+
+
+# ---------- locked step-by-step onboarding (customers) ----------
+class GoogleKeysIn(BaseModel):
+    client_id: str = Field(max_length=200)
+    client_secret: str = Field(max_length=200)
+
+
+class AckIn(BaseModel):
+    key: Literal["verify", "face", "gmail"]
+
+
+@app.get("/api/onboarding")
+def onboarding_state():
+    from . import onboarding
+
+    st = onboarding.state()
+    st["helper_code"] = None if tenant.current() == tenant.OWNER else workers.claim_code(tenant.current())
+    return st
+
+
+@app.post("/api/onboarding/google")
+def onboarding_google(body: GoogleKeysIn):
+    """The copy's own Google project keys (pasted by the customer, or by the Super Admin while viewing as them)."""
+    from . import onboarding
+
+    if tenant.current() == tenant.OWNER:
+        raise HTTPException(400, "The owner's keys are set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).")
+    try:
+        onboarding.save_google_keys(body.client_id, body.client_secret)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return onboarding.state()
+
+
+@app.post("/api/onboarding/ack")
+def onboarding_ack(body: AckIn):
+    from . import onboarding
+
+    if not onboarding.allows(body.key):
+        raise HTTPException(409, "Finish the steps before this one first.")
+    onboarding.acknowledge(body.key)
+    return onboarding.state()
+
+
+def _need_step(step: str):
+    """Server-side lock: a customer who is still being set up cannot jump ahead of the current step."""
+    from . import onboarding
+
+    if not onboarding.allows(step):
+        raise HTTPException(409, "This opens after the earlier setup steps are done. Open “Get started” and follow the steps in order.")
+
+
+HELPER_APP_FILES = ("config.py", "tenant.py", "crypto.py", "ingest.py", "tts.py", "captions.py", "hot.py")
+HELPER_WORKER_FILES = ("clipstudio_worker.py", "transcribe.py", "run_worker.bat", "run_hidden.bat", "install_autostart.bat",
+                       "uninstall_autostart.bat")
+
+def _helper_zip(tid: int, with_code: bool = True) -> bytes:
+    """The helper program for one copy: only the files it needs (not the server), its code and the server address."""
+    import io
+    import zipfile
+
+    root, buf = _STATIC.parent, io.BytesIO()
+    crlf = lambda data: data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")  # noqa: E731  (cmd needs Windows line ends)
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in HELPER_APP_FILES:
+            z.write(root / "app" / f, f"app/{f}")
+        for f in HELPER_WORKER_FILES:
+            data = (root / "worker" / f).read_bytes()
+            z.writestr(f"worker/{f}", crlf(data) if f.endswith(".bat") else data)
+        z.writestr("worker/requirements.txt", (root / "worker" / "helper_requirements.txt").read_bytes())
+        z.writestr("worker/server.txt", BASE_URL)
+        z.writestr("Start helper.bat", crlf((root / "worker" / "start_helper.bat").read_bytes()))
+        z.writestr("helper_version.txt", SERVER_VERSION or "dev")  # written last on the PC: marks a complete update
+        if with_code and tid != tenant.OWNER:
+            z.writestr("worker/helper_code.txt", workers.claim_code(tid))
+    return buf.getvalue()
+
+
+@app.get("/api/helper/download")
+def helper_download():
+    """The helper as one ZIP, already tied to this account (customers); double-click "Start helper" inside."""
+    _need_step("helper")
+    data = _helper_zip(tenant.current())
+    return Response(data, media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="helper.zip"', "Cache-Control": "no-store"})
+
+
+@app.get("/api/worker/update")
+def worker_update(request: Request):
+    """A helper without Git (a customer's) fetches the current helper files from its own server."""
+    _worker_or_401(request)
+    return Response(_helper_zip(tenant.current(), with_code=False), media_type="application/zip", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/auth/callback")
@@ -2296,7 +2435,8 @@ def auth_callback(request: Request, code: str | None = None, state: str | None =
         if error or not code:
             return RedirectResponse("/forgot?err=" + quote("Google sign-in was cancelled."), status_code=302)
         try:
-            email = youtube.handle_reset_callback(code, state)
+            with tenant.use(tenant.OWNER):
+                email = youtube.handle_reset_callback(code, state)
         except Exception as e:  # noqa: BLE001
             return RedirectResponse("/forgot?err=" + quote(str(e)[:150]), status_code=302)
         if email.lower() not in auth.allowed_reset_emails():
@@ -2668,6 +2808,7 @@ def list_workers():
 
 @app.post("/api/workers/{wid}/approve")
 def approve_worker(wid: int, body: PairIn):
+    _need_step("helper")
     with SessionLocal() as s:
         w = _get(s, Worker, wid)
         code = re.sub(r"\D", "", body.code or "")

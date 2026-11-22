@@ -17,7 +17,8 @@ HOW = {
         "Choose the Google account that owns the channel. If the account has several channels (brand accounts), Google asks which one — pick the channel you want to upload to.",
         "If Google shows “Google hasn't verified this app”: press Advanced, then “Go to Raji Studio”.",
         "Tick every permission box and press Allow / Continue. You come back to the dashboard and the channel is in the list.",
-        "If Google says “Access blocked” for this account: the owner of the Google Cloud project must add this Google address as a test user (console.cloud.google.com → APIs & Services → OAuth consent screen → Audience → Test users → Add users). Then try again.",
+        "If Google says “Access blocked”: in the Google Cloud project that your keys come from, open APIs & Services → OAuth consent screen → Audience and press “Publish app” (or add this Google address under Test users). Then try again.",
+        "Customers: your own Google project's keys can be changed in My channels → “Google project keys”.",
         "To add a second channel, do the same again with the other channel — the first one stays connected.",
     ],
     "main": [

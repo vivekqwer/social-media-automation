@@ -66,7 +66,9 @@ def _comments_ytdlp(video_id: str, limit: int) -> list[str]:
 
 def fetch_comments(video_id: str, limit: int = 300) -> list[str]:
     attempts = []
-    if YT_API_KEY:
+    from . import tenant
+
+    if YT_API_KEY and tenant.current() == tenant.OWNER:
         attempts.append(lambda: _comments_api(video_id, limit))
     attempts.append(lambda: __import__("app.youtube", fromlist=["x"]).api_comments(video_id, limit))  # connected channel's login
     attempts.append(lambda: _comments_ytdlp(video_id, limit))

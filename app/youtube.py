@@ -27,15 +27,32 @@ if IS_LOCAL:
 os.environ.setdefault("OAUTHLIB_RELAX_TOKEN_SCOPE", "1")
 
 
+def google_client() -> tuple[str, str]:
+    """(client id, secret) of the Google project this copy talks to Google with: its own keys when it has them;
+    else the server's — for the owner, and for a customer the Super Admin allowed to share it."""
+    from . import tenant
+
+    cid = get_setting("google_client_id")
+    if cid:
+        try:
+            return cid, decrypt(get_setting("google_client_secret") or "")
+        except Exception:  # noqa: BLE001
+            return cid, ""
+    if tenant.current() == tenant.OWNER or get_setting("shared_google") == "1":
+        return GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+    return "", ""
+
+
 def configured() -> bool:
-    return bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
+    return all(google_client())
 
 
 def _flow(scopes: list | None = None) -> Flow:
+    client_id, client_secret = google_client()
     cfg = {
         "web": {
-            "client_id": GOOGLE_CLIENT_ID,
-            "client_secret": GOOGLE_CLIENT_SECRET,
+            "client_id": client_id,
+            "client_secret": client_secret,
             "auth_uri": "https://accounts.google.com/o/oauth2/auth",
             "token_uri": "https://oauth2.googleapis.com/token",
             "redirect_uris": [REDIRECT],
@@ -100,6 +117,18 @@ def _default_dest_id() -> int | None:
         return d.id if d else None
 
 
+def token_client_ok(info: dict) -> bool:
+    """A customer's stored channel login must belong to the Google project their copy uses now: after the Super Admin
+    stops sharing their project, or the customer enters their own keys, the old login must not keep uploading through
+    (and using up) somebody else's project. The owner's own copy is never checked."""
+    from . import tenant
+
+    if tenant.current() == tenant.OWNER:
+        return True
+    made_with = (info or {}).get("client_id")
+    return not made_with or made_with == google_client()[0]
+
+
 def _creds(dest_id: int | None):
     dest_id = dest_id or _default_dest_id()
     if not dest_id:
@@ -108,8 +137,13 @@ def _creds(dest_id: int | None):
         d = s.get(Destination, dest_id)
         if not d:
             raise RuntimeError(f"Destination {dest_id} not found")
+        info = json.loads(decrypt(d.token))
+        if not token_client_ok(info):
+            from .crypto import TokenError
+
+            raise TokenError("This channel was connected through another Google project. Connect it again.")
         # use the scopes this login actually has (older logins have no Analytics scope; asking for it would fail)
-        creds = Credentials.from_authorized_user_info(json.loads(decrypt(d.token)))
+        creds = Credentials.from_authorized_user_info(info)
         if not creds.valid and creds.refresh_token:
             creds.refresh(Request())
             d.token = encrypt(creds.to_json())
@@ -166,7 +200,7 @@ def _email_from(creds) -> str | None:
     try:
         from google.oauth2 import id_token
 
-        claims = id_token.verify_oauth2_token(creds.id_token, Request(), GOOGLE_CLIENT_ID)
+        claims = id_token.verify_oauth2_token(creds.id_token, Request(), google_client()[0] or GOOGLE_CLIENT_ID)
         return claims["email"].lower() if claims.get("email_verified") else None
     except Exception:  # noqa: BLE001
         return None

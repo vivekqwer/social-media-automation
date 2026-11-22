@@ -30,6 +30,9 @@ from app.captions import fetch_track  # noqa: E402
 from app.hot import _comments_ytdlp, fetch_heatmap  # noqa: E402
 
 DEFAULT_SERVER = "https://social-media-automation-production-f5543fa3.up.railway.app"
+_server_file = pathlib.Path(__file__).with_name("server.txt")  # written into a downloaded helper by its dashboard
+if _server_file.exists():
+    DEFAULT_SERVER = _server_file.read_text(encoding="utf-8-sig").strip() or DEFAULT_SERVER
 SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFAULT_SERVER)).rstrip("/")
 if not (SERVER.startswith("https://") or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", SERVER)):
     sys.exit("The server address must start with https:// (the helper sends videos and its key there).")
@@ -50,10 +53,18 @@ def log(msg: str):
 
 
 def single_instance():
-    """Only one helper per PC (two would download the same clip twice)."""
+    """Only one helper per account on a PC (two would download the same clip twice). Helpers of different
+    accounts (each has its own code in helper_code.txt) may run side by side."""
+    port = 47613
+    code_file = pathlib.Path(__file__).with_name("helper_code.txt")
+    try:
+        if code_file.exists():
+            port += 1 + int(code_file.read_text(encoding="utf-8-sig").strip().split("-", 1)[0]) % 1000  # 47614-48613
+    except (ValueError, OSError):
+        pass
     lock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
-        lock.bind(("127.0.0.1", 47613))
+        lock.bind(("127.0.0.1", port))
     except OSError as e:
         if e.errno == errno.EADDRINUSE or getattr(e, "winerror", 0) == 10048:
             log("Another Raji Studio helper is already running on this PC. Closing this one.")
@@ -72,11 +83,58 @@ except Exception:  # noqa: BLE001
     STARTED_AT = ""
 
 
+ZIP_ALLOWED = re.compile(r"(app/[a-z_]+\.py|worker/[a-z_]+\.(py|bat|txt)|helper_version\.txt|Start helper\.bat)")
+ZIP_KEEP = {"worker/helper_code.txt", "worker/server.txt", "worker/.worker_token"}  # this PC's own settings
+WIN_DEVICES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+MAX_UPDATE_BYTES = 5 * 1024 * 1024
+
+
+def update_from_server(server_version: str):
+    """A downloaded helper (no Git): fetch the current helper files from its own server, then restart (exit 4)."""
+    vfile = ROOT / "helper_version.txt"
+    have = vfile.read_text(encoding="utf-8-sig").strip() if vfile.exists() else ""
+    if have == server_version:
+        return
+    import io
+    import zipfile
+
+    try:
+        r = httpx.get(f"{SERVER}/api/worker/update", headers={"x-worker-token": get_token()}, timeout=120)
+        if r.status_code != 200 or len(r.content) > MAX_UPDATE_BYTES:
+            return
+        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+            infos = [i for i in z.infolist() if not i.is_dir()]
+            names = [i.filename for i in infos]
+            bad = (not names or any(not ZIP_ALLOWED.fullmatch(n) for n in names)
+                   or any(n.rsplit("/", 1)[-1].split(".")[0].lower() in WIN_DEVICES for n in names)
+                   or sum(i.file_size for i in infos) > MAX_UPDATE_BYTES)
+            if bad:
+                log("Update skipped: the server sent unexpected files.")
+                return
+            names.sort(key=lambda n: n == "helper_version.txt")  # the version file last: it marks a complete update
+            for n in names:
+                if n.lower() in ZIP_KEEP:
+                    continue  # this PC's own settings stay as they are
+                dest = ROOT / n
+                if n.endswith(".bat") and dest.exists():
+                    continue  # a start script that is running right now must not be swapped under it
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                tmp = dest.with_name(dest.name + ".new")
+                tmp.write_bytes(z.read(n))
+                os.replace(tmp, dest)
+        log("Updated the helper from the server. Restarting...")
+        sys.exit(EXIT_UPDATED)
+    except (httpx.HTTPError, OSError, ValueError, zipfile.BadZipFile) as e:
+        log(f"Update check failed ({str(e)[:80]}); trying again later.")
+
+
 def maybe_update(server_version: str):
     """Move the helper's code to exactly the commit the server runs (fast-forward only), then restart (exit 4).
     The code always comes from GitHub over HTTPS; the server only says which commit."""
-    if not re.fullmatch(r"[0-9a-f]{40}", server_version or "") or not (ROOT / ".git").exists():
+    if not re.fullmatch(r"[0-9a-f]{40}", server_version or ""):
         return
+    if not (ROOT / ".git").exists():
+        return update_from_server(server_version)
     try:
         if EXPECTED_ORIGIN not in _git("remote", "get-url", "origin").stdout:
             return

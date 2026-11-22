@@ -1,0 +1,9 @@
+# What a downloaded helper PC needs (installed by "Start helper" the first time; sent as worker/requirements.txt)
+yt-dlp[default]
+httpx
+edge-tts
+cryptography
+python-dotenv
+imageio-ffmpeg
+deno
+faster-whisper>=1.1

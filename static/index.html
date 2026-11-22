@@ -185,6 +185,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
   <aside id="sb">
     <div class="brand"><div class="mark"><i data-ico="play"></i></div><div><b id="brand-name">Raji Studio</b><span id="brand-sub">Creator workspace</span></div></div>
     <div class="grp">Platform</div>
+    <button class="nav hide" data-p="start" id="nav-start"><i data-ico="check"></i>Get started<span class="count" id="b-start"></span></button>
     <button class="nav on" data-p="dashboard"><i data-ico="dashboard"></i>Dashboard</button>
     <button class="nav" data-p="clips"><i data-ico="film"></i>Clips<span class="count" id="b-review" style="display:none"></span></button>
     <button class="nav" data-p="sources"><i data-ico="rss"></i>Sources</button>
@@ -292,6 +293,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="page-h"><div><h1>Alerts</h1><div class="desc" id="al-desc">Your uploaded videos are checked on YouTube every 2 hours: deleted, removed for copyright, rejected or blocked.</div></div><button class="btn" id="al-check"><i data-ico="refresh"></i>Check now</button></div>
         <div class="alert" style="margin-bottom:16px"><i data-ico="alert"></i><span class="sm">YouTube's API shows what happened to a video (removed, rejected with a reason, blocked in countries), but not strikes or the claimant's name — use “Open in YouTube Studio” on an alert for that.</span></div>
         <div id="al-list"></div>
+      </section>
+
+      <section id="p-start" class="hide">
+        <div class="page-h"><div><h1>Get started</h1><div class="desc" id="ob-desc">Set up your system step by step. Each step opens when the one before it is done. Everything happens on this page — no coding.</div></div><span class="badge" id="ob-badge">…</span></div>
+        <div id="ob-steps"></div>
       </section>
 
       <section id="p-users" class="hide">
@@ -588,12 +594,13 @@ async function once(fn,btn){if(LOCK){toast('Still working on the previous action
 const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
 const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
 
-const TITLES={users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+const TITLES={start:'Get started',users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
 function go(p){
+  if(window.OBLOCK&&p!=='start'){p='start';if(!window.OBSRC)toast('Finish “Get started” first — the rest opens when the setup is done');window.OBSRC=false}
   $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
   $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
   $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
-  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide,users:loadUsers}[p];if(L)Promise.resolve().then(L).catch(fail);
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide,users:loadUsers,start:loadStart}[p];if(L)Promise.resolve().then(L).catch(fail);
 }
 $$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
 $('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
@@ -776,7 +783,7 @@ function clipMini(c,actions){
 function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
 
 const FIXBTN={connect:['Connect / reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper'],
-  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide']};
+  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys']};
 async function loadHealth(h0,target){
   let h=h0;if(!h){try{h=await api('/api/health')}catch(e){return}}
   $(target||'#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
@@ -784,6 +791,7 @@ async function loadHealth(h0,target){
     return `<div class="item"><span class="badge ${it.level==='bad'?'failed':it.level==='warn'?'queued':'outline'}">${it.level==='bad'?'Fix now':it.level==='warn'?'Check':'Info'}</span><div class="tx grow"><span>${esc(it.text)}</span></div>${btn}</div>`}).join('')
     :`<div class="row" style="gap:10px">${ico('check')}<b>Everything is working.</b><span class="mut sm">Uploads, thumbnails, sources and the helper are fine.</span></div>`;
   $$('[data-hfix]',$(target||'#hl-list')).forEach(b=>b.onclick=()=>once(async()=>{const it=h.items[+b.dataset.hfix];
+    if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return}
     if(it.fix==='add_source'){openAdd();return}if(it.fix==='sources'){go('sources');return}if(it.fix==='guide'){go('guide');return}
     if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return}
     if(it.fix==='resume'){await api(`/api/destinations/${it.id}/resume`,'POST');toast('Uploads resumed')}
@@ -1292,6 +1300,12 @@ async function loadMe(){
   $('#un').textContent=ME.viewing?ME.viewing.name:(ME.name||'admin');$('#uf').textContent=ME.viewing?'viewed by Super Admin':ME.role==='super'?'Super Admin':(ME.plan||'Customer');
   $('#av').textContent=($('#un').textContent||'A')[0].toUpperCase();
   $('#nav-users').classList.toggle('hide',ME.role!=='super');
+  const ob=ME.onboarding;window.OBLOCK=!!(ob&&ob.active);$('#nav-start').classList.toggle('hide',!window.OBLOCK);
+  if(ob){$('#b-start').textContent=ob.done+'/'+ob.total}
+  $$('.nav[data-p]').forEach(n=>{if(n.dataset.p!=='start'){n.style.opacity=window.OBLOCK?.45:'';n.title=window.OBLOCK?'Opens when “Get started” is finished':''}});
+  ['top-quick','top-new','nav-quick'].forEach(id=>{const e=$('#'+id);if(e)e.classList.toggle('hide',window.OBLOCK)});
+  $('#top-add').classList.toggle('hide',window.OBLOCK);
+  if(window.OBLOCK&&$('#p-start').classList.contains('hide'))go('start');
   if($('#pw-hint')&&ME.role==='user')$('#pw-hint').textContent='Forgot it? Ask the person who gave you access — they can give you a temporary password.';
   let bar=$('#view-bar');if(ME.viewing){if(!bar){bar=document.createElement('div');bar.id='view-bar';bar.style.cssText='position:sticky;top:0;z-index:40;background:#f59e0b;color:#111;padding:8px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-weight:500';document.body.prepend(bar)}
     bar.innerHTML=`You are looking at <b>${esc(ME.viewing.name)}</b>'s dashboard (${esc(ME.viewing.email)}). What you change here changes THEIR system. <button class="btn sm" id="view-exit">Back to my own dashboard</button>`;
@@ -1310,12 +1324,52 @@ function renderPlan(){
     +`<details ${new URLSearchParams(location.search).has('limit')||window.PLANOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">More channels</summary>
       <ol class="sm" style="margin:8px 0;padding-left:18px;line-height:1.8"><li>${pay.price?'Price: <b>'+esc(pay.price)+'</b>.':'Ask for the price.'}</li><li>${pay.upi?'Pay to <b>'+esc(pay.upi)+'</b>.':'Payment details will be sent to you.'} ${esc(pay.text||'')}</li><li>Write how many channels you want and the payment reference, then press Send.</li><li>When the payment has been checked, the extra channels are switched on and you can connect them here.</li></ol>
       <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f">Channels wanted<input id="up-n" type="number" min="${lim+1}" max="50" value="${lim+1}" style="width:120px"></label><label class="f grow">Payment reference / message<input id="up-msg" maxlength="500" placeholder="UPI reference number"></label><button class="btn" id="up-send" style="align-self:flex-end">Send request</button></div></details>
+    <details style="margin-top:10px" id="gk-box" ${window.KEYSOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">Google project keys</summary><div id="gk-body" class="sm" style="margin-top:8px">…</div></details>
     <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Name of your system</summary><div class="row" style="margin-top:8px"><input id="br-name" class="grow" maxlength="60" value="${esc(ME.brand||'')}"><button class="btn outline" id="br-save">Rename</button></div></details>`;
   $('#up-send').onclick=()=>once(async()=>{await api('/api/account/upgrade','POST',{channels:+$('#up-n').value,message:$('#up-msg').value});toast('Request sent — you get the extra channels after the payment is checked');await loadMe()},$('#up-send'));
   $('#br-save').onclick=()=>once(async()=>{await api('/api/account/brand','POST',{brand:$('#br-name').value});toast('Renamed');await loadMe()},$('#br-save'));
+  keysForm($('#gk-body'),()=>{toast('Keys saved. If a channel now shows “Reconnect needed”, connect it again.');loadDests()});
   api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
     claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
     $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
+}
+async function keysForm(el,done){
+  if(!el)return;let o;try{o=await api('/api/onboarding')}catch(e){el.textContent='';return}const g=o.google||{};
+  el.innerHTML=`<div style="margin-bottom:6px">${g.own?'Your system uses <b>your own</b> Google project.':g.shared?'Your system uses the <b>provider\'s</b> Google project for now. Save your own keys to get your own upload allowance.':'<b style="color:var(--bad)">No keys saved.</b> Uploads and Google sign-ins cannot work until you save them.'}</div>
+    <div class="row" style="margin:6px 0;flex-wrap:wrap"><span>Authorized redirect URI:</span> <code style="user-select:all">${esc(g.redirect_uri||'')}</code></div>
+    <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input class="gk-cid" autocomplete="off" value="${esc(g.client_id||'')}" placeholder="….apps.googleusercontent.com"></label><label class="f grow">Client secret<input class="gk-sec" type="password" autocomplete="new-password" placeholder="${g.own?'saved — type a new one to change it':'GOCSPX-…'}"></label><button class="btn gk-save" style="align-self:flex-end">Save</button></div>
+    <div class="mut" style="margin-top:6px">The keys are checked with Google before they are saved. How to get them: Setup guide, or “Get started” step 1.</div>`;
+  $('.gk-save',el).onclick=()=>once(async()=>{await api('/api/onboarding/google','POST',{client_id:$('.gk-cid',el).value,client_secret:$('.gk-sec',el).value});window.KEYSOPEN=false;if(done)done()},$('.gk-save',el));
+}
+async function loadStart(){
+  const o=await api('/api/onboarding');
+  if(!o.active){window.OBLOCK=false;await loadMe();if(o.total){toast('Setup finished — your system is running');go('dashboard')}return}
+  const b=$('#ob-badge');b.className='badge queued';b.textContent=`Step ${Math.min(o.done+1,o.total)} of ${o.total}`;
+  const g=o.google||{};
+  const body={
+    google:()=>`<div class="row" style="margin:8px 0"><span class="sm">Authorized redirect URI:</span> <code style="user-select:all">${esc(g.redirect_uri)}</code><button class="btn ghost sm" id="ob-copy">Copy</button><a class="btn outline sm" href="https://console.cloud.google.com/" target="_blank" rel="noopener">Open Google Cloud</a></div>
+      <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input id="ob-cid" autocomplete="off" placeholder="1234567890-abc….apps.googleusercontent.com" value="${esc(g.client_id||'')}"></label><label class="f grow">Client secret<input id="ob-sec" type="password" autocomplete="new-password" placeholder="GOCSPX-…"></label><button class="btn" id="ob-keys" style="align-self:flex-end">Save</button></div>`,
+    channel:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/login">Connect YouTube channel</a></div>`,
+    verify:()=>`<div class="row" style="margin-top:8px"><a class="btn outline" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Open youtube.com/verify</a><button class="btn" data-oback="verify">I have verified it</button></div>`,
+    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a><span class="mut sm">${o.helper_waiting?'A helper is waiting — type its pairing code:':'After starting it, type the pairing code it shows:'}</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn" id="ob-approve">Approve</button></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">${o.helper_waiting?'':'Waiting for your helper to start… this page checks every 10 seconds.'}</div>`,
+    face:()=>`<div class="row" style="margin-top:8px"><label class="btn">Upload my photo<input type="file" accept="image/jpeg,image/png,image/webp" id="ob-face" hidden></label><button class="btn ghost" data-oback="face">Skip for now</button><span class="mut sm" id="ob-facenote"></span></div>`,
+    gmail:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/gmail">Connect Gmail</a><button class="btn ghost" data-oback="gmail">Skip for now</button></div>`,
+    source:()=>`<div class="row" style="margin-top:8px"><button class="btn" id="ob-src">Add my first source</button></div>`};
+  $('#ob-steps').innerHTML=o.steps.map((st,i)=>{const cur=st.key===o.current;return `<div class="card" style="margin-bottom:12px;${st.locked?'opacity:.5':''}"><div class="ch"><div><h3>${st.done?'✅':st.locked?'🔒':'👉'} ${i+1}. ${esc(st.title)}${st.skipped?' <span class="badge outline">skipped</span>':''}</h3><p>${esc(st.why)}</p></div>${st.done?'<span class="badge uploaded">Done</span>':st.locked?'<span class="badge outline">Opens after step '+i+'</span>':'<span class="badge queued">Do this now</span>'}</div>
+    ${cur?`<div class="cb"><ol class="sm" style="margin:0 0 6px;padding-left:18px;line-height:1.8">${st.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>${body[st.key]()}</div>`:''}
+    ${st.key==='google'&&st.done&&!g.shared?'<div class="cb"><details><summary class="sm" style="cursor:pointer">Wrong keys? Change them</summary><div id="ob-rekeys" class="sm" style="margin-top:8px"></div></details></div>':''}</div>`}).join('');
+  keysForm($('#ob-rekeys'),async()=>{toast('Keys saved');await loadMe();await loadStart()});
+  const after=async()=>{await loadMe();await loadStart()};
+  if($('#ob-copy'))$('#ob-copy').onclick=async()=>{try{await navigator.clipboard.writeText(g.redirect_uri);toast('Copied — paste it into Google')}catch(e){prompt('Copy this address:',g.redirect_uri)}};
+  if($('#ob-keys'))$('#ob-keys').onclick=()=>once(async()=>{await api('/api/onboarding/google','POST',{client_id:$('#ob-cid').value,client_secret:$('#ob-sec').value});toast('Saved — now connect your channel');await after()},$('#ob-keys'));
+  $$('[data-oback]').forEach(x=>x.onclick=()=>once(async()=>{await api('/api/onboarding/ack','POST',{key:x.dataset.oback});await after()},x));
+  if($('#ob-approve'))$('#ob-approve').onclick=()=>once(async()=>{const ws=await api('/api/workers');const w=ws.find(x=>!x.approved);if(!w)throw new Error('No helper has started yet. Double-click “Start helper” on your PC and wait until it shows a pairing code.');
+    await api(`/api/workers/${w.id}/approve`,'POST',{code:$('#ob-pair').value});toast('Helper approved');await after()},$('#ob-approve'));
+  if($('#ob-face'))$('#ob-face').onchange=()=>once(async()=>{const f=$('#ob-face').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);$('#ob-facenote').textContent='Removing the background… (can take a minute)';try{await api('/api/faces/0','POST',fd)}finally{$('#ob-facenote').textContent=''}toast('Photo saved');await after()});
+  if($('#ob-src'))$('#ob-src').onclick=()=>{window.OBSRC=true;openAdd()};
+  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName));
+    if($('#p-start').classList.contains('hide')||$('#m-add').classList.contains('on'))return;
+    if(typing){window._obT=setTimeout(again,10000);return}loadStart().catch(()=>{})},10000);
 }
 async function loadUsers(){
   const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
@@ -1326,11 +1380,12 @@ async function loadUsers(){
   $('#us-list').innerHTML=U.length?U.map(u=>{const g=u.usage||{};return `<div class="item" style="flex-wrap:wrap;align-items:flex-start"><div class="avatar">${esc((u.name||'?')[0].toUpperCase())}</div>
     <div class="tx grow"><b>${esc(u.name)}</b> <span class="badge ${lab[u.status][1]}">${lab[u.status][0]}</span> <span class="mut sm">${esc(u.email)}</span>
       <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
+      ${u.usage&&!g.error?`<span class="sm" style="display:block">Setup: ${g.setup_done?'finished':esc(g.setup||'')+' steps done'} · Google project: ${g.own_google?'their own':g.shared_google?'<b>yours (shared uploads)</b>':'none yet'}</span>`:''}
       ${u.usage?`<span class="sm" style="display:block">${g.error?esc(g.error):`${g.channels} of ${u.channel_limit} channel(s) · ${g.sources} sources · ${g.clips} clips · ${g.uploaded} uploaded · helper ${g.helper?'online':'offline'}`}</span>`:''}
       ${u.upgrade?`<div class="alert" style="margin-top:6px"><span>Asks for <b>${u.upgrade.channels} channels</b> (${new Date(u.upgrade.at).toLocaleDateString()}): ${esc(u.upgrade.message||'no message')}</span><div class="row" style="margin-top:6px"><button class="btn sm" data-uallow="${u.id}" data-n="${u.upgrade.channels}">Paid — allow ${u.upgrade.channels} channels</button><button class="btn ghost sm" data-uclose="${u.id}">Not paid — close request</button></div></div>`:''}
       ${u.note?`<span class="mut sm" style="display:block">Note: ${esc(u.note)}</span>`:''}</div>
     <div class="row" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">${u.status==='pending'?`<button class="btn sm" data-uok="${u.id}">Approve</button><button class="btn bad sm" data-udel="${u.id}">Reject</button>`:''}
-      ${u.status==='active'?`<label class="row sm" style="gap:6px">Channels<input type="number" min="1" max="50" value="${u.channel_limit}" data-ulim="${u.id}" style="width:70px"></label><button class="btn outline sm" data-uview="${u.id}">View as</button><button class="btn outline sm" data-unote="${u.id}">Note</button><button class="btn outline sm" data-upw="${u.id}">Reset password</button><button class="btn bad sm" data-ublock="${u.id}">Block</button>`:''}
+      ${u.status==='active'?`<label class="row sm" style="gap:6px">Channels<input type="number" min="1" max="50" value="${u.channel_limit}" data-ulim="${u.id}" style="width:70px"></label><button class="btn outline sm" data-uview="${u.id}">View as</button><button class="btn outline sm" data-unote="${u.id}">Note</button>${g.own_google?'':`<button class="btn outline sm" data-ushare="${u.id}" data-on="${g.shared_google?0:1}" title="Lets this customer skip step 1 and upload through YOUR Google project — they then use up your daily uploads">${g.shared_google?'Stop sharing my Google project':'Share my Google project'}</button>`}<button class="btn outline sm" data-upw="${u.id}">Reset password</button><button class="btn bad sm" data-ublock="${u.id}">Block</button>`:''}
       ${u.status==='blocked'?`<button class="btn outline sm" data-uunblock="${u.id}">Unblock</button><button class="btn bad sm" data-udel="${u.id}">Delete login</button>`:''}</div></div>`}).join('')
     :'<span class="mut sm">No accounts yet. People create one on the sign-up page; you approve them here.</span>';
   const act=(sel,fn)=>$$(sel).forEach(b=>b.onclick=()=>once(()=>fn(b),b));const by=id=>U.find(u=>u.id===+id);
@@ -1343,6 +1398,7 @@ async function loadUsers(){
   act('[data-udel]',async b=>{if(!confirm(`Remove the login of ${by(b.dataset.udel).name}? This cannot be undone.`))return;await api('/api/admin/users/'+b.dataset.udel,'DELETE');loadUsers();loadMe()});
   act('[data-unote]',async b=>{const u=by(b.dataset.unote),t=prompt('Your note about this customer (payment, phone, …):',u.note||'');if(t===null)return;await edit(u.id,{note:t});loadUsers()});
   act('[data-upw]',async b=>{const u=by(b.dataset.upw);if(!confirm(`Give ${u.name} a new temporary password? Their current password stops working.`))return;const r=await api(`/api/admin/users/${u.id}/reset-password`,'POST');prompt('Send this temporary password to the customer (shown only once). They change it after signing in:',r.password)});
+  act('[data-ushare]',async b=>{const on=b.dataset.on==='1';if(on&&!confirm('Let this customer upload through YOUR Google project?\n\nTheir uploads then count against your own daily allowance (about 6 a day in total). Use this only for testing or while they set up their own project.'))return;await api(`/api/admin/users/${b.dataset.ushare}/shared-google`,'POST',{on});loadUsers()});
   act('[data-uview]',async b=>{await api(`/api/admin/users/${b.dataset.uview}/view`,'POST');location.href='/'});
   $$('[data-ulim]').forEach(inp=>inp.onchange=()=>once(async()=>{await edit(inp.dataset.ulim,{channel_limit:+inp.value});toast('Channel limit saved');loadUsers()}));
 }
@@ -1354,7 +1410,8 @@ loadMe();
 (()=>{const q=new URLSearchParams(location.search);if(q.has('limit')){history.replaceState(null,'',location.pathname);window.PLANOPEN=true;go('settings');setTimeout(()=>toast(q.get('limit'),true),500);return}
   if(!q.has('connected')&&!q.has('connect_error')&&!q.has('gmail')&&!q.has('gmail_error'))return go('dashboard');
   history.replaceState(null,'',location.pathname);
-  if(q.has('connect_error')){go('guide');window.GUIDEOPEN='youtube';setTimeout(()=>toast('The channel was not connected: '+q.get('connect_error')+' — see step “YouTube channel connected” for what to do',true),400);return}
+  if(q.has('connect_error')){const msg=q.get('connect_error');loadMe().then(()=>{if(window.OBLOCK){go('start');toast('The channel was not connected: '+msg+' — read the steps on this page again',true)}
+      else{window.GUIDEOPEN='youtube';go('guide');toast('The channel was not connected: '+msg+' — see step “YouTube channel connected” for what to do',true)}});return}
   if(q.has('gmail_error')){window.GUIDEOPEN='gmail';go('guide');setTimeout(()=>toast('Gmail was not connected: '+q.get('gmail_error')+' — see step “Gmail connected”',true),400);return}
   if(q.has('gmail')){go('settings');setTimeout(()=>toast('Gmail connected'),400);return}
   window.JUSTCONNECTED=q.get('new')==='1'?+q.get('connected'):null;go('settings');

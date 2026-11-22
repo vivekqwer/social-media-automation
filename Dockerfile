@@ -11,6 +11,8 @@ RUN mkdir -p models && curl -fsSL -o models/u2net_human_seg.onnx https://github.
 COPY app app
 COPY static static
 COPY fonts fonts
+# the helper program customers download from their dashboard is built from these files
+COPY worker worker
 # make the bundled fonts (Noto Devanagari, Anton) available to libass font fallback too
 RUN mkdir -p /usr/share/fonts/truetype/clipstudio && cp fonts/*.ttf /usr/share/fonts/truetype/clipstudio/ && fc-cache -f
 ENV DATA_DIR=/data PYTHONUNBUFFERED=1
