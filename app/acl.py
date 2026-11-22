@@ -82,6 +82,7 @@ PERMS = [
 
     ("uploads.youtube", "uploads", "Upload to YouTube at all", True),
     ("uploads.auto", "uploads", "Automatic upload without review", True),
+    ("uploads.comment", "uploads", "First comment under new videos", True),
 
     ("gmail.connect", "extras", "Connect / disconnect Gmail", True),
     ("gmail.send", "extras", "Permission mails to creators (send, and read their replies)", True),
@@ -288,6 +289,9 @@ ROUTES = [
     ("POST", "/api/phone", "telegram.use", "Changed phone notifications"),
     ("POST", "/api/phone/test", "telegram.use", None),
     ("POST", "/api/settings/reminder", "clips.edit", "Changed the like & subscribe reminder"),
+    ("GET", "/api/settings/comment", SIGNED, None),
+    ("POST", "/api/settings/comment", "uploads.comment", "Changed the first comment"),
+    ("POST", "/api/clips/{cid}/comment", "uploads.comment", None),
     ("POST", "/api/clips/{cid}/captions", "clips.captions", None),
     ("POST", "/api/clips/{cid}/tts", "clips.voice", None),
     ("POST", "/api/clips/{cid}/voice-upload", "clips.voice", None),

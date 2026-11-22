@@ -148,6 +148,12 @@ class Clip(Base):
     reuploaded_as = Column(Integer)  # this video was deleted from YouTube and uploaded again as that clip
     removed_at = Column(DateTime)  # deleted from YouTube and removed from the dashboard by the owner (kept as history)
     live_noted = Column(Boolean)  # the owner was told this video went live
+    comment_on = Column(Boolean)  # first comment under the video (None = as the account setting says; False = not for this clip)
+    comment_text = Column(Text)  # this clip's own comment words (empty = the account's words)
+    comment_id = Column(String(64))  # the comment on YouTube, once posted (never posted twice)
+    comment_state = Column(String(300))  # off | waiting[: why] | posting | posted | no permission | failed: why
+    comment_tries = Column(Integer)  # failed attempts that may go away by themselves (network, YouTube busy)
+    comment_next = Column(DateTime)  # not before this time (UTC): the publish time, or the next try
     meta_done = Column(Boolean, default=False)  # also posted to Instagram / Facebook
     meta_result = Column(JSON)
     thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low

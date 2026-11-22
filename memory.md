@@ -131,3 +131,4 @@ MVP built, 4-agent reviewed, fixes applied, tested locally (ranking, ffmpeg rend
 
 ## Payments (Razorpay, 2026-11-22)
 - app/payments.py. Keys in owner setting `razorpay` (secrets encrypted), prices in `plan_prices`; shared table `payments`; Account.plan_expires / expiry_warned. Webhook URL: BASE_URL/api/pay/razorpay/webhook (events payment.captured, order.paid). Expiry job daily 3:30 UTC. Channels over the limit don't upload (never deleted). No keys = manual UPI flow. Real keys must be pasted by the user.
+- 2026-11-22 (Task 54, branch of agent worktree, not deployed): first comment after upload (app/comments.py, job every 10 min). YouTube API cannot pin: owner pins by hand from the notification link. Scope youtube.force-ssl only for new connections; older channels show "reconnect once to allow comments" and their comments wait as "no permission". Comments use leftover quota only (quota.can_comment).

@@ -17,6 +17,7 @@ HOW = {
         "Choose the Google account that owns the channel. If the account has several channels (brand accounts), Google asks which one — pick the channel you want to upload to.",
         "If Google shows “Google hasn't verified this app”: press Advanced, then “Go to Raji Studio”.",
         "Tick every permission box and press Allow / Continue. You come back to the dashboard and the channel is in the list.",
+        "The box “See, edit, and permanently delete your YouTube videos, ratings, comments and captions” is only used to post the first comment under each new video. Channels connected before this was added do not have it yet (My channels says so): connect them once more (same channel) to allow comments.",
         "If Google says “Access blocked”: in the Google Cloud project that your keys come from, open APIs & Services → OAuth consent screen → Audience and press “Publish app” (or add this Google address under Test users). Then try again.",
         "Customers: your own Google project's keys can be changed in My channels → “Google project keys”.",
         "To add a second channel, do the same again with the other channel — the first one stays connected.",
@@ -140,6 +141,13 @@ HELP = [
      "A small line is shown once, for about 3 seconds near the end of every new video. It has no sound and does not blink.",
      "My channels → “Like & subscribe reminder”: switch it off or choose other words. For one clip only: open it → Trim & look. "
      "Clips that are already made keep their look until you press Save & re-render (or Clips → “Make all waiting clips again”)."),
+    ("The first comment is not pinned / was not posted",
+     "After every upload the channel posts its own first comment once the video is public (scheduled videos: at their "
+     "publish time, within about 10 minutes). YouTube does not let any app pin a comment, so you get a message with the "
+     "video link. Uploads always come first: when today's YouTube allowance is needed for uploads, comments wait.",
+     "To pin: open the link → comments → tap ⋮ next to your comment → Pin. If a clip says “no permission”: My channels → "
+     "Connect a YouTube channel → choose the same channel and tick every box; waiting comments then go out by themselves. "
+     "Words: My channels → “First comment”; one clip: open it → Details."),
     ("My thumbnail does not show on my Shorts",
      "YouTube shows a frame of the video for Shorts (on the channel's Shorts tab and in the feed), not the uploaded thumbnail — nobody can choose it through the API. So every Short carries the title and your small face at the top of every frame, and the thumbnail itself is shown for the first moment of the video.",
      "Nothing. To choose the exact picture yourself: YouTube app on your phone → the Short → Edit → thumbnail → pick the first frame. To switch the title band off for one clip: open it → Trim & look. Face size: My channels → “Size on thumbnails”."),

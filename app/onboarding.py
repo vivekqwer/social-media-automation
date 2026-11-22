@@ -43,6 +43,7 @@ HOW = {
         "Choose the Google account of your channel. If it has several channels, pick the one you want to upload to.",
         "Google says “Google hasn't verified this app” — that is normal for your own project: press Advanced → “Go to …”.",
         "Tick every permission box and press Continue. You come back here and this step turns green.",
+        "One box says “See, edit, and permanently delete your YouTube videos, ratings, comments and captions”. Google words it broadly; the system uses it only to post the first comment under each new video (nothing is ever deleted). Leave it unticked and everything else still works — just without that comment.",
         "If Google says “Access blocked”: in Google Cloud check that you pressed “Publish app”. If it says “redirect_uri_mismatch”: the redirect address in your Google client is not exactly the one shown in step 1 — copy it again.",
         "Wrong keys saved? Open My channels → “Google project keys” and save the right ones.",
     ],

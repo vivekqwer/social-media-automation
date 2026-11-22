@@ -37,6 +37,10 @@ def recover():
         for c in s.query(Clip).filter(Clip.status.in_(["uploading", "rendering"])).all():
             if c.status == "uploading":
                 c.status = "uploaded" if c.youtube_id else "queued"
+                if c.youtube_id:
+                    from .comments import after_upload
+
+                    after_upload(c)  # its first comment, as if the upload had finished normally
             else:
                 c.status, c.error = "draft", None
                 rerender.append(c.id)  # render it again automatically
@@ -48,6 +52,8 @@ def recover():
             if q.get("state") in ("starting", "analyzing", "rendering") and not q.get("clip_id") and not p.analysis_pending:
                 requick.append(p.id)
         s.commit()
+    from .comments import recover_stuck
+    recover_stuck()
     from .quick import quick_run
     from .render import run_render
     for cid in rerender:
@@ -218,6 +224,8 @@ def process_queue():
                 publish_at = c.publish_at if c.publish_at and c.publish_at > now + timedelta(minutes=15) else None
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
                 c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
+                from .comments import after_upload
+                after_upload(c)  # first comment: posted by post_due once the video is public
                 s.commit()  # saved at once: a crash now must never upload the video twice
                 acl.record_here("uploads.youtube", f"Uploaded to YouTube: {(c.title or '')[:120]} (#{c.id})")
                 _tg(f"⬆️ Uploaded: <b>{_e(c.title)}</b>\nhttps://youtu.be/{c.youtube_id}"
@@ -336,6 +344,7 @@ def start():
     #   scan_if_due          "Competitor tracker"
     #   daily_summary        Telegram (telegram.enabled)
     #   learn_daily          auto-tune switch of the account; sources only when "Change sources" is on -> learn.daily
+    #   post_comments        "First comment under new videos" (and the account's own on/off in My channels)
     #   always: sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
@@ -391,5 +400,8 @@ def start():
     from .phone import events as phone_events
     add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you
+    from .comments import post_due as post_comments
+    add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
     sch.start()
     return sch

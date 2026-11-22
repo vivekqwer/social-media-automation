@@ -377,6 +377,13 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="rm-on" checked><i></i></span>Show it on my videos</label>
                 <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Words<select id="rm-preset"></select></label><label class="f grow hide" id="rm-custom-wrap">Your own words (up to 40 letters, no emoji)<input id="rm-custom" maxlength="40" placeholder="Like and subscribe for more"></label><button class="btn" id="rm-save">Save</button></div>
                 <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
+            <div class="card"><div class="ch"><div><h3>First comment</h3><p>After every upload your channel writes the first comment under the new video, as soon as the video is public (a scheduled video: at its publish time, within about 10 minutes). <b>YouTube does not let any app pin a comment</b> — so you get a message with the video link: open it, tap ⋮ next to your comment → Pin.</p></div><span class="badge" id="fc-badge">…</span></div>
+              <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="fc-on" checked><i></i></span>Post a first comment on my new videos</label>
+                <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Comment<select id="fc-preset"></select></label><button class="btn" id="fc-save">Save</button></div>
+                <label class="f hide" id="fc-custom-wrap" style="margin-top:8px">Your own comment (up to 500 characters, emoji are fine). These words are filled in for each video: {title} {channel} {hashtags}<textarea id="fc-custom" maxlength="500" style="min-height:70px" placeholder="Which one would you try first? 👇"></textarea></label>
+                <div class="mut sm" style="margin-top:8px">Preview: <span id="fc-prev" style="color:var(--fg);white-space:pre-wrap"></span></div>
+                <div class="sm" id="fc-chs" style="margin-top:8px"></div>
+                <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Details. Each comment uses 50 of YouTube's daily units; uploads always go first, comments wait when the units are needed.</span></div></div>
             <div class="card"><div class="ch"><div><h3>How it works</h3></div></div><div class="cb">
               <ol class="mut" style="margin:0;padding-left:18px;line-height:1.9">
                 <li>Add a source channel (or paste one video).</li>
@@ -473,6 +480,11 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="f"><span>Title <span class="mut sm" id="e-mtn" style="font-weight:400"></span></span><input id="e-mt" placeholder="Title"></label>
       <label class="f">Description<textarea id="e-md" style="min-height:160px" placeholder="Description (credit to the original channel is added automatically)"></textarea></label>
       <label class="f"><span>Tags <span class="mut sm" id="e-mgn" style="font-weight:400"></span></span><input id="e-mg" placeholder="comma separated"></label>
+      <div class="kwbox" id="e-fc-box"><div style="font-size:13px;font-weight:500">First comment</div>
+        <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="e-fc-on" checked><i></i></span>Post a first comment under this video</label>
+        <textarea id="e-fc-text" maxlength="500" style="min-height:60px" placeholder="Empty = the comment chosen in My channels. You can use {title} {channel} {hashtags}"></textarea>
+        <div class="mut sm" id="e-fc-note"></div>
+        <div class="row"><button class="btn outline sm" id="e-fc-save">Save comment</button></div></div>
     </div>
     <div class="panel" data-t="thumb">
       <div class="f"><span class="mut sm" style="font-weight:400">Made automatically after every render and sent to YouTube with the video.</span>
@@ -1071,7 +1083,7 @@ async function loadDests(){
   const DL=await api('/api/destinations');const mainD=DL.find(d=>d.is_main);
   const just=window.JUSTCONNECTED&&DL.find(d=>d.id===window.JUSTCONNECTED);
   const banner=just&&DL.length>1?`<div class="alert" style="margin-bottom:10px"><span><b>${esc(just.name)}</b> is connected. What should it do?</span><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-take="${just.id}">Move everything here (switch channel)</button><button class="btn outline sm" id="dl-keep">Keep both — I choose per source</button></div></div>`:'';
-  $('#dest-list').innerHTML=banner+(DL.length?DL.map(d=>`<div class="item" style="flex-wrap:wrap"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx grow"><b>${esc(d.name)}</b> ${d.is_main?'<span class="badge uploaded">Main</span>':''}<span class="mut sm" style="display:block">${d.sources} source${d.sources===1?'':'s'} · ${d.pending} clip${d.pending===1?'':'s'} waiting · ${d.uploaded} uploaded · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}</span></div>
+  $('#dest-list').innerHTML=banner+(DL.length?DL.map(d=>`<div class="item" style="flex-wrap:wrap"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx grow"><b>${esc(d.name)}</b> ${d.is_main?'<span class="badge uploaded">Main</span>':''}<span class="mut sm" style="display:block">${d.sources} source${d.sources===1?'':'s'} · ${d.pending} clip${d.pending===1?'':'s'} waiting · ${d.uploaded} uploaded · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}${d.can_comment===false?' · <a href="/auth/login" title="This channel was connected before comments were added. Connect it once more (same channel) so it can post the first comment under new videos. Uploads are not affected.">reconnect once to allow comments</a>':''}</span></div>
     ${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}
     <div class="row" style="flex-basis:100%;flex-wrap:wrap;gap:6px;margin-top:6px">${!d.is_main?`<button class="btn outline sm" data-main="${d.id}">Make main</button>`:''}${DL.length>1?`<button class="btn outline sm" data-take="${d.id}">Move everything here</button>`:''}<label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label><button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div></div>`).join('')
     +`<details class="sm" style="margin-top:10px"><summary style="cursor:pointer">How do I add or change a channel?</summary><ol class="mut" style="margin:8px 0 0;padding-left:18px;line-height:1.8"><li><b>Add another channel:</b> press “Connect a YouTube channel” and choose the other channel in Google's window. This one stays connected.</li><li><b>Use both:</b> in Sources choose the channel for each source. The <b>Main</b> channel gets everything new.</li><li><b>Switch to the new channel:</b> press “Move everything here” on it — all sources and waiting clips move.</li><li><b>Remove the old channel:</b> press Disconnect on it. Videos already on YouTube are never touched.</li></ol></details>`
@@ -1120,13 +1132,41 @@ async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}c
   if($('#ph-tog'))$('#ph-tog').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:p.on?'off':'on'});loadPhone()},$('#ph-tog'));
   if($('#ph-new'))$('#ph-new').onclick=()=>once(async()=>{if(!confirm('Make a new QR code? The phone that scanned the old one stops getting messages until it scans the new one.'))return;await api('/api/phone','POST',{action:'new'});loadPhone()},$('#ph-new'));
 }
-async function loadFaceSize(){loadReminder();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadFaceSize(){loadReminder();loadComment();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
 async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
   $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
   $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
   const b=$('#rm-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off'}
 function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
 $('#rm-preset').onchange=rmShow;
+let FC=null;
+const fcFill=(t,title,ch,tags)=>String(t||'').split('{title}').join(title).split('{channel}').join(ch).split('{hashtags}').join(tags).trim();
+async function loadComment(){let r;try{r=await api('/api/settings/comment')}catch(e){return}FC=r;
+  $('#fc-on').checked=!!r.on;$('#fc-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own comment…</option>';
+  $('#fc-preset').value=r.preset;$('#fc-custom').value=r.custom||'';fcShow();
+  const b=$('#fc-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
+  $('#fc-chs').innerHTML=r.channels.map(c=>c.can_comment?`<div>✔ <b>${esc(c.name)}</b> can post comments</div>`
+    :`<div class="alert" style="margin-top:6px">${ico('alert')}<span><b>${esc(c.name)}</b>: reconnect the channel once to allow comments (it was connected before comments were added). Uploads are not affected.</span><a class="btn sm" href="/auth/login">Reconnect</a></div>`).join('')}
+function fcShow(){const own=$('#fc-preset').value==='custom';$('#fc-custom-wrap').classList.toggle('hide',!own);
+  const t=own?$('#fc-custom').value:((FC&&FC.presets.find(p=>p.key===$('#fc-preset').value))||{}).text;
+  $('#fc-prev').textContent=fcFill(t,'Street food in Delhi',(FC&&FC.example_channel)||'My channel','#streetfood #delhi')||'—'}
+$('#fc-preset').onchange=fcShow;$('#fc-custom').oninput=fcShow;
+$('#fc-save').onclick=()=>once(async()=>{await api('/api/settings/comment','POST',{on:$('#fc-on').checked,preset:$('#fc-preset').value,custom:$('#fc-custom').value});toast('Saved — videos uploaded from now on get this comment');loadComment()},$('#fc-save'));
+function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
+  $('#e-fc-on').checked=c.comment_on!==false;$('#e-fc-text').value=c.comment_text||'';
+  $('#e-fc-on').disabled=$('#e-fc-text').disabled=done;$('#e-fc-save').classList.toggle('hide',done);
+  let n;
+  if(done)n=`Posted ✔ — <a href="https://youtu.be/${esc(c.youtube_id)}" target="_blank" rel="noopener">open the video</a> and pin it: tap ⋮ next to the comment → Pin. (YouTube does not let apps pin comments.)`;
+  else if(st==='no permission')n='Not posted yet: this channel was connected before comments were added. Reconnect it once (My channels → Connect a YouTube channel → the same channel) — the comment is then posted by itself.';
+  else if(st.startsWith('failed'))n='Not posted: '+esc(st.slice(7).trim())+'. Press Save comment to try once more.';
+  else if(st.startsWith('waiting'))n=st.length>8?'Waiting: '+esc(st.slice(8).trim())+'.':'Waiting — posted within about 10 minutes after the video is public.';
+  else if(st==='posting')n='Posting now…';
+  else if(st==='off'&&c.status==='uploaded')n='No comment for this video. Switch it on and press Save comment to post one now.';
+  else n=c.comment_account_on===false?'First comments are switched off for your account (My channels → First comment).':'Posted after the upload, as soon as the video is public:';
+  if(!done&&c.comment_preview&&c.comment_on!==false&&c.comment_account_on!==false)n+=`<div style="color:var(--fg);white-space:pre-wrap;margin-top:4px">“${esc(c.comment_preview)}”</div>`;
+  if(!done&&c.comment_can===false&&st!=='no permission')n+='<div>This channel must be reconnected once to allow comments (My channels).</div>';
+  $('#e-fc-note').innerHTML=n}
+$('#e-fc-save').onclick=()=>once(async()=>{const id=CUR.id;const c=await api(`/api/clips/${id}/comment`,'POST',{on:$('#e-fc-on').checked,text:$('#e-fc-text').value});if(!sameClip(id))return;Object.assign(CUR,c);fcEditor(CUR);toast('Comment saved')},$('#e-fc-save'));
 $('#rm-save').onclick=()=>once(async()=>{await api('/api/settings/reminder','POST',{on:$('#rm-on').checked,preset:$('#rm-preset').value,custom:$('#rm-custom').value});toast('Saved — new clips use it. Clips that are already made: Clips → “Make all waiting clips again”.');loadReminder()},$('#rm-save'));
 $('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
@@ -1270,7 +1310,7 @@ function fill(c){
   $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
   $('#e-when').value=c.status==='queued'&&c.publish_at&&new Date(c.publish_at)>new Date()?localInput(new Date(c.publish_at)):'';
-  $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');kwFill(c);
+  $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');kwFill(c);fcEditor(c);
   setStatus(c);
 }
 function setStatus(c){
@@ -1336,6 +1376,7 @@ function collect(){
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
     credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
+    comment_on:$('#e-fc-on').checked,comment_text:$('#e-fc-text').value,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
 async function save(){if(!can('clips.edit'))return CUR;const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
@@ -1525,7 +1566,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
-  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
