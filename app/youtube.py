@@ -18,8 +18,11 @@ from .db import Destination, SessionLocal, get_setting, set_setting, main_destin
 
 EMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"  # watch time, traffic sources, countries
+COMMENT_SCOPE = "https://www.googleapis.com/auth/youtube.force-ssl"  # post the first comment under each new video
+# New connections ask for all of these. A stored login keeps the scopes it was made with (a refresh asks for exactly
+# those), so older channels go on uploading; they only skip what needs a newer scope until they are connected again.
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload", "https://www.googleapis.com/auth/youtube.readonly",
-          ANALYTICS_SCOPE] + EMAIL_SCOPES
+          COMMENT_SCOPE, ANALYTICS_SCOPE] + EMAIL_SCOPES
 REDIRECT = f"{BASE_URL}/auth/callback"
 
 if IS_LOCAL:
@@ -88,6 +91,7 @@ def handle_callback(code: str, state: str, channel_limit: int | None = None) -> 
     f = _flow()
     f.fetch_token(code=code)
     creds = f.credentials
+    granted = _granted_scopes(f)
     email = _email_from(creds)
     if email:  # this Google account may later reset the dashboard password
         auth.remember_email(email)
@@ -105,10 +109,44 @@ def handle_callback(code: str, state: str, channel_limit: int | None = None) -> 
                                    f"{have} {'is' if have == 1 else 'are'} already connected. Ask for more channels "
                                    "(My channels → More channels), or disconnect one first.")
             d = Destination(channel_id=cid)
-        d.name, d.token = name, encrypt(creds.to_json())
+        info = json.loads(creds.to_json())
+        if granted:  # what Google really allowed (a box left unticked is missing), not only what was asked for
+            info["scopes"] = granted
+        d.name, d.token = name, encrypt(json.dumps(info))
         s.add(d)
         s.commit()
         return d.id
+
+
+def _granted_scopes(f) -> list | None:
+    try:
+        sc = (f.oauth2session.token or {}).get("scope")
+        sc = sc.split() if isinstance(sc, str) else sc
+        return [str(x) for x in sc] if sc else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def login_scopes(dest_id: int) -> list | None:
+    """The scopes a channel's stored login has (None = not known: a very old login). Nothing is sent to Google."""
+    with SessionLocal() as s:
+        d = s.get(Destination, dest_id)
+        if not d or not d.token:
+            return []
+        try:
+            sc = json.loads(decrypt(d.token)).get("scopes")
+        except Exception:  # noqa: BLE001  (unreadable login: it needs a reconnect anyway)
+            return []
+    if isinstance(sc, str):
+        sc = sc.split()
+    return list(sc) if sc is not None else None
+
+
+def can_comment(dest_id: int) -> bool:
+    """May this channel's login post comments? Logins made before comments were added lack the scope: they keep
+    uploading, and their comments wait until the channel is connected once more."""
+    sc = login_scopes(dest_id)
+    return sc is None or COMMENT_SCOPE in sc
 
 
 def _default_dest_id() -> int | None:
@@ -164,6 +202,13 @@ def analytics_client(dest_id: int):
     if creds.scopes is not None and ANALYTICS_SCOPE not in creds.scopes:
         raise NeedsReconnect()
     return build("youtubeAnalytics", "v2", credentials=creds, cache_discovery=False)
+
+
+def comment_client(dest_id: int):
+    creds = _creds(dest_id)
+    if creds.scopes is not None and COMMENT_SCOPE not in creds.scopes:
+        raise NeedsReconnect()
+    return build("youtube", "v3", credentials=creds, cache_discovery=False)
 
 
 def upload(dest_id: int | None, path: str, title: str, description: str, tags: list[str], publish_at=None) -> str:

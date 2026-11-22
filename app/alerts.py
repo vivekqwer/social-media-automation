@@ -210,6 +210,29 @@ def _clip_items(s) -> list:
                         "text": "The video is on YouTube, but posting it to Instagram / Facebook did not work. "
                                 + reason("; ".join(errs)) + " Check the connection in My channels → Instagram + Facebook.",
                         "actions": [{"do": "open_clip", "id": c.id, "label": "Open clip"}, {"do": "go", "page": "settings", "label": "Open My channels"}]})
+    # first comment under a video: refused for good (comments off, made for kids...), or the login is too old for it
+    no_perm = 0
+    for c in s.query(Clip.id, Clip.title, Clip.project_id, Clip.attempted_at, Clip.comment_state) \
+            .filter(Clip.status == "uploaded", Clip.attempted_at >= since, Clip.removed_at.is_(None),
+                    (Clip.comment_state.like("failed%")) | (Clip.comment_state == "no permission")) \
+            .order_by(Clip.id.desc()).limit(60).all():
+        if c.comment_state == "no permission":
+            no_perm += 1
+            continue
+        out.append({"id": f"comment:{c.id}:{zlib.crc32((c.comment_state or '').encode('utf-8', 'replace')):08x}",
+                    "tab": "broken", "level": "warn", "kind": "comment_failed", "label": "Check", "at": _iso(c.attempted_at),
+                    "title": title(c), "clip_id": c.id,
+                    "text": "The video is on YouTube, but its first comment could not be posted: " + c.comment_state[8:].strip()
+                            + ". Nothing else is affected. You can write a comment yourself in the YouTube app.",
+                    "actions": [{"do": "open_clip", "id": c.id, "label": "Open clip"}]})
+    if no_perm:
+        out.append({"id": f"comment:noperm:{no_perm}", "tab": "broken", "level": "warn", "kind": "comment_permission",
+                    "label": "Check", "at": None, "title": "First comments are waiting for permission",
+                    "text": f"{no_perm} new video{'' if no_perm == 1 else 's'} did not get the first comment because the channel "
+                            "was connected before comments were added. Reconnect the channel once to allow comments: My channels "
+                            "→ Connect a YouTube channel → choose the same channel and tick every box. The waiting comments "
+                            "are then posted by themselves.",
+                    "actions": [{"do": "go", "page": "settings", "label": "Open My channels"}]})
     week = utcnow() - timedelta(days=7)
     for p in s.query(Project.id, Project.title, Project.quick, Project.created_at) \
             .filter(Project.created_at >= week, Project.quick.isnot(None)).order_by(Project.id.desc()).limit(80).all():

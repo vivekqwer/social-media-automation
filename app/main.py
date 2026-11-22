@@ -827,6 +827,8 @@ class ClipUpdate(BaseModel):
     voice_fit: Literal["", "speed"] | None = None
     frame_title: bool | None = None
     cta_on: bool | None = None
+    comment_on: bool | None = None
+    comment_text: str | None = Field(None, max_length=500)
 
 
 class TtsIn(BaseModel):
@@ -981,7 +983,18 @@ def create_clip(pid: int, body: ClipIn):
 def get_clip(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        return _clip_card(c, {c.project_id: s.get(Project, c.project_id)}, full=True)
+        out = _clip_card(c, {c.project_id: s.get(Project, c.project_id)}, full=True)
+        try:  # the first comment exactly as it would be posted (placeholders filled in), and whether it can be
+            from . import comments
+
+            d = s.get(Destination, c.destination_id) if c.destination_id else main_destination(s)
+            cfg = comments.settings()
+            out["comment_preview"] = comments.text_for(c, d.name if d else "", cfg)
+            out["comment_account_on"] = cfg["on"]
+            out["comment_can"] = youtube.can_comment(d.id) if d else None
+        except Exception:  # noqa: BLE001
+            pass
+        return out
 
 
 def _render_sig(c: Clip) -> tuple:
@@ -1007,6 +1020,10 @@ def update_clip(cid: int, body: ClipUpdate):
             raise HTTPException(409, f"Clip is {c.status}; wait or create a new clip.")
         before = _render_sig(c)
         for k, v in body.model_dump(exclude_unset=True).items():
+            if k == "comment_text":
+                from .comments import clean as clean_comment
+
+                v = clean_comment(v) or None
             if getattr(c, k) != v:
                 mark_hand_edit(c, k, v)  # title/description/tags changed by hand: the keyword helper leaves them alone
                 setattr(c, k, v)
@@ -1378,6 +1395,7 @@ def _dest_dict(d: Destination) -> dict:
     except TokenError:
         out["needs_reconnect"] = True  # stored login unreadable (e.g. key changed): press Connect again
     out["face"] = "own" if faces.face_path(d.id).exists() else ("default" if faces.DEFAULT_FACE.exists() else None)
+    out["can_comment"] = youtube.can_comment(d.id)  # login made before comments were added: reconnect once
     return out
 
 
@@ -1666,7 +1684,8 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
-            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on")}, status="draft")
+            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on", "comment_on",
+            "comment_text")}, status="draft")
         s.add(new)
         s.commit()
         c.reuploaded_as = new.id
@@ -2003,6 +2022,68 @@ def reminder_set(body: ReminderIn):
         if len(custom) < 3:
             raise HTTPException(400, "Type a few plain words (letters only — emoji and symbols cannot be shown on the video).")
     return reminder.save(body.on, body.preset, custom)
+
+
+class CommentIn(BaseModel):
+    on: bool = True
+    preset: str = Field("ask", max_length=20)
+    custom: str = Field("", max_length=2000)
+
+
+def _comment_settings() -> dict:
+    """The account's first-comment choice + which channels' logins allow comments."""
+    from . import comments
+
+    out = comments.settings()
+    with SessionLocal() as s:
+        out["channels"] = [{"id": d.id, "name": d.name, "can_comment": youtube.can_comment(d.id)}
+                           for d in s.query(Destination).order_by(Destination.id)]
+        main = main_destination(s)
+        out["example_channel"] = main.name if main else "My channel"
+    return out
+
+
+@app.get("/api/settings/comment")
+def comment_get():
+    """First comment under every new video: on/off, the words, and which channels may comment."""
+    return _comment_settings()
+
+
+@app.post("/api/settings/comment")
+def comment_set(body: CommentIn):
+    from . import comments
+
+    if body.preset != "custom" and body.preset not in dict(comments.PRESETS):
+        raise HTTPException(400, "Choose one of the comments in the list.")
+    custom = comments.clean(body.custom)
+    if body.preset == "custom":
+        if len(body.custom.strip()) > comments.MAX_LEN:
+            raise HTTPException(400, f"Keep it shorter: at most {comments.MAX_LEN} characters.")
+        if len(custom) < 2:
+            raise HTTPException(400, "Type the comment first.")
+    comments.save(body.on, body.preset, custom)
+    return _comment_settings()
+
+
+class ClipCommentIn(BaseModel):
+    on: bool | None = None
+    text: str | None = Field(None, max_length=2000)
+
+
+@app.post("/api/clips/{cid}/comment")
+def clip_comment(cid: int, body: ClipCommentIn):
+    """One clip's first comment: on/off and its own words. Works after the upload too, until the comment is posted."""
+    from . import comments
+
+    if body.text is not None and len(body.text.strip()) > comments.MAX_LEN:
+        raise HTTPException(400, f"Keep it shorter: at most {comments.MAX_LEN} characters.")
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if c.comment_id:
+            raise HTTPException(409, "The comment is already on YouTube. To change it, edit it on YouTube itself.")
+        comments.set_for_clip(c, body.on, body.text)
+        s.commit()
+        return get_clip(cid)
 
 
 class PhoneIn(BaseModel):
