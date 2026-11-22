@@ -1,4 +1,5 @@
 import logging
+import time
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -126,7 +127,7 @@ def cleanup_disk():
         if not d.is_dir() or not d.name.isdigit():
             continue
         c = clips.get(int(d.name))
-        age_h = (now.timestamp() - d.stat().st_mtime) / 3600
+        age_h = (time.time() - d.stat().st_mtime) / 3600  # real clock: a naive UTC datetime's .timestamp() reads as local time
         if c is None:
             if age_h > 2:  # clip discarded: remove its folder
                 shutil.rmtree(d, ignore_errors=True)
@@ -139,11 +140,20 @@ def cleanup_disk():
             shutil.rmtree(src, ignore_errors=True)  # the video is on YouTube; keep out.mp4 + thumbnail only
             (d / "body.mp4").unlink(missing_ok=True)
             continue
+        if (c.status == "queued" and c.output_path and Path(c.output_path).exists() and c.thumb_path
+                and Path(c.thumb_path).exists() and age_h > 1 and not mine.exists() and not (src / "reel.mp4").exists()):
+            # ready and waiting for its upload: only the finished video and thumbnail are needed. The downloaded part
+            # can be fetched again by itself if the clip is ever edited; this keeps a big queue inside the server disk
+            for f in (src.iterdir() if src.exists() else []):
+                f.unlink(missing_ok=True)
+            if (d / "out.mp4").exists():
+                (d / "body.mp4").unlink(missing_ok=True)
+            continue
         keep = f"src_{int(c.start or 0)}_{int(c.end or 0) + 1}.mp4"
         if src.exists():
             for f in src.iterdir():
-                stale = (now.timestamp() - f.stat().st_mtime) / 3600 > 24
-                if f.name not in (keep, "upload.mp4") and (stale or not f.name.endswith(".part")):
+                stale = (time.time() - f.stat().st_mtime) / 3600 > 24
+                if f.name not in (keep, "upload.mp4", "reel.mp4") and (stale or not f.name.endswith(".part")):
                     if f.name.endswith(".part") and not stale:
                         continue
                     f.unlink(missing_ok=True)  # an old trim, a partial download or a whole-video leftover

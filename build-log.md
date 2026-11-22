@@ -316,3 +316,4 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - **Deleted video**: "Upload again" and "Remove" / "Show it again" on the clip and in the Alerts tab, always in sync (`Clip.reuploaded_as`, `Clip.removed_at`); a second copy is refused; copyright removals cannot be uploaded again; removed clips leave the lists and the "uploaded" count; "blocked in some countries" is still live (no Remove).
 - Disk free space in /api/overview (for big batches).
 - Tests: 780 pass; 3 known stale expectations remain (test_mailnotify, test_trend3 x2).
+- Disk: the Railway volume is 4.8 GB. A queued, rendered clip now keeps only out.mp4 + thumbnail (the downloaded part and body.mp4 are removed after an hour; re-fetched by itself if the clip is edited), so ~200 queued clips fit. Fixed: the clean-up's age used a naive-UTC .timestamp() (wrong outside UTC), and it deleted helper-made reel.mp4 sources.
