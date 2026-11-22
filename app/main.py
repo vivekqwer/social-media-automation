@@ -2325,6 +2325,27 @@ def face_size_set(body: FaceSizeIn):
     return {"size": body.size}
 
 
+class QueueCapIn(BaseModel):
+    cap: int = Field(ge=10, le=300)
+
+
+@app.get("/api/settings/queue-cap")
+def queue_cap_get():
+    from . import autopilot
+
+    return {"cap": autopilot.queue_cap(), "usual": autopilot.MAX_QUEUED_PER_DEST, "range": list(autopilot.QUEUE_CAP_RANGE)}
+
+
+@app.post("/api/settings/queue-cap")
+def queue_cap_set(body: QueueCapIn):
+    """How many clips may wait for one YouTube channel before the sources pause (usually 30). Raising it makes a large
+    batch at once; the sources also wait while the server's disk is almost full."""
+    from . import autopilot
+
+    set_setting("queue_cap", str(body.cap))
+    return {"cap": autopilot.queue_cap()}
+
+
 class ReminderIn(BaseModel):
     on: bool = True
     preset: str = Field("share", max_length=20)

@@ -16,7 +16,32 @@ from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
 from .render import run_render
 
-MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog
+MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog (the usual number; see queue_cap)
+QUEUE_CAP_RANGE = (10, 300)
+MIN_FREE_GB = 0.7  # the sources wait while the server's disk has less free space than this
+
+
+def queue_cap() -> int:
+    """How many clips may wait for one YouTube channel before the sources pause. The usual number is 30; the account's
+    setting "queue_cap" raises or lowers it (e.g. 200 to make a whole batch at once)."""
+    from .db import get_setting
+
+    try:
+        n = int(get_setting("queue_cap") or 0)
+    except (TypeError, ValueError):
+        n = 0
+    return min(max(n, QUEUE_CAP_RANGE[0]), QUEUE_CAP_RANGE[1]) if n else MAX_QUEUED_PER_DEST
+
+
+def disk_free_gb() -> float | None:
+    import shutil
+
+    from .config import BASE_DATA_DIR
+
+    try:
+        return shutil.disk_usage(BASE_DATA_DIR).free / 1e9
+    except OSError:
+        return None
 # clips that already own a publish time (incl. ones still waiting for the helper PC or rendering)
 HOLDS_SLOT = ["fetching", "rendering", "draft", "rendered", "queued", "uploading", "uploaded"]
 
@@ -272,8 +297,14 @@ def run_channel(channel_id: int):
                 s.commit()
             backlog = s.query(Clip).filter(Clip.destination_id == ch.destination_id,
                                            Clip.status.in_(["queued", "fetching", "rendering"])).count()
-            if backlog >= MAX_QUEUED_PER_DEST:
+            if backlog >= queue_cap():
                 ch.last_status = f"paused: {backlog} clips already queued"
+                ch.last_run = utcnow()
+                s.commit()
+                return
+            free = disk_free_gb()
+            if free is not None and free < MIN_FREE_GB:  # a large waiting list must never fill the disk
+                ch.last_status = f"paused: the server's disk is almost full ({free:.1f} GB free) - new clips wait until uploads free some space"
                 ch.last_run = utcnow()
                 s.commit()
                 return

@@ -206,7 +206,7 @@ def _per_run(ch, vpr=None) -> int:
 def _why_not_more(s, ch, sources) -> str:
     """'' when a source may make one more video per run, else the reason in plain words."""
     from . import acl
-    from .autopilot import MAX_QUEUED_PER_DEST
+    from .autopilot import queue_cap
 
     blocked = acl.source_block(ch.kind, bool(ch.auto_scripts))
     if blocked:
@@ -218,7 +218,7 @@ def _why_not_more(s, ch, sources) -> str:
             return f"your account's limit of {cap} clips a day"
     waiting = s.query(Clip).filter(Clip.destination_id == ch.destination_id,
                                    Clip.status.in_(["queued", "fetching", "rendering"])).count()
-    if waiting >= int(MAX_QUEUED_PER_DEST * 0.8):
+    if waiting >= int(queue_cap() * 0.8):
         return f"{waiting} clips are already waiting to go up on that channel"
     return ""
 
