@@ -416,3 +416,10 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Found: 4 of the 8 channel sources said "no new videos" — a source only looked at the newest videos_per_run×4 (20) uploads. app/youtube.py `api_list_video_ids` pages through the uploads; app/autopilot.py: when the newest are all used, the source goes back through up to 300 older uploads ("nothing new: taking older videos of this channel").
 - Test: test_older_videos.py 7/7; test_queue_cap 10, test_channels 18, test_multi 5, test_noncc 4.
 - Not done: the helper PC is the bottleneck (one clip in 4–9 minutes); more agents cannot speed it up.
+
+## 2026-11-23 — Task 67: clips go to YouTube ahead of time (owner's request: "upload the coming ones too")
+- Why: YouTube allows about 5 uploads a day through the API (10,000 units; one upload + thumbnail = 1,650). Until now a clip was sent 48 hours before its publish time, so 200 clips stayed on the server for months.
+- app/quota.py `upload_lead_hours()`: account setting "upload_lead_days" (2–400; empty = the usual 2 days). Used by scheduler.process_queue, comments (quota kept for uploads) and metadata.freshen_due (which now looks only at the next clips to go up). Routes: GET /api/settings/upload-lead, POST /api/admin/upload-lead (Super Admin only). No dashboard control yet.
+- With a large number the server sends everything that waits, earliest publish time first, up to the daily budget; YouTube keeps each video private until its own day and publishes it by itself.
+- Limit to remember: a clip that is on YouTube cannot be re-made (only title/description can change in YouTube Studio).
+- Tests: test_upload_lead.py 14/14; test_acl_bg 38, test_comments 86, test_keywords 76, test_acl 65, test_security 18, test_multi 5, test_queue_cap 10, test_older_videos 7, test_gone, test_alerts_board, test_acl_routes 19 — no failures.
