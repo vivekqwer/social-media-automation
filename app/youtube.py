@@ -240,6 +240,32 @@ def video_status(dest_id: int, ids: list[str]) -> dict:
     return out
 
 
+KEEP_STATUS = ("embeddable", "license", "publicStatsViewable", "selfDeclaredMadeForKids", "containsSyntheticMedia")
+
+
+def keep_private(dest_id: int, video_id: str) -> str:
+    """Set one of my videos to private with NO publish time (videos.update, part=status; 1 + 50 quota units), so a video
+    that was uploaded early and scheduled never goes public by itself. Nothing is deleted. Returns what it was before
+    ("private" / "unlisted" / "public"). An update replaces the whole status part, so the other status settings of the
+    video are read first and sent back unchanged; leaving publishAt out is what clears the schedule.
+    Needs the wider login (youtube.force-ssl): a channel connected before comments were added raises NeedsReconnect."""
+    yt = comment_client(dest_id)
+    r = yt.videos().list(part="status", id=video_id, maxResults=1).execute()
+    quota.spend("read")
+    items = r.get("items") or []
+    if not items:
+        raise LookupError("The video is no longer on YouTube.")
+    old = items[0].get("status") or {}
+    was = str(old.get("privacyStatus") or "")
+    if was == "private" and not old.get("publishAt"):
+        return was  # already private with no publish time: nothing to change, no quota used
+    status = {k: old[k] for k in KEEP_STATUS if k in old}
+    status["privacyStatus"] = "private"
+    quota.spend("update")
+    yt.videos().update(part="status", body={"id": video_id, "status": status}).execute()
+    return was
+
+
 def _email_from(creds) -> str | None:
     """Verified e-mail of the signed-in Google account, from the OpenID id_token."""
     try:

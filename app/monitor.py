@@ -128,4 +128,16 @@ def check_uploads() -> dict:
                 c.yt_state, c.yt_checked_at = state, utcnow()
                 checked += 1
             s.commit()
+    try:  # a strike-like state: protect the channel at once (never-use list, held clips, scheduled videos kept private)
+        from . import strikes
+
+        strikes.watch()
+    except Exception as e:  # noqa: BLE001  (the check itself is done; this is written down and tried again by its own job)
+        log.warning("monitor: strike responder: %s", str(e)[:200])
+        try:
+            from .guide import record_error
+
+            record_error("Strike responder (after checking my videos)", e)
+        except Exception:  # noqa: BLE001
+            pass
     return {"checked": checked, "new_alerts": new}

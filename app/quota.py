@@ -42,7 +42,7 @@ SessionLocal = _BudgetSession()
 
 PT = ZoneInfo("America/Los_Angeles")
 DAILY_UNITS = int(os.getenv("YT_DAILY_QUOTA") or "10000")
-COST = {"upload": 1600, "thumbnail": 50, "search": 100, "read": 1, "comment": 50}
+COST = {"upload": 1600, "thumbnail": 50, "search": 100, "read": 1, "comment": 50, "update": 50}
 UPLOAD_COST = COST["upload"] + COST["thumbnail"]
 RESERVE = 400  # kept free for the video monitor, lookups and topic searches
 

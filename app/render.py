@@ -353,16 +353,17 @@ def run_render(clip_id: int):
     """Background job: policy check -> render -> update status."""
     with SessionLocal() as s:
         clip = s.get(Clip, clip_id)
-        if not clip:
-            return  # discarded meanwhile
+        if not clip or clip.status == "held":
+            return  # discarded meanwhile, or held after a strike from its creator (see strikes.py)
         project = s.get(Project, clip.project_id)
         errs = check_edit(project, clip)
         if errs:
             clip.status, clip.error = "failed", "; ".join(errs)
             s.commit()
             return
-        # claim the clip: never re-render one that is being uploaded or is already on YouTube
-        res = s.execute(update(Clip).where(Clip.id == clip_id, Clip.status.notin_(["uploading", "uploaded"]))
+        # claim the clip: never re-render one that is being uploaded or is already on YouTube, and never one that is
+        # held after a strike from its creator (a finished render would put it back in the upload queue)
+        res = s.execute(update(Clip).where(Clip.id == clip_id, Clip.status.notin_(["uploading", "uploaded", "held"]))
                         .values(status="rendering", error=None))
         s.commit()
         if res.rowcount != 1:

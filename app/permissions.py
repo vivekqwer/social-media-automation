@@ -102,11 +102,14 @@ def refresh_inbox() -> list[dict]:
         _note("Permission inbox: reading trending videos", e)
     candidates += [{**v, "channel_id": v["channel_url"].rsplit("/", 1)[-1]} for v in overview().get("outliers", [])]
     new = []
+    from . import strikes
+
+    struck = strikes.blocked()  # creators a strike came from are never asked again
     for v in candidates:
         cid = v.get("channel_id") or ""
         if len(added) + len(new) >= PER_DAY:
             break
-        if not cid or cid in d or youtube.RISKY.search(v.get("title", "")) or LABELS.search(v.get("channel", "")):
+        if not cid or cid in d or cid in struck or youtube.RISKY.search(v.get("title", "")) or LABELS.search(v.get("channel", "")):
             continue
         d[cid] = {"channel_id": cid, "name": v.get("channel", ""), "url": f"https://www.youtube.com/channel/{cid}",
                   "video_id": v["video_id"], "video_title": v.get("title", ""), "views": v.get("views", 0),
@@ -390,8 +393,10 @@ def grant(cid: str, proof: str) -> dict:
     if cid not in d:
         raise KeyError(cid)
     c = d[cid]
-    from . import acl
+    from . import acl, strikes
 
+    if strikes.is_blocked(cid) or strikes.is_blocked(c.get("url")):  # a strike came from them: no source for their videos
+        raise ValueError(strikes.blocked_message(c.get("name") or ""))
     if not acl.allowed("source.channel"):  # a yes becomes a channel source: that kind must be allowed for the account
         raise ValueError(acl.message("source.channel"))
     with SessionLocal() as s:
