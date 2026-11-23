@@ -227,6 +227,7 @@ ROUTES = [
     ("POST", "/api/strikes/{sid}/send", "gmail.send", "Sent a request to a creator to retract a complaint"),
     ("POST", "/api/strikes/{sid}/solved", "page.alerts", "Marked a strike case as solved"),
     ("POST", "/api/strikes/{sid}/release", "sources.edit", "Allowed a creator again after a strike"),
+    ("POST", "/api/strikes/{sid}/block", "sources.edit", "Stopped using a creator after a strike"),
     ("POST", "/api/strikes/{sid}/hide-public", "channels.pause", "Set a struck creator's other videos to private"),
     ("GET", "/api/destinations", "page.settings", None),
     ("GET", "/api/backup", "page.settings", None),  # Backup & restore (My channels): only ever this account's own copy

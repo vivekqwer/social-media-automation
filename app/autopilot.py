@@ -304,7 +304,7 @@ def run_channel(channel_id: int):
             from . import strikes
 
             if not topic and ch.mode != "own" and (strikes.is_blocked(ch.resolved_url) or strikes.is_blocked(ch.query)):
-                # a strike came from this creator: the source stops for good (Alerts → Strikes can allow them again)
+                # this creator is on the never-use list after a strike: the source stops for good (Alerts → Strikes can allow them again)
                 ch.auto, ch.last_run = False, utcnow()
                 ch.last_status = f"stopped: {ch.name or 'this creator'} {strikes.BLOCKED_SKIP}"
                 s.commit()

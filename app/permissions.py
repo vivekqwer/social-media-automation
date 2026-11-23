@@ -104,7 +104,7 @@ def refresh_inbox() -> list[dict]:
     new = []
     from . import strikes
 
-    struck = strikes.blocked()  # creators a strike came from are never asked again
+    struck = strikes.blocked()  # creators on the never-use list after a strike are never asked again
     for v in candidates:
         cid = v.get("channel_id") or ""
         if len(added) + len(new) >= PER_DAY:
@@ -395,7 +395,7 @@ def grant(cid: str, proof: str) -> dict:
     c = d[cid]
     from . import acl, strikes
 
-    if strikes.is_blocked(cid) or strikes.is_blocked(c.get("url")):  # a strike came from them: no source for their videos
+    if strikes.is_blocked(cid) or strikes.is_blocked(c.get("url")):  # on the never-use list after a strike: no source for their videos
         raise ValueError(strikes.blocked_message(c.get("name") or ""))
     if not acl.allowed("source.channel"):  # a yes becomes a channel source: that kind must be allowed for the account
         raise ValueError(acl.message("source.channel"))

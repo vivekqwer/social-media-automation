@@ -1088,7 +1088,7 @@ def create_project(body: ProjectIn):
                                   "title": info["title"], "channel": info["channel"]})
     from . import strikes
 
-    if strikes.is_blocked(info.get("channel_url")):  # a strike came from this creator: not by hand either
+    if strikes.is_blocked(info.get("channel_url")):  # on the never-use list after a strike: not by hand either
         raise HTTPException(409, strikes.blocked_message(info.get("channel") or ""))
     with SessionLocal() as s:
         p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note, **info)
@@ -1401,8 +1401,8 @@ def render(cid: int):
     return {"status": "rendering"}
 
 
-HELD_MSG = ("This clip is held: a strike came from the creator of its video, so it cannot be made or uploaded. Nothing was "
-            "deleted. Alerts → Strikes shows the case; “Use this creator again” there gives the clip back.")
+HELD_MSG = ("This clip is held: the creator of its video is on the never-use list after a strike on your channel, so it "
+            "cannot be made or uploaded. Nothing was deleted. Alerts → Strikes shows the case; “Use this creator again” there gives the clip back.")
 
 
 def _not_held(c: Clip):
@@ -2519,6 +2519,15 @@ def strike_release(sid: int):
     from . import strikes
 
     return _strike_call(strikes.release, sid)
+
+
+@app.post("/api/strikes/{sid}/block")
+def strike_block(sid: int):
+    """Stop using this creator (offered for every case with a creator; a copyright strike does it by itself): never-use
+    list, their source stopped, their waiting clips held, their scheduled videos kept private."""
+    from . import strikes
+
+    return _strike_call(strikes.block_creator, sid)
 
 
 @app.post("/api/strikes/{sid}/hide-public")
@@ -3899,7 +3908,7 @@ def quick_start(body: QuickIn):
                                   "title": info["title"], "channel": info["channel"]})
     from . import strikes
 
-    if strikes.is_blocked(info.get("channel_url")):  # a strike came from this creator: no quick upload either
+    if strikes.is_blocked(info.get("channel_url")):  # on the never-use list after a strike: no quick upload either
         raise HTTPException(409, strikes.blocked_message(info.get("channel") or ""))
     if body.mode == "permission":
         _check_permission_note(body.permission_note)

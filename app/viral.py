@@ -173,7 +173,7 @@ def pick_today(extra: str | None = None) -> list:
     cands = sorted(board.values(), key=lambda r: (r.get("gain", 0), r["views"]), reverse=True)
     from . import strikes
 
-    struck = strikes.blocked()  # creators a strike came from: never picked, never asked again
+    struck = strikes.blocked()  # creators on the never-use list after a strike: never picked, never asked again
     if extra and any(r["video_id"] == extra and r.get("channel_id") in struck for r in cands):
         raise ValueError(strikes.blocked_message())
     cands = [r for r in cands if r.get("channel_id") not in struck]

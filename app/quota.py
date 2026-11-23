@@ -129,6 +129,14 @@ def can_comment(uploads_waiting: int = 0) -> bool:
     return left - need >= COST["comment"] + 5 * COST["read"]
 
 
+def can_update(uploads_waiting: int = 0) -> bool:
+    """One videos.update (keeping a video private after a strike: 50 units + a read) fits in what is left today after
+    every upload that is waiting (as many as fit at all) and half the reserve — the same rule as can_comment."""
+    left = DAILY_UNITS - used() - RESERVE // 2
+    need = min(max(0, int(uploads_waiting)), max(0, left // UPLOAD_COST)) * UPLOAD_COST
+    return left - need >= COST["update"] + COST["read"]
+
+
 SEARCH_BUDGET = 400  # topic searches may use at most this much a day, so uploads keep their budget
 
 

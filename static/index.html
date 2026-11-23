@@ -884,7 +884,7 @@ let ALTAB='all',ALB=null,ALSHOW=[];
 const ALTABS=[['all','All'],['deleted','Deleted'],['strikes','Strikes & copyright'],['broken','Not working'],['system','System errors']];
 const ALHINT={all:'Everything in one list: what is wrong right now first, then the history, newest first.',
   deleted:'Videos that are gone from YouTube — deleted by you, or by YouTube without a copyright reason.',
-  strikes:'Videos YouTube rejected, blocked or claimed, channels whose uploads were paused because of it, and each strike case: what the system did by itself and what is left for you. YouTube does not let apps see strikes or answer them — the words for YouTube are prepared here and you paste them in YouTube Studio.',
+  strikes:'Videos YouTube rejected, blocked or claimed, channels whose uploads were paused because of it, and each strike case: what the system did by itself and what is left for you. Only YouTube’s own status of a video makes the system act — a mail alone never does. YouTube does not let apps see strikes or answer them — the words for YouTube are prepared here and you paste them in YouTube Studio.',
   broken:'Things that are not working right now. Each one disappears by itself when it is fixed.',
   system:'Unexpected problems on the server or in a background job. The system carries on by itself; they are kept here so they can be sent to the person who looks after it.'};
 const ALEMPTY={all:['No problems found','Everything is working and your uploaded videos are fine on YouTube.'],deleted:['No deleted videos','None of your uploaded videos has disappeared from YouTube.'],
@@ -902,7 +902,8 @@ function stCard(a,n){const c=a.case||{},m=c.mail,y=c.youtube||{},r=c.reply,fresh
   const b=(k,label,cls='outline',icon='')=>`<button class="btn ${cls} sm" data-st="${k}" data-n="${n}">${icon?ico(icon):''}${esc(label)}</button>`;
   let mail='';
   if(m){const st=m.state==='sent'?`<b>Sent</b> to ${esc(m.to)} on ${when(m.sent_at)}${m.sent_by==='auto'?' (by itself)':''}. It is never sent twice.`
-      :m.state==='ready'?`<b>Waiting for you</b> — ready to go to ${esc(m.to)}${m.to_from?' (address from '+esc(m.to_from)+')':''}.`
+      :m.state==='ready'?(m.auto?`<b>Waiting for you</b> — ready to go to ${esc(m.to)}${m.to_from?' (address from '+esc(m.to_from)+')':''}.`
+        :`<b>Ready — send it by hand.</b> Address: ${esc(m.to)}${m.to_from?' — from '+esc(m.to_from):''}. Check that it is really the creator’s, then press Send. It never goes out by itself.`)
       :m.state==='no_email'?'<b>No e-mail found</b> — send it yourself (Copy the request), or paste the creator’s address here and press Send:'
       :m.state==='sending'?'Being sent right now…'
       :`<b>Sending did not finish.</b> ${esc(m.error||'')} Look in Gmail’s Sent folder; if it is not there, press Send again.`;
@@ -922,7 +923,7 @@ function stCard(a,n){const c=a.case||{},m=c.mail,y=c.youtube||{},r=c.reply,fresh
   const acts=(m&&m.can_send?b('send','Send the request now','','inbox'):'')+(m?b('copymail','Copy the request'):'')+(y.text?b('copyyt','Copy the text for YouTube'):'')
     +(/^https:\/\/studio\.youtube\.com\//.test(y.studio_url||'')?`<a class="btn outline sm" target="_blank" rel="noopener" href="${esc(y.studio_url)}">${ico('youtube')}Open YouTube Studio</a>`:'')
     +(c.paused&&c.dest_id?b('resume','Resume uploads'):'')+((c.public_others||[]).length?b('hide','Make their other videos private'):'')
-    +(c.blocked?b('release','Use this creator again','ghost'):'')+(c.status!=='solved'?b('solve','Mark as solved','outline','check'):'')
+    +(c.can_block?b('block','Stop using this creator'):'')+(c.blocked?b('release','Use this creator again','ghost'):'')+(c.status!=='solved'?b('solve','Mark as solved','outline','check'):'')
     +(a.actions||[]).map((x,i)=>x.do==='dismiss'?`<button class="btn ghost sm" data-alact="${n}:${i}" data-alact-do="dismiss">${esc(x.label||'Dismiss')}</button>`:'').join('');
   return `<div class="card" style="margin-bottom:12px${fresh?';border-color:var(--'+(a.level==='bad'?'bad':'warn')+')':''}${a.seen&&c.status==='solved'?';opacity:.82':''}"><div class="cb" style="min-width:0">
       <div class="row" style="justify-content:space-between"><div class="row" style="min-width:0"><span class="badge ${ALCLS[a.level]||'outline'}">${esc(a.label||'')}</span>${fresh?'<span class="badge failed">new</span>':''}<b style="word-break:break-word">${esc(a.title||'')}</b></div><span class="mut sm">${when(c.at)}</span></div>
@@ -934,7 +935,7 @@ function stCard(a,n){const c=a.case||{},m=c.mail,y=c.youtube||{},r=c.reply,fresh
         ${row('Original video',yturl(c.source_url)?`<a href="${esc(c.source_url)}" target="_blank" rel="noopener">${esc(c.source_title||c.source_url)}</a>`:esc(c.source_title||''))}
         ${row('Who complained (from YouTube’s mail)',esc(c.claimant||''))}
       </div>
-      <div class="stbox"><div class="mut sm">What the system already did</div><ul>${li((c.done||[]).length?c.done:['Recorded the case. Nothing else was needed.'])}</ul></div>
+      <div class="stbox"><div class="mut sm">What the system already did</div><ul>${li((c.done||[]).length?c.done:[c.confirmed?'Recorded the case. Nothing else was needed.':'Nothing — only YouTube’s own status of the video makes the system act, and it does not show a removal (yet).'])}</ul></div>
       ${mail}${reply}${yt}${notices}${others}
       <div class="stbox" style="border-color:var(--${c.status==='open'?'warn':'border'})"><div class="mut sm">What is left for you</div><ul>${li((c.left||[]).length?c.left:['Nothing right now.'])}</ul></div>
       <div class="row" style="margin-top:12px;flex-wrap:wrap">${acts}</div>
@@ -950,6 +951,8 @@ async function stAct(btn){const a=ALSHOW[+btn.dataset.n],c=a&&a.case,k=btn.datas
   else if(k==='resume'){if(!confirm('Resume uploads to this channel? Only do this if the strike is dealt with.'))return;await api(`/api/destinations/${Number(c.dest_id)}/resume`,'POST');toast('Uploads resumed')}
   else if(k==='hide'){const n=(c.public_others||[]).length;if(!confirm(`Set ${n} other video${n===1?'':'s'} from this creator to Private on YouTube? Nothing is deleted — you can make them public again in YouTube Studio.`))return;
     const r=await api(`/api/strikes/${id}/hide-public`,'POST');toast(r.failed?`${r.done} set to private, ${r.failed} could not be changed — see the card`:`${r.done} video${r.done===1?'':'s'} set to private`,!!r.failed)}
+  else if(k==='block'){if(!confirm(`Stop using ${c.creator||'this creator'}? They go on the never-use list, their source stops, their waiting clips are held and their scheduled videos are kept private. Nothing is deleted; “Use this creator again” undoes it.`))return;
+    const r=await api(`/api/strikes/${id}/block`,'POST');toast(`Stopped — ${r.held} clip${r.held===1?'':'s'} held, ${r.private} video${r.private===1?'':'s'} kept private`)}
   else if(k==='release'){if(!confirm('Use this creator again? They come off the never-use list and the held clips go back to Clips for your review. Do this only if the complaint was a mistake or is settled.'))return;
     const r=await api(`/api/strikes/${id}/release`,'POST');toast(`Allowed again — ${r.released} clip${r.released===1?'':'s'} back in Clips. Start their source on the Sources page if you want it to run.`)}
   else if(k==='solve'){await api(`/api/strikes/${id}/solved`,'POST');toast('Marked as solved — it stays here as history')}
@@ -990,7 +993,7 @@ function renderAlerts(){
   $$('[data-st]',$('#al-list')).forEach(btn=>btn.onclick=()=>once(()=>stAct(btn),btn));
   const sr=d.strike_reply,box=$('#al-strike-set');box.classList.toggle('hide',!(sr&&ALTAB==='strikes'));
   if(sr){const sw=$('#st-auto');sw.checked=!!sr.auto;sw.disabled=!sr.allowed&&!sr.auto;
-    $('#st-auto-hint').textContent='After a copyright complaint the system writes a short, sincere mail asking the creator to take it back. On: it goes out by itself from your Gmail — once per video, never twice, at most '+Number(sr.per_day)+' a day. Off: it waits here until you press “Send the request now”. YouTube itself cannot be answered automatically: the words for YouTube are prepared in each case and you paste them in YouTube Studio.'
+    $('#st-auto-hint').textContent='After a copyright complaint the system writes a short, sincere mail asking the creator to take it back. On: it goes out by itself from your Gmail — only when YouTube itself shows the video removed and the address is the one YouTube’s own notice gives for that creator; once per video, never twice, at most '+Number(sr.per_day)+' a day. Every other address waits for your Send. Off: everything waits here until you press “Send the request now”. YouTube itself cannot be answered automatically: the words for YouTube are prepared in each case and you paste them in YouTube Studio.'
       +(sr.allowed?(sr.gmail?' Mails go out from '+sr.gmail+'.':' Gmail is not connected yet (My channels → Gmail), so nothing can be sent.'):' '+(sr.note||''))}
 }
 $('#st-auto').onchange=()=>{const sw=$('#st-auto'),want=sw.checked;once(async()=>{try{const r=await api('/api/settings/strike-reply','POST',{auto:want});if(ALB)ALB.strike_reply=r;toast(r.auto?'On — ready requests go out by themselves (within about 15 minutes)':'Off — requests wait until you press Send');renderAlerts()}catch(e){sw.checked=!want;throw e}})};
