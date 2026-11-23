@@ -3492,7 +3492,7 @@ def worker_jobs(request: Request):
                 Channel.kind == "reel", Channel.auto_scripts.is_(True)).count() > 0
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(20):
-            if len(jobs) >= 2 or not free(c.job_lease):
+            if len(jobs) >= HELPER_DOWNLOADS or not free(c.job_lease):
                 continue
             if (c.fetch_tries or 0) >= MAX_JOB_TRIES:
                 c.status, c.job_lease = "failed", None
@@ -3617,6 +3617,7 @@ def worker_captions(cid: int, body: CaptionsIn, request: Request):
     return {"ok": True, "lines": len(cues)}
 
 
+HELPER_DOWNLOADS = 3  # video downloads handed to a helper in one go (it runs them side by side)
 JOB_LEASE = timedelta(minutes=40)  # a helper that took a job gets this long before another may take it
 MAX_JOB_TRIES = 3
 

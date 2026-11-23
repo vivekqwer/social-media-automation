@@ -40,6 +40,7 @@ TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
 # ReelGen (text -> reel engine) lives in its own project folder on this PC
 REELGEN_DIR = pathlib.Path(os.getenv("CLIPSTUDIO_REELGEN", r"D:\video generator"))
 POLL_SECONDS = 8
+PARALLEL = 3  # video downloads at the same time (YouTube slows each single download down to about playing speed)
 UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
 EXPECTED_ORIGIN = "github.com/vivekqwer/social-media-automation"  # only ever update from this repository
 EXIT_UPDATED, EXIT_ALREADY_RUNNING = 4, 5  # the launchers restart on 4 and stop on 5
@@ -476,7 +477,8 @@ def handle(job: dict, headers: dict):
                 log(f"clip {cid}: downloading {job['video_id']} {job['start']:.0f}-{job['end']:.0f}s")
                 path = download_section(job["video_id"], job["start"], job["end"], pathlib.Path(d))
                 if job.get("transcribe"):  # the video has no subtitles: write captions here (offline Whisper)
-                    send_captions(job, path, headers)
+                    with _HEAVY:  # one at a time: it uses the whole processor
+                        send_captions(job, path, headers)
                 with open(path, "rb") as f:
                     r = _post(f"{SERVER}/api/worker/source/{cid}", headers,
                               files={"file": ("source.mp4", f, "video/mp4")}, timeout=900)
@@ -566,6 +568,33 @@ def _tell_failed(id_: int, kind: str, error: str, headers: dict):
         pass  # the server re-offers the job after its lease runs out
 
 
+import threading  # noqa: E402
+
+_HEAVY = threading.Lock()
+
+
+def handle_all(jobs: list, headers: dict):
+    """Video downloads run side by side (they wait on YouTube, not on this PC); everything else one after another."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def one(job):
+        try:
+            handle(job, headers)
+        except Exception as e:  # noqa: BLE001  (one job's problem must never stop the others)
+            log(f"job failed: {str(e)[:150]}")
+
+    downloads = [j for j in jobs if j.get("type") == "source"]
+    others = [j for j in jobs if j.get("type") != "source"]
+    if len(downloads) > 1:
+        with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
+            list(pool.map(one, downloads))
+    else:
+        for j in downloads:
+            one(j)
+    for j in others:
+        one(j)
+
+
 def main():
     _lock = single_instance()  # noqa: F841  (held for the life of the process)
     tok = get_token()
@@ -593,8 +622,7 @@ def main():
                     log("Approved. Waiting for jobs...")
                     waiting = False
                 data = r.json()
-                for job in data.get("jobs", []):
-                    handle(job, headers)
+                handle_all(data.get("jobs", []), headers)
                 backup_daily(headers)
                 if time.time() - last_update_check > UPDATE_EVERY:
                     last_update_check = time.time()
