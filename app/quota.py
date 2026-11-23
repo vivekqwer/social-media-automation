@@ -93,6 +93,25 @@ def used() -> int:
         return int(row.value) if row and row.value else 0
 
 
+LEAD_DAYS_RANGE = (2, 400)
+
+
+def upload_lead_hours() -> int:
+    """How long before its publish time a clip is sent to YouTube (YouTube keeps it private until that time).
+    Usually 48 hours. The account setting "upload_lead_days" sends clips earlier: with a large number everything that
+    is waiting goes up as fast as the daily budget allows, earliest publish time first, and YouTube publishes each one
+    on its own day even when this server is not running."""
+    from .config import UPLOAD_LEAD_HOURS
+
+    try:
+        days = int(get_setting("upload_lead_days") or 0)
+    except (TypeError, ValueError):
+        days = 0
+    if not days:
+        return UPLOAD_LEAD_HOURS
+    return min(max(days, LEAD_DAYS_RANGE[0]), LEAD_DAYS_RANGE[1]) * 24
+
+
 def capacity() -> int:
     """Uploads that fit in one day (all channels together)."""
     return max(1, (DAILY_UNITS - RESERVE) // UPLOAD_COST)

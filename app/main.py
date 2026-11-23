@@ -2346,6 +2346,27 @@ def queue_cap_set(body: QueueCapIn):
     return {"cap": autopilot.queue_cap()}
 
 
+class UploadLeadIn(BaseModel):
+    days: int = Field(ge=0, le=400)  # 0 = the usual 2 days
+
+
+@app.get("/api/settings/upload-lead")
+def upload_lead_get():
+    from . import quota
+
+    return {"days": quota.upload_lead_hours() // 24, "usual": 2, "range": list(quota.LEAD_DAYS_RANGE), "per_day": quota.capacity()}
+
+
+@app.post("/api/admin/upload-lead")
+def upload_lead_set(body: UploadLeadIn):
+    """How many days before its publish time a clip is sent to YouTube (YouTube keeps it private until then). A large
+    number sends everything that is waiting as fast as the daily budget allows; YouTube then publishes by itself."""
+    from . import quota
+
+    set_setting("upload_lead_days", str(body.days) if body.days else "")
+    return {"days": quota.upload_lead_hours() // 24}
+
+
 class ReminderIn(BaseModel):
     on: bool = True
     preset: str = Field("share", max_length=20)

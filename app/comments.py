@@ -231,7 +231,7 @@ def _uploads_due_here() -> int:
     now = utcnow()
     with SessionLocal() as s:
         paused = [d.id for d in s.query(Destination.id).filter(Destination.paused.is_(True))]
-        until = quota.next_reset() + timedelta(hours=UPLOAD_LEAD_HOURS)
+        until = quota.next_reset() + timedelta(hours=quota.upload_lead_hours())
         q = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"]),
                                  (Clip.publish_at.is_(None)) | (Clip.publish_at <= until))
         if paused:

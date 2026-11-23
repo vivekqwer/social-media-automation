@@ -206,7 +206,7 @@ def process_queue():
             c = s.get(Clip, cid)
             if not c or c.status != "queued" or c.destination_id in paused:
                 continue
-            if c.publish_at and c.publish_at > now + timedelta(hours=UPLOAD_LEAD_HOURS):
+            if c.publish_at and c.publish_at > now + timedelta(hours=quota.upload_lead_hours()):
                 continue
             p = s.get(Project, c.project_id)
             errs = check_edit(p, c)

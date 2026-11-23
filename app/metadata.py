@@ -336,15 +336,17 @@ def freshen_clip(clip_id: int, force: bool = False) -> bool:
 def freshen_due(limit: int = 4) -> int:
     """Timed job: clips are often made days before they go up. The ones that will be sent to YouTube within the
     next few hours get their keywords researched again first (a few per run; hand-edited clips are left alone)."""
-    from .config import UPLOAD_LEAD_HOURS
+    from . import quota
 
     now = utcnow()
-    horizon = now + timedelta(hours=UPLOAD_LEAD_HOURS + SOON_HOURS)  # uploads start UPLOAD_LEAD_HOURS before publish time
+    horizon = now + timedelta(hours=quota.upload_lead_hours() + SOON_HOURS)  # uploads start that long before publish time
     with SessionLocal() as s:
         rows = s.query(Clip).filter(
             (Clip.status == "queued") | (Clip.autoqueue.is_(True) & Clip.status.in_(["fetching", "draft", "rendering"])),
             Clip.youtube_id.is_(None), Clip.meta_edited.isnot(True),
             (Clip.publish_at.is_(None)) | (Clip.publish_at <= horizon)).order_by(Clip.publish_at, Clip.id).all()
+        # with a long lead everything waiting is inside the horizon: only the ones that go up in the next two days matter
+        rows = rows[:max(8, quota.capacity() * 2)]
         due = [c.id for c in rows if needs_refresh(c, now)][:limit]
     done = sum(1 for cid in due if freshen_clip(cid))
     day = now.strftime("%Y-%m-%d")
