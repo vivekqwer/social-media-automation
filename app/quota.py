@@ -137,6 +137,14 @@ def can_update(uploads_waiting: int = 0) -> bool:
     return left - need >= COST["update"] + COST["read"]
 
 
+def can_read(units: int = 1, uploads_waiting: int = 0) -> bool:
+    """A few read units (looking up a creator's public e-mail) fit in what is left today after every upload that is
+    waiting (as many as fit at all) and half the reserve — the same rule as can_comment: uploads come first."""
+    left = DAILY_UNITS - used() - RESERVE // 2
+    need = min(max(0, int(uploads_waiting)), max(0, left // UPLOAD_COST)) * UPLOAD_COST
+    return left - need >= max(1, int(units))
+
+
 SEARCH_BUDGET = 400  # topic searches may use at most this much a day, so uploads keep their budget
 
 

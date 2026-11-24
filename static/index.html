@@ -300,7 +300,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Competitor tracker</h3><p id="id-desc">Channels you watch. Every day the system finds their videos doing 3× or more better than usual.</p></div><button class="btn outline sm" id="id-scan">Check now</button></div>
           <div class="cb"><div class="row"><input id="id-q" class="grow" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')" placeholder="Channel link or @handle, e.g. @kabitaskitchen"><button class="btn" id="id-add">Track</button></div><div id="id-chans" class="row" style="gap:6px;margin-top:10px"></div></div>
           <div class="tw" id="id-out"></div></div>
-        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Permission inbox</h3><p>Creators of popular videos you may not reuse yet. Send them the ready message; when they say yes, press “They said yes” — their new videos are then clipped and uploaded automatically, with credit. New creators also arrive on Telegram every morning.</p></div><div class="row"><button class="btn outline sm" id="pm-emails">Find emails</button><button class="btn outline sm" id="pm-find">Find creators now</button></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Permission inbox</h3><p>Creators of popular videos you may not reuse yet. Their public e-mail is looked up by itself (channel description, their recent videos, their own website). Send the ready message, or let it go out by itself. Replies are read every 15 minutes: a plain yes starts their clips (with credit), a plain no is marked “Said no”, anything else waits for you at the top of this list.</p></div><div class="row"><button class="btn outline sm" id="pm-emails">Find emails</button><button class="btn outline sm" id="pm-find">Find creators now</button></div></div>
+          <div class="cb" id="pm-auto-box" style="padding-bottom:0"><label class="row" style="gap:10px;font-weight:500;flex-wrap:nowrap"><span class="switch"><input type="checkbox" id="pm-auto"><i></i></span><span>Send permission mails by themselves</span></label><div class="mut sm" id="pm-auto-hint" style="margin-top:6px"></div></div>
           <div class="cb" id="pm-list"></div></div>
         <div class="card"><div class="ch"><div><h3>Trending in India</h3><p>YouTube's trending list, updated every 6 hours.</p></div><select id="id-cat" style="width:auto"><option value="">All</option><option value="26">Howto &amp; Style (food, recipes)</option><option value="22">People &amp; Blogs</option><option value="24">Entertainment</option><option value="23">Comedy</option><option value="10">Music</option><option value="20">Gaming</option></select></div>
           <div class="tw" id="id-trend"></div></div>
@@ -861,18 +862,34 @@ async function loadViral(){
 $('#vr-day').onchange=()=>{VRDAY=$('#vr-day').value;loadViral().catch(fail)};
 $('#vr-refresh').onclick=()=>once(async()=>{await api('/api/viral/refresh','POST');VRDAY='';await loadViral();toast('Updated')},$('#vr-refresh'));
 $('#vr-send').onclick=()=>once(async()=>{if(!confirm('Send the ready permission mails from your Gmail now?'))return;const r=await api('/api/viral/send','POST');toast(r.sent+' mail(s) sent'+(r.errors.length?' — '+r.errors.join('; '):''));loadViral()},$('#vr-send'));
+let PA=null;
+function pmSearch(c){const x=c.search||{};
+  if(x.state==='looking'||x.state==='queued')return '<span class="mut sm">Looking for e-mail…</span>';
+  if(x.state==='none'){const tried=(x.tried&&x.tried.length?x.tried:['description','videos','website']).join(', ');
+    return x.final?`<span class="mut sm">No public e-mail found (tried: ${esc(tried)}) — add it by hand</span>`
+      :`<span class="mut sm">No public e-mail found yet (tried: ${esc(tried)}) — looking again ${esc(when(x.next))}</span>`}
+  return ''}
+function pmAutoHint(){const a=PA,h=$('#pm-auto-hint');if(!a||!h)return;$('#pm-auto').checked=!!a.auto;
+  h.textContent=!a.allowed?a.note:!a.gmail?'Connect Gmail first (My channels → Gmail). Until then nothing is sent.'
+    :(a.auto?`On — a creator with an address is mailed by itself from ${a.gmail}: at most ${a.per_day} a day, 1 every ${a.spread_hours} hours (${a.sent_today} sent today${a.next_at?', next not before '+when(a.next_at):''}). Never twice, never to skipped or “said no” creators, music labels or studios, or an address two creators share.`
+      :`Off — mails wait until you press Send (at most ${a.per_day} a day).`)}
 async function loadPerms(){
-  const L=await api('/api/permissions');const lab={new:['To ask','queued'],asked:['Asked','outline'],replied:['Replied!','queued'],granted:['Allowed','uploaded'],skipped:['Skipped','outline'],declined:['Said no','outline']};
-  $('#pm-list').innerHTML=L.length?L.map(c=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(c.name)}</b> <span class="badge ${lab[c.status][1]}">${lab[c.status][0]}</span><span class="mut sm" style="display:block">${esc((c.video_title||'').slice(0,80))} · ${num(c.views)} views</span>
-    ${c.status==='granted'?`<span class="sm" style="display:block;color:var(--ok)">${c.auto_granted?'Said yes by mail — started automatically. ':''}Proof: ${esc(c.proof||'')}</span>`:''}</div>
+  const [L,A]=await Promise.all([api('/api/permissions'),api('/api/settings/perm-auto').catch(()=>null)]);PA=A;pmAutoHint();
+  const lab={new:['To ask','queued'],asked:['Asked','outline'],replied:['Replied — needs you','queued'],granted:['Allowed','uploaded'],skipped:['Skipped','outline'],declined:['Said no','outline']};
+  const auto=!!(PA&&PA.auto&&PA.gmail&&PA.allowed);
+  $('#pm-list').innerHTML=L.length?L.map(c=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(c.name)}</b> <span class="badge ${(lab[c.status]||['?','outline'])[1]}">${esc((lab[c.status]||[c.status])[0])}</span><span class="mut sm" style="display:block">${esc((c.video_title||'').slice(0,80))} · ${num(c.views)} views</span>
+    ${c.status==='granted'?`<span class="sm" style="display:block;color:var(--ok)">${c.auto_granted?'Said yes by mail — started automatically. ':''}Proof: ${esc(c.proof||'')}</span>`:''}
+    ${c.status==='declined'&&c.declined_by==='reply'?`<span class="mut sm" style="display:block">Said no by mail${c.replied_at?' on '+esc(when(c.replied_at)):''}: “${esc((c.reply||'').slice(0,200))}” — nothing more is sent.</span>`:''}</div>
     ${c.status==='granted'&&c.auto_granted?`<button class="btn outline sm" data-pmundo="${esc(c.channel_id)}">Undo</button>`:''}
     <a class="btn ghost sm" href="${esc(c.url)}/about" target="_blank" rel="noopener">Open channel</a>
-    ${c.status==='replied'?`<div class="sm" style="flex-basis:100%;margin:6px 0;padding:8px;background:var(--muted);border-radius:8px"><b>Reply from ${esc(c.reply_from||'')}:</b> ${esc(c.reply||'')}</div><button class="btn sm" data-pmgr="${esc(c.channel_id)}">✅ Permission given</button><button class="btn outline sm" data-pmno="${esc(c.channel_id)}">They said no</button>`:''}
+    ${c.status==='replied'?`<div class="sm" style="flex-basis:100%;margin:6px 0;padding:8px;background:var(--muted);border-radius:8px"><b>Reply from ${esc(c.reply_from||'')}</b>${c.reply_date||c.replied_at?` <span class="mut">· ${esc(c.reply_date||when(c.replied_at))}</span>`:''}: ${esc(c.reply||'')}</div><button class="btn sm" data-pmgr="${esc(c.channel_id)}">✅ Permission given</button><button class="btn outline sm" data-pmno="${esc(c.channel_id)}">They said no</button>`:''}
     ${['new','asked'].includes(c.status)&&!c.mailed?`<details style="flex-basis:100%;margin:6px 0"><summary class="sm" style="cursor:pointer">See / edit the mail</summary>
       <input class="pm-subj" data-cid="${esc(c.channel_id)}" value="${esc(c.subject||'')}" style="width:100%;margin:6px 0">
       <textarea class="pm-msg" data-cid="${esc(c.channel_id)}" rows="9" style="width:100%">${esc(c.message||'')}</textarea></details>`:''}
-    ${['new','asked'].includes(c.status)&&!c.mailed?`<input class="pm-email" data-cid="${esc(c.channel_id)}" placeholder="${c.email_checked?'no public email — see About page':'creator\'s email'}" value="${esc(c.email||'')}" style="width:220px">${c.email_from?`<span class="mut sm">found in ${esc(c.email_from)}</span>`:''}<button class="btn sm" data-pmsend="${esc(c.channel_id)}">Send mail</button>`:''}
-    ${c.mailed&&c.status==='asked'?'<span class="mut sm">Mail sent — waiting for their reply</span>':''}
+    ${['new','asked'].includes(c.status)&&!c.mailed?`<div class="row" style="flex-basis:100%;gap:6px;flex-wrap:wrap"><input class="pm-email" data-cid="${esc(c.channel_id)}" placeholder="Add e-mail" value="${esc(c.email||'')}" style="width:220px">${c.email&&c.email_from?`<span class="mut sm">found in: ${esc(c.email_from)}</span>`:pmSearch(c)}<button class="btn sm" data-pmsend="${esc(c.channel_id)}">Send mail</button>${!c.email&&!['looking','queued'].includes((c.search||{}).state)?`<button class="btn outline sm" data-pmfind="${esc(c.channel_id)}">Find e-mail</button>`:''}</div>
+      ${c.send_unsure?'<span class="sm" style="flex-basis:100%;color:var(--bad)">Sending did not finish. Look in Gmail’s Sent folder: if the mail is not there, press Send again. It is never sent again by itself.</span>':''}
+      ${auto&&c.status==='new'&&c.email&&!c.send_unsure?`<span class="mut sm" style="flex-basis:100%">${c.auto_hold?'Not sent by itself: '+esc(c.auto_hold):'Goes out by itself in the next free slot.'}</span>`:''}`:''}
+    ${c.mailed&&c.status==='asked'?`<span class="mut sm">Mail sent${c.asked_at?' '+esc(when(c.asked_at)):''}${c.sent_by==='auto'?' by itself':''} to ${esc(c.email||'')} — waiting for their reply (checked every 15 minutes)</span>`:''}
     ${!['granted','replied','declined'].includes(c.status)?`<button class="btn outline sm" data-pmcopy="${esc(c.channel_id)}">Copy message</button><button class="btn outline sm" data-pmask="${esc(c.channel_id)}">Asked</button><button class="btn sm" data-pmyes="${esc(c.channel_id)}">They said yes</button><button class="btn ghost sm" data-pmskip="${esc(c.channel_id)}">Skip</button>`:''}</div>`).join('')
     :'<span class="mut sm">Nothing yet — press “Find creators now” or wait for the morning check.</span>';
   const byId=Object.fromEntries(L.map(c=>[c.channel_id,c]));
@@ -881,6 +898,7 @@ async function loadPerms(){
     await api(`/api/permissions/${id}/email`,'POST',{email:em});
     const m=$(`.pm-msg[data-cid="${id}"]`),sj=$(`.pm-subj[data-cid="${id}"]`);if(m&&m.value.trim()!==(byId[id].message||'').trim()||sj&&sj.value.trim()!==(byId[id].subject||''))await api(`/api/permissions/${id}/message`,'POST',{subject:sj?sj.value:'',message:m.value});
     await api(`/api/permissions/${id}/send`,'POST');toast('Mail sent from your Gmail');loadPerms()},b));
+  $$('[data-pmfind]').forEach(b=>b.onclick=()=>once(async()=>{const r=await api(`/api/permissions/${b.dataset.pmfind}/find-email`,'POST');toast(r.found?'E-mail found — check it below':'No public e-mail found on their channel, videos or website — add it by hand');loadPerms()},b));
   $$('[data-pmgr]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmgr}/grant-reply`,'POST');toast('Saved — their new videos will be uploaded automatically, with credit');loadPerms()}));
   $$('[data-pmundo]').forEach(b=>b.onclick=()=>once(async()=>{if(!confirm('Stop uploading this creator\'s videos?'))return;await api(`/api/permissions/${b.dataset.pmundo}/revoke`,'POST');toast('Stopped — decide again from their reply');loadPerms()}));
   $$('[data-pmno]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmno}/mark/declined`,'POST');loadPerms()}));
@@ -889,7 +907,11 @@ async function loadPerms(){
   $$('[data-pmyes]').forEach(b=>b.onclick=()=>{const proof=prompt('How did they say yes? Who, how and when (e.g. "Instagram reply from @name on 22 Nov 2026"):');if(!proof)return;
     once(async()=>{await api(`/api/permissions/${b.dataset.pmyes}/grant`,'POST',{proof});toast('Saved — their new videos will be clipped and uploaded automatically');loadPerms()})});
 }
-$('#pm-emails').onclick=()=>once(async()=>{const r=await api('/api/permissions/find-emails','POST');toast(r.found?r.found+' email(s) found — check and press Send':'No public emails in their channel descriptions — use the About page');loadPerms()},$('#pm-emails'));
+$('#pm-auto').onchange=()=>{const sw=$('#pm-auto'),want=sw.checked;once(async()=>{try{PA=await api('/api/settings/perm-auto','POST',{auto:want});pmAutoHint();toast(PA.auto?'On — ready mails go out by themselves (at most 1 every 2 hours)':'Off — mails wait until you press Send');loadPerms()}catch(e){sw.checked=!want;throw e}})};
+// the inbox updates by itself (replies, yes / no, addresses found) while it is open — not while you are typing in it
+setInterval(()=>{const L=$('#pm-list');if(!L||$('#p-ideas').classList.contains('hide')||document.visibilityState!=='visible')return;
+  if(L.contains(document.activeElement)||L.querySelector('details[open]'))return;loadPerms().catch(()=>{})},45000);
+$('#pm-emails').onclick=()=>once(async()=>{const r=await api('/api/permissions/find-emails','POST');toast(r.found?r.found+' e-mail(s) found':'No new public e-mails found (channel, videos, website) — the rest are looked up by themselves');loadPerms()},$('#pm-emails'));
 $('#pm-find').onclick=()=>once(async()=>{const r=await api('/api/permissions/refresh','POST');toast(r.length?r.length+' new creator(s) found':'No new creators right now');loadPerms()},$('#pm-find'));
 $('#id-add').onclick=()=>once(async()=>{const q=$('#id-q').value.trim();if(!q)throw new Error('Type a channel link or @handle');await api('/api/ideas/competitors','POST',{query:q});$('#id-q').value='';toast('Tracking — press Check now or wait for the daily check');loadIdeas()},$('#id-add'));
 $('#id-scan').onclick=()=>once(async()=>{await api('/api/ideas/scan','POST');toast('Checked');loadIdeas()},$('#id-scan'));
@@ -1744,8 +1766,8 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
   'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
-  'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
-  'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
+  'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send,#pm-auto-box',
+  'permissions.manage':'#pm-emails,#pm-find,[data-pmfind],[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};

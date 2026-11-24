@@ -255,7 +255,7 @@ def _handle_callback(data: str) -> str:
             if kind == "pn":
                 permissions.set_status(cid, "declined")
                 return "OK — they will not be used."
-            c = permissions.send_mail(cid)
+            c = permissions.send_mail(cid, by="telegram")
             return f"Mail sent to {c['email']}. You'll get their reply here."
         except (KeyError, ValueError) as e:
             return f"Could not do that: {e}"
@@ -320,7 +320,7 @@ def poll():
                     set_setting("tg_pending_email", "")
                     try:
                         permissions.set_email(pending_mail, text.strip())
-                        c = permissions.send_mail(pending_mail)
+                        c = permissions.send_mail(pending_mail, by="telegram")
                         notify(f"📧 Mail sent to {esc(c['email'])}. I'll tell you when they reply.")
                     except (ValueError, KeyError) as e:
                         notify(f"Not sent: {esc(str(e))}")

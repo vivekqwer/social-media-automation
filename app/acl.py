@@ -339,6 +339,8 @@ ROUTES = [
     ("POST", "/api/permissions/{cid}/revoke", "permissions.manage", "Took back a creator's permission"),
     ("GET", "/api/settings/mail", SIGNED, None),
     ("POST", "/api/settings/mail", "permissions.manage", None),
+    ("GET", "/api/settings/perm-auto", "page.ideas", None),
+    ("POST", "/api/settings/perm-auto", "permissions.manage", "Changed: send permission mails by themselves"),  # ON also needs gmail.send (inside)
     ("POST", "/api/ideas/competitors", "ideas.competitors", "Added a channel to the competitor tracker"),
     ("DELETE", "/api/ideas/competitors", "ideas.competitors", None),
     ("POST", "/api/ideas/scan", "ideas.competitors", None),
