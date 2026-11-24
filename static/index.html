@@ -270,6 +270,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
 
       <section id="p-sources" class="hide">
         <div class="page-h"><div><h1>Sources</h1><div class="desc">Channels the system takes videos from.</div></div><button class="btn" id="open-add"><i data-ico="plus"></i>Add sources</button></div>
+        <div class="card" style="margin-bottom:16px" id="nz-card"><div class="ch"><div><h3>Change my niche</h3><p>What your channel is about. Each niche has its own ready-made topic sources; removing one switches its sources off (nothing is deleted, clips already made stay).</p></div></div><div class="cb" id="nz-body"></div></div>
         <div class="card"><div class="tw" id="src-list"></div></div>
       </section>
 
@@ -1179,6 +1180,45 @@ async function loadSources(){
   $$('[data-sdest]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.sdest}/destination`,'POST',{destination_id:+b.value});toast('This source now uploads to '+b.options[b.selectedIndex].text+' (its waiting clips moved too)')}));
   $$('[data-lang]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.lang}/language`,'POST',{language:b.value});toast(b.value==='en'?'AI scripts in English (Indian voice) — the small local AI writes English much better':'AI scripts in Hinglish')}));
   $$('[data-autoup]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.autoup}/review`,'POST',{review_first:!b.checked});toast(b.checked?'New clips will upload automatically':'New clips will wait for your approval')}));
+  loadNiches().catch(()=>{});
+}
+/* ---------- "What is your channel about?": niches -> topic sources made for you (app/niche_sources.py) ---------- */
+async function nichePicker(el,done,st){
+  if(!el)return;st=st||await api('/api/niches');
+  if(!st.topic_on){el.innerHTML='<div class="alert"><span>Topic sources are switched off for your account, so niches cannot be used. Ask the person who gave you access.</span></div>';return}
+  const act=new Set(st.mine.filter(m=>m.active).map(m=>m.key)),free=st.catalog.filter(n=>!act.has(n.key));
+  el.innerHTML=`<div class="alert" style="margin-bottom:10px"><span>${esc(st.note)}</span></div>
+    ${free.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">${free.map(n=>`<label class="card" style="padding:10px;cursor:pointer;display:block"><span class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-nz="${esc(n.key)}"><b>${esc(n.label)}</b></span><span class="mut sm" style="display:block;margin-top:4px">${esc(n.phrases.slice(0,3).join(' · '))}${n.trending&&st.trending_on?' · + trending':''}</span>${n.warning?'<span class="sm" style="display:block;margin-top:4px;color:var(--bad)">Few Creative Commons videos: expect fewer clips.</span>':''}</label>`).join('')}</div>`:''}
+    <label class="f" style="margin-top:10px">Or write your own topic<input class="nz-topic" maxlength="60" placeholder="e.g. indian street food · home gardening · cricket coaching"></label>
+    <div class="nz-prev mut sm" style="margin-top:4px"></div>
+    <label class="row sm" style="gap:8px;margin-top:10px"><span class="switch"><input type="checkbox" class="nz-rev" checked><i></i></span>Check the first clips myself before they go up (Review first)</label>
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn nz-go">Make my sources</button><span class="mut sm">${st.room==null?'':st.room+' more source'+(st.room===1?'':'s')+' allowed on your plan'}</span></div>`;
+  const inp=$('.nz-topic',el),prev=$('.nz-prev',el);let tm;
+  inp.oninput=()=>{clearTimeout(tm);const t=inp.value.trim();if(!t){prev.innerHTML='';return}
+    tm=setTimeout(async()=>{let p;try{p=(await api('/api/niches?topic='+encodeURIComponent(t))).preview}catch(e){return}if(!p||inp.value.trim()!==t)return;
+      prev.innerHTML=(p.phrases.length?'Sources for: '+p.phrases.map(x=>'<b>'+esc(x)+'</b>').join(' · '):'Write words, not a link.')
+        +(p.warning?`<div style="color:var(--bad);margin-top:4px">${esc(p.warning)}</div>`:'')
+        +(p.suggest.length?'<div style="margin-top:4px">People also search: '+p.suggest.map(x=>`<button class="btn ghost sm" data-nzs="${esc(x)}">${esc(x)}</button>`).join(' ')+'</div>':'');
+      $$('[data-nzs]',prev).forEach(b=>b.onclick=()=>{inp.value=b.dataset.nzs;inp.oninput()})},700)};
+  $('.nz-go',el).onclick=()=>once(async()=>{const keys=$$('[data-nz]:checked',el).map(x=>x.dataset.nz),topic=inp.value.trim();
+    if(!keys.length&&!topic)throw new Error('Tick a niche or write your own topic first');
+    const r=await api('/api/niches','POST',{keys,topic,review_first:$('.nz-rev',el).checked,tz_offset:new Date().getTimezoneOffset()});
+    const n=r.made.length+r.turned_on.length;
+    toast(n?`${n} source${n===1?'':'s'} ready — they look for Creative Commons videos every ${r.interval_hours} hours`:'Those sources were already there');
+    if(r.why||r.warnings.length)alert([r.why,...r.warnings].filter(Boolean).join('\n\n'));
+    if(done)await done()},$('.nz-go',el));
+}
+async function loadNiches(){
+  const el=$('#nz-body');if(!el)return;const st=await api('/api/niches'),mine=st.mine;
+  el.innerHTML=(mine.length?mine.map(m=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(m.label)}</b>${m.custom?' <span class="badge outline">my topic</span>':''} ${m.active?'<span class="badge uploaded">On</span>':'<span class="badge outline">Off</span>'}
+      <span class="mut sm" style="display:block">${m.on} of ${m.sources} source${m.sources===1?'':'s'} on · ${m.videos} video${m.videos===1?'':'s'} used so far · ${esc(m.phrases.slice(0,4).join(' · '))}</span>
+      ${m.warnings.map(w=>`<span class="sm" style="display:block;color:var(--bad)">${esc(w)}</span>`).join('')}</div>
+      ${m.active?`<button class="btn outline sm" data-nzoff="${esc(m.key)}">Remove</button>`:`<button class="btn outline sm" data-nzon="${esc(m.key)}">Switch on again</button>`}</div>`).join(''):'<div class="mut sm" style="margin-bottom:8px">No niche picked yet.</div>')
+    +`<details id="nz-add" style="margin-top:10px" ${mine.length?'':'open'}><summary style="cursor:pointer;font-weight:500">Add a niche or your own topic</summary><div id="nz-pick" style="margin-top:8px"></div></details>`;
+  nichePicker($('#nz-pick'),()=>loadSources(),st);
+  $$('[data-nzoff]',el).forEach(b=>b.onclick=()=>once(async()=>{if(!confirm('Switch off every source of this niche?\n\nNothing is deleted and clips already made stay. You can switch it on again here.'))return;
+    const r=await api('/api/niches/remove','POST',{key:b.dataset.nzoff});toast(r.switched_off+' source'+(r.switched_off===1?'':'s')+' switched off');loadSources()},b));
+  $$('[data-nzon]',el).forEach(b=>b.onclick=()=>once(async()=>{const r=await api('/api/niches','POST',{keys:[b.dataset.nzon]});toast((r.turned_on.length+r.made.length)+' source(s) switched on again');loadSources()},b));
 }
 
 async function loadDests(){
@@ -1763,8 +1803,8 @@ const NAVPAGES=['dashboard','clips','sources','analytics','viral','ideas','alert
 function pageOn(p){return !NAVPAGES.includes(p)||can('page.'+p)}
 function firstPage(){return NAVPAGES.find(pageOn)||'none'}
 const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
-  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc]',
-  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
+  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc],#nz-add,[data-nzon]',
+  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo,[data-nzoff]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
@@ -1869,7 +1909,7 @@ async function loadStart(){
       ${o.helper_waiting?`<div class="row" style="margin-top:8px;flex-wrap:wrap"><span class="mut sm">A helper without the key is waiting — type its pairing code:</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn outline" id="ob-approve">Approve</button></div>`:''}`,
     face:()=>`<div class="row" style="margin-top:8px"><label class="btn">Upload my photo<input type="file" accept="image/jpeg,image/png,image/webp" id="ob-face" hidden></label><button class="btn ghost" data-oback="face">Skip for now</button><span class="mut sm" id="ob-facenote"></span></div>`,
     gmail:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/gmail">Connect Gmail</a><button class="btn ghost" data-oback="gmail">Skip for now</button></div>`,
-    source:()=>`<div class="row" style="margin-top:8px"><button class="btn" id="ob-src">Add my first source</button></div>`};
+    source:()=>`<div id="ob-niche" style="margin-top:8px"></div><div class="row" style="margin-top:10px"><button class="btn ghost sm" id="ob-src">Add a source myself instead</button></div>`};
   $('#ob-steps').innerHTML=o.steps.map((st,i)=>{const cur=st.key===o.current;return `<div class="card" style="margin-bottom:12px;${st.locked?'opacity:.5':''}"><div class="ch"><div><h3>${st.done?'✅':st.locked?'🔒':'👉'} ${i+1}. ${esc(st.title)}${st.skipped?' <span class="badge outline">skipped</span>':''}</h3><p>${esc(st.why)}</p></div>${st.done?'<span class="badge uploaded">Done</span>':st.locked?'<span class="badge outline">Opens after step '+i+'</span>':'<span class="badge queued">Do this now</span>'}</div>
     ${cur?`<div class="cb"><ol class="sm" style="margin:0 0 6px;padding-left:18px;line-height:1.8">${st.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>${body[st.key]()}</div>`:''}
     ${st.key==='google'&&st.done&&!g.shared?'<div class="cb"><details><summary class="sm" style="cursor:pointer">Wrong keys? Change them</summary><div id="ob-rekeys" class="sm" style="margin-top:8px"></div></details></div>':''}</div>`}).join('');
@@ -1882,7 +1922,9 @@ async function loadStart(){
     await api(`/api/workers/${w.id}/approve`,'POST',{code:$('#ob-pair').value});toast('Helper approved');await after()},$('#ob-approve'));
   if($('#ob-face'))$('#ob-face').onchange=()=>once(async()=>{const f=$('#ob-face').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);$('#ob-facenote').textContent='Removing the background… (can take a minute)';try{await api('/api/faces/0','POST',fd)}finally{$('#ob-facenote').textContent=''}toast('Photo saved');await after()});
   if($('#ob-src'))$('#ob-src').onclick=()=>{window.OBSRC=true;openAdd()};
-  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName));
+  if($('#ob-niche'))nichePicker($('#ob-niche'),after).catch(e=>{$('#ob-niche').textContent=e.message});
+  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName))
+      ||$('#ob-niche [data-nz]:checked')||($('#ob-niche .nz-topic')&&$('#ob-niche .nz-topic').value);/* never wipe niches being picked */
     if($('#p-start').classList.contains('hide')||$('#m-add').classList.contains('on'))return;
     if(typing){window._obT=setTimeout(again,10000);return}loadStart().catch(()=>{})},10000);
 }

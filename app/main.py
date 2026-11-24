@@ -2113,6 +2113,49 @@ TREND_CATS = {"": "all", "26": "food & how-to", "22": "people & blogs", "24": "e
               "20": "gaming", "17": "sports", "28": "science & tech"}
 
 
+# ---------- "What is your channel about?": pick niches -> topic sources made for you (app/niche_sources.py) ----------
+class NicheIn(BaseModel):
+    keys: list[str] = Field(default_factory=list, max_length=20)
+    topic: str = Field("", max_length=120)
+    review_first: bool = True
+    tz_offset: int | None = Field(None, ge=-900, le=900)
+
+
+class NicheOffIn(BaseModel):
+    key: str = Field(min_length=1, max_length=40)
+
+
+@app.get("/api/niches")
+def niches_state(topic: str = ""):
+    from . import niche_sources
+
+    out = niche_sources.state()
+    if topic.strip():
+        out["preview"] = niche_sources.preview(topic[:120])
+    return out
+
+
+@app.post("/api/niches")
+def niches_choose(body: NicheIn):
+    from . import niche_sources
+
+    _need_step("source")  # it is the "first source" step of Get started
+    try:
+        return niche_sources.choose(body.keys, body.topic, body.review_first, body.tz_offset)
+    except niche_sources.NicheError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/niches/remove")
+def niches_remove(body: NicheOffIn):
+    from . import niche_sources
+
+    try:
+        return niche_sources.remove(body.key)
+    except niche_sources.NicheError as e:
+        raise HTTPException(404, str(e))
+
+
 class ScriptsIn(BaseModel):
     scripts: list[str] = Field(max_length=500)
 
