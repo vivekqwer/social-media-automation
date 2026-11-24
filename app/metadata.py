@@ -297,6 +297,8 @@ def needs_refresh(clip: Clip, now: datetime | None = None) -> bool:
     if clip.meta_edited or clip.youtube_id or clip.status in ("uploading", "uploaded"):
         return False
     rec = clip.kw or {}
+    if rec.get("basis"):  # my own video, written from a search on its topic (app/owntopic.py): the owner checks it
+        return False
     if not rec:
         return not clip.title  # nothing written yet -> write it; an older clip with a title may be hand-made
     try:

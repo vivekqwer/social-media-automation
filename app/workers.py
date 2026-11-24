@@ -88,7 +88,9 @@ def captioner_recent() -> bool:
 
 
 # ---------------------------------------------------------------- central helper (one helper for every account)
-KINDS = ("source", "transcribe", "analyze", "reel", "tts", "script", "setup_ai")
+# "archive" = save uploaded videos on this PC, send them back, list the folder (app/archive.py): own copy only, never
+# a ticket; the PC helper says "all", the phone never says it
+KINDS = ("source", "transcribe", "analyze", "reel", "tts", "script", "setup_ai", "archive")
 # The only kinds of job another account's work is ever given out as, whatever the helper says it can do: a stolen
 # central token then reaches downloads and video analysis, never voice-over text, script topics or keys.
 CENTRAL_KINDS = frozenset({"source", "analyze"})

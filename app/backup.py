@@ -587,6 +587,10 @@ def _keep_uploaded(conn, rows: list) -> int:
     n = 0
     for row in rows:
         cur = now.get(row["id"])
+        if cur and cur.archived_at and not row.get("archived_at") and row.get("youtube_id") in (None, cur.youtube_id) \
+                and (cur.project_id, cur.start, cur.end) == (row.get("project_id"), row.get("start"), row.get("end")):
+            # saved on the PC after the backup was made (its server file may be gone already): keep that record
+            row.update(archived_at=cur.archived_at, archived_sha=cur.archived_sha, archived_src_sha=cur.archived_src_sha)
         if cur and not row.get("youtube_id") and (cur.project_id, cur.start, cur.end) == (row.get("project_id"), row.get("start"), row.get("end")):
             row.update(youtube_id=cur.youtube_id, status=cur.status, attempted_at=cur.attempted_at, publish_at=cur.publish_at,
                        error=None)

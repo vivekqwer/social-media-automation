@@ -164,6 +164,17 @@ class Clip(Base):
     thumb_face = Column(Boolean, default=True)  # put my face (channel's or default) on the thumbnail
     yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...
     yt_checked_at = Column(DateTime)
+    # a copy of the finished video on the owner's PC (app/archive.py); the server's file goes once it is confirmed
+    archived_at = Column(DateTime)  # the helper PC confirmed its copy (sha256 matched)
+    archived_sha = Column(String(64))  # sha256 of out.mp4 as saved on the PC
+    archived_src_sha = Column(String(64))  # sha256 of my own uploaded file (src/upload.mp4) as saved on the PC
+    archive_lease = Column(DateTime)  # a helper took this clip's archive/restore job at
+    restore_wanted = Column(DateTime)  # "Get the video back from the PC" was pressed at
+    archive_note = Column(String(300))  # what last happened to the PC copy, in plain words
+    archived_by = Column(Integer)  # the helper (workers.id) that holds the PC copy; "Get back" asks that one
+    archived_size = Column(Integer)  # bytes of out.mp4 as saved (a file sent back may be at most 10% larger)
+    archived_src_size = Column(Integer)  # bytes of src/upload.mp4 as saved
+    archive_missing = Column(DateTime)  # the helper's daily folder list did not have this clip's file (nothing deleted)
     held_was = Column(String(20))  # status before the strike responder held this clip (status "held": it will not upload)
     kept_private = Column(Boolean)  # already on YouTube with a future publish time: set to private after a strike (strikes.py)
     # draft | rendering | rendered | queued | uploading | uploaded | failed | held (after a strike from its creator)
@@ -233,6 +244,8 @@ class Worker(Base):
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
     llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
     ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
+    archive_dir = Column(String(300))  # where this helper keeps the saved videos (it tells the server on every poll)
+    inventory_at = Column(DateTime)  # this helper was last asked to list its archive folder
     central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
     can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))

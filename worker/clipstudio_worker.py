@@ -457,9 +457,150 @@ def write_script(job: dict, headers: dict):
     log(f"local AI: script sent ({len(text)} characters)" + ("" if verdict.get("ok", True) else f" - not used: {verdict.get('why')}"))
 
 
+def _archive_dir() -> pathlib.Path:
+    """Finished videos of uploaded clips (the server deletes its copy once this PC has it). Outside the project folder,
+    so updating, re-installing or cleaning the project never touches them. Another place: set RAJI_ARCHIVE_DIR, or
+    write the folder into worker\\archive_dir.txt."""
+    if os.environ.get("RAJI_ARCHIVE_DIR"):
+        return pathlib.Path(os.environ["RAJI_ARCHIVE_DIR"]).expanduser()
+    try:
+        txt = (ROOT / "worker" / "archive_dir.txt").read_text(encoding="utf-8").strip()
+        if txt:
+            return pathlib.Path(txt).expanduser()
+    except OSError:
+        pass
+    return pathlib.Path(os.environ.get("USERPROFILE") or pathlib.Path.home()) / "RajiStudioArchive"
+
+
+ARCHIVE_DIR = _archive_dir()
+OLD_ARCHIVE_DIR = ROOT / "archive"  # where the first version kept them: still read (never written)
+KEY_RE = re.compile(r"t\d{1,9}-c\d{1,12}")
+SAVE_KINDS = ("inventory", "restore", "archive")  # run after every other job of a poll, one at a time
+
+
+def archive_header() -> str:
+    from urllib.parse import quote
+
+    return quote(str(ARCHIVE_DIR))  # headers are ASCII only
+
+
+def _sha256(path: pathlib.Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while chunk := f.read(1 << 20):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _saved_name(key: str, name: str, sha: str = "") -> str:
+    tail = ".source.mp4" if name == "source" else ".mp4"
+    return f"{key}-{sha[:12]}{tail}" if sha else f"{key}{tail}"
+
+
+def _find_saved(key: str, name: str, sha: str) -> pathlib.Path | None:
+    """The saved file with exactly this sha256 (a file is never overwritten, so there may be more than one)."""
+    for d in (ARCHIVE_DIR, OLD_ARCHIVE_DIR):
+        for p in (d / _saved_name(key, name), d / _saved_name(key, name, sha)):
+            if p.exists() and _sha256(p) == sha:
+                return p
+    return None
+
+
+def send_inventory(headers: dict):
+    """Once a day (the server asks): the names of the saved videos this PC still has. Nothing is deleted anywhere."""
+    names = set()
+    for d in (ARCHIVE_DIR, OLD_ARCHIVE_DIR):
+        if d.is_dir():
+            names |= {p.name for p in d.iterdir() if p.is_file() and p.suffix == ".mp4" and KEY_RE.match(p.name)}
+    r = _post(f"{SERVER}/api/worker/archive-inventory", headers, json={"names": sorted(names)}, timeout=120)
+    log(f"archive folder checked: {len(names)} saved video file(s) -> {r.status_code}")
+
+
+def archive_clip(job: dict, headers: dict):
+    """Download an uploaded clip's finished video (and my own original file) into the archive folder, check, confirm."""
+    import json
+
+    cid, key = job["clip_id"], job["key"]
+    if not KEY_RE.fullmatch(key):
+        raise RuntimeError("unexpected clip name")
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
+    shas = {}
+    for f in job.get("files") or []:
+        name, sha = f.get("name"), str(f.get("sha") or "").lower()
+        if name not in ("video", "source") or not re.fullmatch(r"[0-9a-f]{64}", sha):
+            continue
+        if _find_saved(key, name, sha):
+            shas[name] = sha
+            continue
+        dest = ARCHIVE_DIR / _saved_name(key, name)
+        if dest.exists():  # a different file has this name: never overwrite a saved video
+            dest = ARCHIVE_DIR / _saved_name(key, name, sha)
+        tmp = dest.with_name(dest.name + ".part")
+        h = hashlib.sha256()
+        with httpx.stream("GET", f"{SERVER}/api/worker/archive/{cid}/{name}", headers=headers,
+                          timeout=httpx.Timeout(60, read=300)) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as out:
+                for chunk in r.iter_bytes(1 << 20):
+                    out.write(chunk)
+                    h.update(chunk)
+        if h.hexdigest() != sha:
+            tmp.unlink(missing_ok=True)
+            raise RuntimeError(f"the {name} file arrived damaged (sha256 differs); it is tried again later")
+        os.replace(tmp, dest)
+        shas[name] = sha
+    info = {**(job.get("info") or {}), "files": {n: {"sha256": s, "file": _find_saved(key, n, s).name} for n, s in shas.items()},
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S")}
+    side = ARCHIVE_DIR / f"{key}.json"
+    tmp = side.with_name(side.name + ".tmp")
+    tmp.write_text(json.dumps(info, ensure_ascii=False, indent=1), encoding="utf-8")
+    os.replace(tmp, side)
+    r = _post(f"{SERVER}/api/worker/archived/{cid}", headers, json={"files": shas}, timeout=120)
+    log(f"clip {cid}: video saved on this PC ({ARCHIVE_DIR.name}\\{_saved_name(key, 'video')}) -> {r.status_code}")
+
+
+def restore_clip(job: dict, headers: dict):
+    """Send a saved video back to the server ("Get the video back from the PC" in the dashboard)."""
+    cid, key = job["clip_id"], job["key"]
+    if not KEY_RE.fullmatch(key):
+        raise RuntimeError("unexpected clip name")
+    found = {}
+    for f in job.get("files") or []:
+        p = _find_saved(key, f.get("name"), str(f.get("sha") or "").lower())
+        if not p:
+            raise RuntimeError(f"the saved {f.get('name')} file of this clip is not in {ARCHIVE_DIR}")
+        found[f["name"]] = p
+    for name, p in found.items():  # one file per request, as the raw body (the server counts it as it arrives)
+        for i in range(3):
+            try:
+                with open(p, "rb") as fh:
+                    r = httpx.post(f"{SERVER}/api/worker/restore/{cid}/{name}", content=fh, timeout=900,
+                                   headers={**headers, "content-type": "application/octet-stream",
+                                            "content-length": str(p.stat().st_size)})
+                if r.status_code == 409:
+                    break  # no longer needed (or refused): the server says why on the clip
+                r.raise_for_status()
+                break
+            except (httpx.TransportError, httpx.HTTPStatusError) as e:
+                if isinstance(e, httpx.HTTPStatusError) and e.response.status_code < 500 or i == 2:
+                    raise
+                time.sleep(10 * (i + 1))
+        log(f"clip {cid}: saved {name} file sent back to the server -> {r.status_code}")
+
+
 def handle(job: dict, headers: dict):
     if job["type"] == "setup_ai":
         return start_ai_setup()
+    if job["type"] in SAVE_KINDS:
+        try:
+            if job["type"] == "inventory":
+                return send_inventory(headers)
+            return archive_clip(job, headers) if job["type"] == "archive" else restore_clip(job, headers)
+        except Exception as e:  # noqa: BLE001
+            log(f"clip {job.get('clip_id')}: {job['type']} failed: {str(e)[:150]}")
+            if job.get("clip_id"):  # (the folder list has no clip: the server asks again tomorrow)
+                _tell_failed(job["clip_id"], job["type"], str(e)[:300], headers)
+            return None
     if job["type"] not in ("analyze", "script", "source", "reel", "tts"):
         return log(f"unknown job type {job['type']!r} (the helper updates itself soon)")
     if job["type"] == "analyze":
@@ -584,7 +725,8 @@ def handle_all(jobs: list, headers: dict):
             log(f"job failed: {str(e)[:150]}")
 
     downloads = [j for j in jobs if j.get("type") == "source"]
-    others = [j for j in jobs if j.get("type") != "source"]
+    others = [j for j in jobs if j.get("type") != "source" and j.get("type") not in SAVE_KINDS]
+    others += sorted((j for j in jobs if j.get("type") in SAVE_KINDS), key=lambda j: SAVE_KINDS.index(j["type"]))  # last
     if len(downloads) > 1:
         with ThreadPoolExecutor(max_workers=PARALLEL) as pool:
             list(pool.map(one, downloads))
@@ -605,7 +747,7 @@ def main():
     while True:
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-",
-                                                                     "x-worker-can": "all"},
+                                                                "x-worker-archive": archive_header(), "x-worker-can": "all"},
                           timeout=30)
             delay = POLL_SECONDS
             if r.status_code == 403:
