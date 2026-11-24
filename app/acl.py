@@ -92,7 +92,7 @@ PERMS = [
     ("telegram.use", "extras", "Telegram", True),
     ("pexels.use", "extras", "Pexels stock photos", True),
     ("ai.reels", "extras", "AI reels (local AI on the helper PC)", True),
-    ("helper.manage", "extras", "Helper PC (download, approve, remove)", True),
+    ("helper.manage", "extras", "Helper PC (download, helper key, approve, remove)", True),
     ("google.keys", "extras", "Change their own Google project keys", True),
     ("cookies.manage", "extras", "YouTube cookies for the server", True),
     ("affiliate.use", "extras", "Affiliate links", True),
@@ -155,6 +155,7 @@ ROUTES = [
     ("GET", "/healthz", ANYONE, None),
     ("GET", "/helper/phone.py", ANYONE, None),  # the Android phone helper: a public file of the repository, no secrets
     ("GET", "/helper/setup.sh", ANYONE, None),
+    ("GET", "/helper/install.ps1", ANYONE, None),  # the Windows helper's one-time setup: a public file, the key comes on the command line
     ("GET", "/media/{cid}/{exp}/{sig}.mp4", ANYONE, None),  # signed, short-lived link for Instagram / Facebook
     ("POST", "/api/pay/razorpay/webhook", ANYONE, None),  # Razorpay's own call, proven by its signature (app/payments.py)
     # --- the account itself
@@ -369,7 +370,13 @@ ROUTES = [
     ("GET", "/api/workers", SIGNED, None),
     ("POST", "/api/workers/{wid}/approve", "helper.manage", "Approved a helper PC"),
     ("DELETE", "/api/workers/{wid}", "helper.manage", "Removed a helper PC"),
+    # helper key (app/enroll.py): helpers that carry it join by themselves; only the account's admin sees it
+    ("GET", "/api/helper/key", "helper.manage", None),
+    ("POST", "/api/helper/key/show", "helper.manage", "Looked at the helper key (install commands)"),
+    ("POST", "/api/helper/key/rotate", "helper.manage", "Made a new helper key (the old one stopped)"),
+    ("POST", "/api/helper/key/revoke", "helper.manage", "Switched the helper key off"),
     ("POST", "/api/worker/register", HELPER, None),
+    ("GET", "/api/worker/package", HELPER, None),  # the helper program for the install command (needs the helper key)
     ("GET", "/api/worker/jobs", HELPER, None),
     ("GET", "/api/worker/backup", HELPER, None),
     ("GET", "/api/worker/update", HELPER, None),

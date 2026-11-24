@@ -56,7 +56,7 @@ HOW = {
         "On a Windows PC that is usually on (at home), press “Download my helper” below and save the ZIP file.",
         "Open the folder where it was saved, right-click the ZIP → “Extract All…” → Extract. Open the new folder.",
         "Double-click “Start helper”. If Windows shows a blue “Windows protected your PC” box, press “More info” → “Run anyway” (it is your own helper). The first time it installs what it needs; if it says Python was installed, close the window and double-click “Start helper” once more.",
-        "The window shows a 6-digit pairing code. Type that code below and press Approve.",
+        "It connects by itself (the download carries your helper key) — nothing to approve. This page moves on as soon as it runs.",
         "To make it start by itself with Windows: open the folder “worker” and double-click “install_autostart”.",
     ],
     "face": [

@@ -32,10 +32,12 @@ those. A clip from the phone goes up without automatic captions.
    curl -fsSL https://YOUR-SERVER/helper/setup.sh | bash -s -- https://YOUR-SERVER
    ```
 
-   First it asks for a "helper code": the Super Admin's phone just presses Enter; a customer's phone pastes
-   the code shown in their dashboard. Then it takes a few minutes. If it asks another question, press Enter.
-7. **Approve the phone.** At the end Termux shows a 6-digit pairing code. In the dashboard: My channels →
-   Helper PC → the new "Android phone" → **Approve** → type the code.
+   Copy it from My channels → Helper PC → **Show** (Android phone). It first asks for your **helper key**: press
+   **Copy key** in the dashboard and paste it (nothing is shown while you paste). The key is never on the command
+   line, so it is not in Termux's history. Then it takes a few minutes. If it asks another question, press Enter.
+7. **Nothing to approve.** At the end Termux says "Connected by itself - nothing to approve" and the phone shows
+   in the dashboard. (Pressed Enter instead of giving a key: it asks for a helper code and ends with a 6-digit pairing
+   code: then press **Approve** on the new "Android phone" and type it.)
 8. **Super Admin only: make it the central helper.** In the same list press **Make central**. From now on the
    phone also downloads for every customer who has no helper of their own, and for customers who switched on
    "Use the shared helper when my PC is off" while their PC is off. It only downloads and analyses for them.
@@ -58,7 +60,9 @@ Nothing. The helper:
 - **See what it is doing:** in Termux type `tail -n 30 ~/raji-helper/helper.log`.
 - **Stop it:** `bash ~/raji-helper/stop.sh`.
 - **Set it up again from the start:** paste the command from step 6 again. It is safe.
-- **Removed it in the dashboard by mistake:** it registers again by itself; approve the new pairing code.
+- **Removed it in the dashboard by mistake:** it does not join again by itself (that is what Remove means); it
+  waits with a pairing code — press **Approve** and type it.
+- **Wi-Fi dropped / phone was asleep:** it looks at the network every 30 s and calls in as soon as it is back.
 
 ## Size
 

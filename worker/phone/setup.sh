@@ -3,8 +3,10 @@
 #
 #   curl -fsSL https://YOUR-SERVER/helper/setup.sh | bash -s -- https://YOUR-SERVER
 #
-# A customer's own phone asks for the helper code (My channels -> Helper PC shows it); the Super Admin presses Enter.
-# The code is typed at the prompt (or put in ~/raji-helper/helper_code.txt), never on the command line.
+# It asks for the account's helper key (dashboard: My channels -> Helper PC -> Show -> Copy key) and keeps it in
+# ~/raji-helper/enroll_key.txt (only you can read it): the phone then joins by itself, nothing to approve. The key is
+# typed at the prompt (hidden), never on the command line, so it is not in the shell history.
+# No key (Enter): a customer's phone asks for the helper code and is approved with a pairing code, as before.
 # Running it again is safe: it updates everything and restarts the helper.
 set -u
 SERVER="${1:-https://social-media-automation-production-f5543fa3.up.railway.app}"
@@ -20,7 +22,23 @@ esac
 say() { printf '\n== %s\n' "$1"; }
 
 mkdir -p "$DIR" "$BOOT"
-if [ ! -s "$DIR/helper_code.txt" ] && [ -r /dev/tty ]; then
+KEY_RX='^rk[0-9]{1,9}[.][0-9a-f]{8}[.][A-Za-z0-9_-]{43}$'   # exactly the shape the server makes
+KEY=""
+if [ -r /dev/tty ]; then
+  echo "Helper key (dashboard: My channels -> Helper PC -> Show -> Copy key). Paste it and press Enter"
+  printf '(nothing is shown; just Enter if this phone has one already or you use a helper code): '
+  read -r -s KEY </dev/tty || KEY=""
+  echo
+  KEY="$(printf '%s' "$KEY" | tr -d '[:space:]')"
+fi
+if [ -n "$KEY" ]; then
+  if ! [[ "$KEY" =~ $KEY_RX ]]; then
+    echo "This helper key does not look right - copy it again from the dashboard (Show -> Copy key)."; exit 1
+  fi
+  (umask 077; printf '%s\n' "$KEY" > "$DIR/enroll_key.txt")
+  chmod 600 "$DIR/enroll_key.txt"
+fi
+if [ -z "$KEY" ] && [ ! -s "$DIR/enroll_key.txt" ] && [ ! -s "$DIR/helper_code.txt" ] && [ -r /dev/tty ]; then
   printf 'Helper code (only for a customer'"'"'s phone; the owner just presses Enter): '
   CODE=""
   read -r CODE </dev/tty || CODE=""
@@ -95,13 +113,15 @@ pkill -f raji-helper/start.sh 2>/dev/null; pkill -f "phone.py" 2>/dev/null; slee
 nohup bash "$DIR/start.sh" >/dev/null 2>&1 &
 for i in $(seq 1 60); do
   sleep 2
-  if [ -f "$DIR/helper.log" ] && grep -q "pairing code\|Waiting for jobs\|running for" "$DIR/helper.log"; then break; fi
+  if [ -f "$DIR/helper.log" ] && grep -q "pairing code\|Waiting for jobs\|running for\|nothing to approve" "$DIR/helper.log"; then break; fi
 done
 echo
 tail -n 5 "$DIR/helper.log" 2>/dev/null
 CODE6="$(grep -o 'pairing code: [0-9]\{6\}' "$DIR/helper.log" 2>/dev/null | tail -n 1 | grep -o '[0-9]\{6\}')"
 echo
-if [ -n "$CODE6" ]; then
+if grep -q "nothing to approve" "$DIR/helper.log" 2>/dev/null; then
+  echo "Connected by itself - nothing to approve. It appears in the dashboard under My channels -> Helper PC."
+elif [ -n "$CODE6" ]; then
   echo "Now open the dashboard -> My channels -> Helper PC -> Approve, and type: $CODE6"
 else
   echo "The helper is running. See $DIR/helper.log"

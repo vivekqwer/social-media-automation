@@ -248,6 +248,8 @@ class Worker(Base):
     archive_dir = Column(String(300))  # where this helper keeps the saved videos (it tells the server on every poll)
     inventory_at = Column(DateTime)  # this helper was last asked to list its archive folder
     central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
+    install_id = Column(String(32))  # random id the helper keeps in a file (stays the same when its token changes)
+    enrolled = Column(String(16))  # id of the helper key it joined with by itself (empty: approved by hand / pairing code)
     can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))
     last_seen = Column(DateTime)

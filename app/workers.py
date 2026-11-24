@@ -220,6 +220,7 @@ def as_dict(w: Worker) -> dict:
         "ip": w.ip,
         "online": online,
         "central": bool(w.central),
+        "enrolled": bool(w.enrolled),  # joined by itself with the helper key
         "can": w.can,
         "last_seen": (w.last_seen.isoformat() + "Z") if w.last_seen else None,
         "created_at": (w.created_at.isoformat() + "Z") if w.created_at else None,

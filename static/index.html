@@ -413,16 +413,17 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div id="bk-list" style="margin-top:12px"><span class="mut sm">…</span></div>
               <div class="mut sm" style="margin-top:10px;line-height:1.7">Keep the downloaded file somewhere safe (Google Drive, a pen drive). <b>Channel logins in a backup only work on this same server</b> — after restoring on a new server, press <b>Reconnect</b> on each channel. Restoring replaces everything with the backup; a safety backup of what is there now is made first.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
+              <div id="wk-key" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"><span class="mut sm">…</span></div>
               <div id="wk-claim" class="hide" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"></div>
               <label class="row sm hide" id="wk-shared" style="gap:8px;margin-bottom:10px"><span class="switch"><input type="checkbox" id="wk-shared-on"><i></i></span><span id="wk-shared-txt">Use the shared helper when my PC is off</span></label>
               <div id="wk-list"></div>
               <div id="wk-arch" class="sm mut" style="margin-top:8px;line-height:1.7"></div>
               <div class="tabs" id="wk-tabs" style="margin-top:12px"><button class="tab on" data-wt="pc">Windows PC</button><button class="tab" data-wt="phone">Android phone</button></div>
-              <div class="mut sm" id="wk-pc" style="margin-top:10px;line-height:1.7"><b>Start automatically (recommended, once):</b> in the project folder double-click <b>worker\install_autostart.bat</b>. The helper then runs hidden whenever your PC is on, restarts itself if it stops, and updates itself when the server gets new code.<br>Manual start: <b>worker\run_worker.bat</b>. New helpers appear here — press <b>Approve</b>.</div>
+              <div class="mut sm" id="wk-pc" style="margin-top:10px;line-height:1.7"><b>A new Windows PC:</b> press <b>Show</b> above, copy the <b>Windows PC</b> command, open <b>Windows PowerShell</b> (Start → type PowerShell), paste it and press Enter; when it waits for the key, press <b>Copy key</b>. It installs the helper, connects it by itself (nothing to approve) and starts it hidden at every sign-in. It restarts itself if it stops, reconnects by itself after sleep or a network change, and updates itself when the server gets new code.<br>The helper already in the project folder: <b>worker\install_autostart.bat</b> once; it is handed the key by itself. A helper started without the key appears below as waiting — press <b>Approve</b> and type its pairing code.</div>
               <div class="mut sm hide" id="wk-phone" style="margin-top:10px;line-height:1.7">An Android phone at home, on the charger and on Wi-Fi, downloads the videos (no reels, voice-overs or automatic captions).
                 <ol style="margin:6px 0;padding-left:18px"><li>Install <b>F-Droid</b> (f-droid.org), then in F-Droid install <b>Termux</b> and <b>Termux:Boot</b> — not the Play Store Termux. Open Termux:Boot once.</li><li>Settings → Apps → Termux and Termux:Boot → Battery → <b>Unrestricted</b>.</li><li>Open Termux, paste this command and press Enter:</li></ol>
                 <div class="row" id="wk-phone-cmd" style="gap:8px;flex-wrap:wrap"><code id="wk-cmd" style="user-select:all;word-break:break-all;flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">…</code><button class="btn ghost sm" id="wk-cmd-copy">Copy</button></div>
-                <div style="margin-top:6px">At the end it shows a 6-digit pairing code: press <b>Approve</b> on the new “Android phone” above and type it. It then starts by itself whenever the phone starts and updates itself.</div></div></div></div>
+                <div style="margin-top:6px">With the command above and the helper key (<b>Show</b> → <b>Copy key</b>, pasted when it asks) the phone connects by itself — nothing to approve. It then starts by itself whenever the phone starts, reconnects by itself after Wi-Fi drops, and updates itself. (An older command without the key ends with a 6-digit pairing code: press <b>Approve</b> on the new “Android phone” above and type it.)</div></div></div></div>
             <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
               <ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.7"><li>Use a <b>spare Google account</b>, not your main one.</li><li>Open YouTube in a private window, sign in, then export <i>cookies.txt</i> for youtube.com (extension “Get cookies.txt LOCALLY”).</li><li>Close the private window, then paste the file here.</li></ol>
               <textarea id="ck-text" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;..." style="min-height:90px;font-size:12px"></textarea>
@@ -1388,20 +1389,51 @@ $('#face-del').onclick=()=>once(async()=>{if(confirm('Remove the default face fr
 async function loadWorkers(){
   try{const L=await api('/api/workers');
     $('#wk-list').innerHTML=L.length?L.map(w=>`<div class="item"><div class="avatar" style="background:var(--muted);color:var(--fg)">${ico('dashboard')}</div><div class="tx"><b>${esc(w.name)}</b><span class="mut sm">${w.last_seen?'Last seen '+when(w.last_seen):'Never seen'}${w.approved?'':' · registered '+when(w.created_at)+(w.ip?' from '+esc(w.ip):'')}</span></div>
-      ${!w.approved?'<span class="badge queued">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${!w.approved?'<span class="badge queued" title="Started without the helper key">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${w.enrolled?'<span class="badge outline" title="Joined by itself with the helper key">Key</span>':''}
       ${w.central?'<span class="badge uploaded" title="Also downloads for every account without a helper of its own">Central</span>':''}
       ${w.approved&&ME.role==='super'&&!ME.viewing?`<button class="btn outline sm" data-wc="${w.id}" data-on="${w.central?0:1}" title="A central helper also downloads for every account that has no helper of its own online">${w.central?'Stop central':'Make central'}</button>`:''}
-      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}">Approve</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Start worker\\run_worker.bat on your computer.');
+      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}" title="Only for a helper without the key">Approve (pairing code)</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove (it does not join again by itself)">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Press Show above and run the command on your PC or phone.');
     const hp=(OV&&OV.helper)||{},na=+hp.archived||0;
     $('#wk-arch').innerHTML=(L.some(w=>w.approved&&(!w.can||w.can==='all'||w.can.split(',').includes('archive')))&&hp.archive_ready===false)
       ?`<span style="color:var(--warn)">${ico('alert')} <b>Update the helper PC so it can save uploaded videos — until then they stay on the server.</b> It updates itself while it runs; otherwise start <b>worker\\run_worker.bat</b> once.</span>`
       :`${ico('check')} <b>${na}</b> uploaded video${na===1?'':'s'} saved on your PC, in <b>${esc(hp.archive_dir||'the folder RajiStudioArchive in your user folder')}</b>. The server keeps a video only while it waits for its upload; open a clip and press <b>Get the video back from the PC</b> to bring one back.`
         +(hp.archive_missing?` <span style="color:var(--warn)">${ico('alert')} ${+hp.archive_missing} saved video(s) are missing from that folder — nothing was deleted; put the folder back if you moved it.</span>`:'');
     $$('[data-wa]').forEach(b=>b.onclick=()=>once(async()=>{const code=prompt('Type the 6-digit pairing code shown in the helper window on your PC or in Termux on the phone (also in helper.log):');if(code===null)return;await api(`/api/workers/${b.dataset.wa}/approve`,'POST',{code});toast('Helper approved');loadWorkers()}));
-    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper PC?')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
+    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper? It stops getting work and does not join again by itself. (To stop every helper that has the key, press New key.)')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
     $$('[data-wc]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';await api(`/api/admin/workers/${b.dataset.wc}/central`,'POST',{on});toast(on?'Central helper: it now also downloads for every account without a helper':'No longer central');loadWorkers()},b));
   }catch(e){}
-  phoneCmd();
+  phoneCmd();loadKey();
+}
+// ---------- helper key: helpers join by themselves (the key is shown only after "Show", to this account's admin) ----------
+// The install commands never contain the key: the installer asks for it (Windows also reads it from the clipboard).
+let KEYCMD=null;
+async function loadKey(shown){
+  const box=$('#wk-key');if(!box)return;let k;
+  if(shown)KEYCMD=shown;
+  try{k=shown||await api('/api/helper/key')}catch(e){box.classList.add('hide');return}
+  box.classList.remove('hide');
+  const on=k.state!=='off',joined=(k.joined||[]).filter(j=>j.current),anyJoined=(k.joined||[]).length;
+  const cmd=(id,title,how,text)=>`<div style="margin-top:8px"><b>${title}</b> <span class="mut sm">${how}</span><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><code id="${id}" style="user-select:all;word-break:break-all;flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">${esc(text)}</code><button class="btn ghost sm" data-kcopy="${id}">Copy</button></div></div>`;
+  const masked=KEYCMD?KEYCMD.key.split('.').slice(0,2).join('.')+'.••••••••':'';
+  box.innerHTML=(on?`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${ico('check')}<span class="sm" style="flex:1;min-width:200px"><b>Helpers connect by themselves.</b> Run a command below on a new PC or phone and give it the helper key when it asks — no approval, no pairing code. Up to ${k.max_helpers} helpers per key.</span>
+      ${KEYCMD?'<button class="btn outline sm" id="wk-khide">Hide</button>':'<button class="btn sm" id="wk-kshow">Show</button>'}<button class="btn outline sm" id="wk-krot">New key</button><button class="btn outline sm" id="wk-kleak">Key leaked</button><button class="btn ghost sm" id="wk-krev">Switch off</button></div>`
+      :`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${ico('alert')}<span class="sm" style="flex:1;min-width:200px"><b>The helper key is switched off.</b> New helpers wait for approval with a pairing code. Helpers already connected keep working.</span><button class="btn sm" id="wk-krot">New key</button>${anyJoined?'<button class="btn outline sm" id="wk-kleak">Key leaked</button>':''}</div>`)
+    +(joined.length?`<div class="mut sm" style="margin-top:6px">Joined with this key: ${joined.map(j=>esc(j.name)+(j.created_at?' ('+when(j.created_at)+')':'')).join(', ')}</div>`:'')
+    +(on&&KEYCMD?`<div style="margin-top:8px"><b>Your helper key</b> <span class="mut sm">— only for your own PCs and phones</span><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><code style="flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">${esc(masked)}</code><button class="btn sm" id="wk-kcopykey">Copy key</button></div></div>`
+      +cmd('wk-klap','Windows PC','— paste in Windows PowerShell; when it waits for the key, press Copy key (it reads the clipboard):',KEYCMD.laptop)
+      +cmd('wk-kphone','Android phone','— paste in Termux; when it asks for the key, press Copy key and paste it there:',KEYCMD.phone)
+      +'<div class="mut sm" style="margin-top:6px">The commands hold no key, so the key never lands in a shell history. Anyone who has the key can add a helper to your account: do not share it. If it leaked, press <b>Key leaked</b>.</div>':'');
+  const hide=$('#wk-khide');if(hide)hide.onclick=()=>{KEYCMD=null;loadKey();phoneCmd()};
+  const show=$('#wk-kshow');if(show)show.onclick=()=>once(async()=>{await loadKey(await api('/api/helper/key/show','POST'))},show);
+  $('#wk-krot').onclick=()=>once(async()=>{if(on&&!confirm('Make a new helper key? The old key stops working at once.\n\nHelpers you approved yourself, and helpers that joined with the current key, keep working and get the new key by themselves. Helpers that joined with an older key do not.\n\nIf the key leaked, press “Key leaked” instead: “New key” alone does not remove helpers that already joined with it.'))return;
+    await loadKey(await api('/api/helper/key/rotate','POST'));toast('New helper key made')},$('#wk-krot'));
+  const leak=$('#wk-kleak');if(leak)leak.onclick=()=>once(async()=>{if(!confirm('Key leaked? This does three things at once:\n\n1. switches the old key off,\n2. removes EVERY helper that joined with a key ('+anyJoined+') — they do not come back by themselves; approve your own again with their pairing code,\n3. makes a new key.\n\nHelpers you approved yourself keep working.'))return;
+    await loadKey(await api('/api/helper/key/rotate','POST',{leaked:true}));toast('Old key off, helpers that joined with it removed, new key made');loadWorkers()},leak);
+  const rev=$('#wk-krev');if(rev)rev.onclick=()=>once(async()=>{if(!confirm('Switch the helper key off? New helpers then need approval with a pairing code. Helpers already connected keep working.'))return;
+    await api('/api/helper/key/revoke','POST');KEYCMD=null;toast('Helper key switched off');loadKey();phoneCmd()},rev);
+  const ck=$('#wk-kcopykey');if(ck)ck.onclick=async()=>{try{await navigator.clipboard.writeText(KEYCMD.key);toast('Key copied — paste it where the installer asks')}catch(e){prompt('Copy this key:',KEYCMD.key)}};
+  $$('[data-kcopy]').forEach(b=>b.onclick=async()=>{const v=$('#'+b.dataset.kcopy).textContent;try{await navigator.clipboard.writeText(v);toast('Copied')}catch(e){prompt('Copy this command:',v)}});
 }
 $$('#wk-tabs [data-wt]').forEach(b=>b.onclick=()=>{$$('#wk-tabs .tab').forEach(x=>x.classList.toggle('on',x===b));$('#wk-pc').classList.toggle('hide',b.dataset.wt!=='pc');$('#wk-phone').classList.toggle('hide',b.dataset.wt!=='phone')});
 async function phoneCmd(){
@@ -1411,7 +1443,8 @@ async function phoneCmd(){
   if(sh&&r.code){sh.classList.remove('hide');$('#wk-shared-on').checked=!!r.shared_chosen;
     $('#wk-shared-txt').textContent='Use the shared helper when my PC is off'+(r.shared?' — the shared helper downloads your videos now'+(r.shared_online?'':' (it is offline at the moment)'):' — off: only your own helper PC downloads')+'. It never makes your reels, voice-overs or captions.';
     $('#wk-shared-on').onchange=e=>once(async()=>{await api('/api/account/shared-helper','POST',{on:e.target.checked});toast('Saved');phoneCmd()})}
-  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}`;el.textContent=cmd+(r.code?'   (when it asks for the helper code, paste: '+r.code+')':'');
+  // never the key in this command: setup.sh asks for it (Helper key box above: Show -> Copy key)
+  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}`;el.textContent=cmd+'   (it asks for your helper key: press Show above, then Copy key'+(r.code?'; without a key it asks for the helper code: '+r.code:'')+')';
   $('#wk-cmd-copy').onclick=async()=>{try{await navigator.clipboard.writeText(cmd);toast('Copied')}catch(e){prompt('Copy this command:',cmd)}};
 }
 async function loadCookies(){
@@ -1788,7 +1821,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
-  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){
@@ -1823,7 +1856,7 @@ function renderPlan(){
   keysForm($('#gk-body'),()=>{toast('Keys saved. If a channel now shows “Reconnect needed”, connect it again.');loadDests()});
   loadOffers().catch(()=>{});
   api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
-    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
+    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">Not needed with “Download my helper” (it carries your helper key) or the commands above with your helper key — they connect by themselves. Only for a helper without the key: save this code in <b>worker\\helper_code.txt</b> before its first start, then approve it below with the pairing code it shows.</div>`;
     $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
 }
 const PERIODS={monthly:'per month',yearly:'per year',once:'one-time'};
@@ -1879,7 +1912,8 @@ async function loadStart(){
       <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input id="ob-cid" autocomplete="off" placeholder="1234567890-abc….apps.googleusercontent.com" value="${esc(g.client_id||'')}"></label><label class="f grow">Client secret<input id="ob-sec" type="password" autocomplete="new-password" placeholder="GOCSPX-…"></label><button class="btn" id="ob-keys" style="align-self:flex-end">Save</button></div>`,
     channel:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/login">Connect YouTube channel</a></div>`,
     verify:()=>`<div class="row" style="margin-top:8px"><a class="btn outline" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Open youtube.com/verify</a><button class="btn" data-oback="verify">I have verified it</button></div>`,
-    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a><span class="mut sm">${o.helper_waiting?'A helper is waiting — type its pairing code:':'After starting it, type the pairing code it shows:'}</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn" id="ob-approve">Approve</button></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">${o.helper_waiting?'':'Waiting for your helper to start… this page checks every 10 seconds.'}</div>`,
+    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">It connects by itself — nothing to approve. Waiting for your helper to start… this page checks every 10 seconds.</div>
+      ${o.helper_waiting?`<div class="row" style="margin-top:8px;flex-wrap:wrap"><span class="mut sm">A helper without the key is waiting — type its pairing code:</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn outline" id="ob-approve">Approve</button></div>`:''}`,
     face:()=>`<div class="row" style="margin-top:8px"><label class="btn">Upload my photo<input type="file" accept="image/jpeg,image/png,image/webp" id="ob-face" hidden></label><button class="btn ghost" data-oback="face">Skip for now</button><span class="mut sm" id="ob-facenote"></span></div>`,
     gmail:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/gmail">Connect Gmail</a><button class="btn ghost" data-oback="gmail">Skip for now</button></div>`,
     source:()=>`<div id="ob-niche" style="margin-top:8px"></div><div class="row" style="margin-top:10px"><button class="btn ghost sm" id="ob-src">Add a source myself instead</button></div>`};
