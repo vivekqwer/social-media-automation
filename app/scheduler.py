@@ -214,6 +214,13 @@ def process_queue():
                 c.status, c.error = "failed", "; ".join(errs)
                 s.commit()
                 continue
+            from . import strikes
+
+            if p is not None and p.mode not in ("original", "own") and strikes.is_blocked(p.channel_url):
+                # the last gate: this creator is on the never-use list after a strike (strikes.py) — nothing of theirs goes up any more
+                c.held_was, c.status, c.autoqueue, c.error = "queued", strikes.HELD, False, strikes.HELD_NOTE
+                s.commit()
+                continue
             # atomic claim: only one worker can flip queued -> uploading
             res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == "queued").values(status="uploading"))
             s.commit()
@@ -351,7 +358,11 @@ def start():
     #   daily_summary        Telegram (telegram.enabled)
     #   learn_daily          auto-tune switch of the account; sources only when "Change sources" is on -> learn.daily
     #   post_comments        "First comment under new videos" (and the account's own on/off in My channels)
-    #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time
+    #   strike_mails         "Permission mails to creators" (YouTube's notices in Gmail — they only open a case and tell the
+    #                        owner —, the request to the creator — sent by itself only when the account switched that on in
+    #                        Alerts → Strikes and the address is YouTube's own — and their answer)
+    #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time,
+    #           strike_watch (a strike YouTube itself shows: never-use list, held clips, scheduled videos kept private — no switch)
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
     add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
@@ -415,5 +426,11 @@ def start():
     from .comments import post_due as post_comments
     add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
+    from .strikes import mail_round as strike_mails, watch as strike_watch
+    add(strike_watch, "interval", minutes=10, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7))  # protect the channel after a strike
+    # in the scheduler's own thread, NOT the single render worker (Gmail can be slow; the round never waits for a lock)
+    add(when_on("gmail.send", strike_mails), "interval", minutes=15, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=9))  # YouTube's notices, the request, the answer
     sch.start()
     return sch

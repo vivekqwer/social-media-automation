@@ -1102,6 +1102,10 @@ def create_project(body: ProjectIn):
     if body.mode == "cc" and not is_cc(info["license"]):
         raise HTTPException(409, {"code": "not_cc", "license": info["license"] or "Standard YouTube License",
                                   "title": info["title"], "channel": info["channel"]})
+    from . import strikes
+
+    if strikes.is_blocked(info.get("channel_url")):  # on the never-use list after a strike: not by hand either
+        raise HTTPException(409, strikes.blocked_message(info.get("channel") or ""))
     with SessionLocal() as s:
         p = Project(url=body.url, mode=body.mode, permission_note=body.permission_note, **info)
         s.add(p)
@@ -1401,6 +1405,7 @@ def voice_upload(cid: int, file: UploadFile = File(...)):
 def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
+        _not_held(c)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
@@ -1412,9 +1417,18 @@ def render(cid: int):
     return {"status": "rendering"}
 
 
+HELD_MSG = ("This clip is held: the creator of its video is on the never-use list after a strike on your channel, so it "
+            "cannot be made or uploaded. Nothing was deleted. Alerts → Strikes shows the case; “Use this creator again” there gives the clip back.")
+
+
+def _not_held(c: Clip):
+    if c.status == "held":
+        raise HTTPException(409, HELD_MSG)
+
+
 def _claim_for_render(s, cid: int):
     """Atomically mark a clip as rendering (a fresh start also resets the helper's download attempts)."""
-    res = s.execute(update(Clip).where(Clip.id == cid, Clip.status.notin_(["rendering", "uploading", "uploaded"]))
+    res = s.execute(update(Clip).where(Clip.id == cid, Clip.status.notin_(["rendering", "uploading", "uploaded", "held"]))
                     .values(status="rendering", error=None, fetch_tries=0, job_lease=None, fetch_since=None))
     s.commit()
     if res.rowcount != 1:
@@ -1426,6 +1440,7 @@ def refetch_source(cid: int):
     """Throw away the downloaded source section and fetch it again (e.g. a bad or low-quality download)."""
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
+        _not_held(c)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         if (DATA_DIR / "clips" / str(cid) / "src" / "upload.mp4").exists():
@@ -1518,6 +1533,7 @@ def schedule(cid: int, body: ScheduleIn):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
+        _not_held(c)
         if c.status not in ("rendered", "queued"):
             raise HTTPException(409, f"Clip is '{c.status}': render it first (edits invalidate the render).")
         if not c.output_path or not Path(c.output_path).exists():
@@ -1638,7 +1654,7 @@ def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
 def overview():
     badge = _alerts_badge()  # before the session below is opened: it reads (and may tidy) on its own
     with SessionLocal() as s:
-        statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed")
+        statuses = ("draft", "fetching", "rendering", "rendered", "queued", "uploading", "uploaded", "failed", "held")
         counts = {k: s.query(Clip).filter(Clip.status == k, Clip.removed_at.is_(None)).count() for k in statuses}
         upcoming = s.query(Clip).filter(Clip.status.in_(["queued", "uploading"])).order_by(Clip.publish_at).limit(8).all()
         recent = s.query(Clip).filter(Clip.status == "uploaded", Clip.removed_at.is_(None)).order_by(Clip.id.desc()).limit(6).all()
@@ -1899,6 +1915,7 @@ def approve_clip(cid: int, body: ApproveIn):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
+        _not_held(c)
         if c.status not in ("rendered", "queued", "failed"):
             raise HTTPException(409, f"Clip is '{c.status}'; render it first.")
         errs = check_edit(p, c)
@@ -2454,6 +2471,90 @@ def comment_set(body: CommentIn):
             raise HTTPException(400, "Type the comment first.")
     comments.save(body.on, body.preset, custom)
     return _comment_settings()
+
+
+# ---------- strike responder: cases, the request to the creator, the words for YouTube (app/strikes.py) ----------
+class StrikeReplyIn(BaseModel):
+    auto: bool = False
+
+
+class StrikeSendIn(BaseModel):
+    to: str | None = Field(None, max_length=200)
+
+
+def _strike_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except KeyError:
+        raise HTTPException(404, "This case does not exist (any more). Press Check now to reload the list.")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/api/strikes")
+def strikes_list():
+    """Every strike case of this account, as the Alerts page shows them, with the account's own switch."""
+    from . import strikes
+
+    return {"cases": strikes.listing(), "settings": strikes.settings_public()}
+
+
+@app.get("/api/settings/strike-reply")
+def strike_reply_get():
+    from . import strikes
+
+    return strikes.settings_public()
+
+
+@app.post("/api/settings/strike-reply")
+def strike_reply_set(body: StrikeReplyIn):
+    """The account's own choice: send the humble request to the creator automatically (off unless switched on here)."""
+    from . import strikes
+
+    if body.auto:
+        acl.need("gmail.send")  # switching it OFF is always possible
+    strikes.save_settings(body.auto)
+    return strikes.settings_public()
+
+
+@app.post("/api/strikes/{sid}/send")
+def strike_send(sid: int, body: StrikeSendIn | None = None):
+    """Send the ready request to the creator now, from the owner's Gmail (once per struck video)."""
+    from . import strikes
+
+    return _strike_call(strikes.send_request, sid, (body.to if body else None), "hand")
+
+
+@app.post("/api/strikes/{sid}/solved")
+def strike_solved(sid: int):
+    from . import strikes
+
+    return _strike_call(strikes.solve, sid)
+
+
+@app.post("/api/strikes/{sid}/release")
+def strike_release(sid: int):
+    """Use this creator again: off the never-use list; the held clips come back to Clips for review."""
+    from . import strikes
+
+    return _strike_call(strikes.release, sid)
+
+
+@app.post("/api/strikes/{sid}/block")
+def strike_block(sid: int):
+    """Stop using this creator (offered for every case with a creator; a copyright strike does it by itself): never-use
+    list, their source stopped, their waiting clips held, their scheduled videos kept private."""
+    from . import strikes
+
+    return _strike_call(strikes.block_creator, sid)
+
+
+@app.post("/api/strikes/{sid}/hide-public")
+def strike_hide_public(sid: int):
+    """Set the struck creator's other public videos on this channel to private (nothing is deleted)."""
+    from . import strikes
+
+    return _strike_call(strikes.hide_public, sid)
 
 
 class ClipCommentIn(BaseModel):
@@ -3923,6 +4024,10 @@ def quick_start(body: QuickIn):
     if body.mode == "cc" and not is_cc(info["license"]):
         raise HTTPException(409, {"code": "not_cc", "license": info["license"] or "Standard YouTube License",
                                   "title": info["title"], "channel": info["channel"]})
+    from . import strikes
+
+    if strikes.is_blocked(info.get("channel_url")):  # on the never-use list after a strike: no quick upload either
+        raise HTTPException(409, strikes.blocked_message(info.get("channel") or ""))
     if body.mode == "permission":
         _check_permission_note(body.permission_note)
     if body.length == "whole" and info["duration"] > 90 * 60:

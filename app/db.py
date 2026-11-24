@@ -164,7 +164,9 @@ class Clip(Base):
     thumb_face = Column(Boolean, default=True)  # put my face (channel's or default) on the thumbnail
     yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...
     yt_checked_at = Column(DateTime)
-    # draft | rendering | rendered | queued | uploading | uploaded | failed
+    held_was = Column(String(20))  # status before the strike responder held this clip (status "held": it will not upload)
+    kept_private = Column(Boolean)  # already on YouTube with a future publish time: set to private after a strike (strikes.py)
+    # draft | rendering | rendered | queued | uploading | uploaded | failed | held (after a strike from its creator)
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
     youtube_id = Column(String(32))
@@ -249,6 +251,25 @@ class Alert(Base):
     details = Column(JSON)  # video title/link, my channel, source creator, upload time
     seen = Column(Boolean, default=False)
     created_at = Column(DateTime, default=utcnow)
+
+
+class StrikeCase(Base):
+    """One struck video: a copyright complaint (a claimant / the creator), a Community Guidelines strike, or another
+    removal. What the system did about it and what is left for the owner is kept in `data` (see app/strikes.py)."""
+
+    __tablename__ = "strike_cases"
+    id = Column(Integer, primary_key=True)
+    clip_id = Column(Integer, index=True)  # my clip (empty: a notice from YouTube that matched none of my videos)
+    youtube_id = Column(String(32), index=True)  # my video on YouTube
+    notice_id = Column(String(64), index=True)  # the Gmail message that opened a case without a clip (never opened twice)
+    kind = Column(String(20))  # copyright | guidelines | other
+    state = Column(String(60))  # what the video monitor saw (rejected:copyright ...) or "mail"
+    status = Column(String(20), default="open")  # open | retracted (the claimant says it is taken back) | solved
+    creator_key = Column(String(200), index=True)  # the struck creator's channel id (the never-use list is keyed by it)
+    mail_state = Column(String(20))  # none | ready | no_email | sending | sent | interrupted (claimed atomically: never twice)
+    data = Column(JSON)  # video, creator, notices, what was done, the mail, the reply, a plain-word log
+    created_at = Column(DateTime, default=utcnow)
+    updated_at = Column(DateTime, default=utcnow)
 
 
 class ChannelStat(Base):

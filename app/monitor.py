@@ -89,6 +89,7 @@ def check_uploads() -> dict:
     for cid, did, yid in rows:
         by_dest.setdefault(did, []).append((cid, yid))
     checked = new = 0
+    changed = []  # clips whose state changed in this check (the strike responder acts only on a change)
     for did, items in by_dest.items():
         try:
             found = youtube.video_status(did, [y for _, y in items])
@@ -116,6 +117,7 @@ def check_uploads() -> dict:
                         "clip_range": [c.start, c.end], "state": state,  # the Alerts page sorts into tabs by this
                     }))
                     new += 1
+                    changed.append(cid)
                     try:
                         from .telegram import esc, notify
 
@@ -128,4 +130,16 @@ def check_uploads() -> dict:
                 c.yt_state, c.yt_checked_at = state, utcnow()
                 checked += 1
             s.commit()
+    try:  # a strike-like state: protect the channel at once (only YouTube's own status acts; see strikes.py)
+        from . import strikes
+
+        strikes.watch(changed)
+    except Exception as e:  # noqa: BLE001  (the check itself is done; this is written down and tried again by its own job)
+        log.warning("monitor: strike responder: %s", str(e)[:200])
+        try:
+            from .guide import record_error
+
+            record_error("Strike responder (after checking my videos)", e)
+        except Exception:  # noqa: BLE001
+            pass
     return {"checked": checked, "new_alerts": new}

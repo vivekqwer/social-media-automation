@@ -77,12 +77,23 @@ def _sent_today() -> int:
     return int(get_setting("gmail_sent:" + utcnow().strftime("%Y-%m-%d")) or 0)
 
 
-def send(to: str, body: str, subject: str | None = None) -> dict:
+def send(to: str, body: str, subject: str | None = None, kind: str = "permission") -> dict:
+    """kind "strike": a request to a claimant after a strike (app/strikes.py). It has its own daily limit there and
+    does not use up (or wait for) the day's permission mails."""
     to = (to or "").strip()
     if not EMAIL_RE.match(to):
         raise ValueError("That email address does not look right.")
+    if kind == "strike":
+        return _deliver(to, body, subject)
     if _sent_today() >= MAX_PER_DAY:
         raise ValueError(f"Already {MAX_PER_DAY} permission mails today — the rest go tomorrow (more would look like spam).")
+    res = _deliver(to, body, subject)
+    key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")
+    set_setting(key, str(_sent_today() + 1))
+    return res
+
+
+def _deliver(to: str, body: str, subject: str | None) -> dict:
     msg = MIMEText(body, "plain", "utf-8")
     msg["to"], msg["subject"] = to, (subject or SUBJECT)[:150]
     me = connected_email()
@@ -94,8 +105,6 @@ def send(to: str, body: str, subject: str | None = None) -> dict:
         msg["from"] = formataddr((mail_identity()[0], me))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     res = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
-    key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")
-    set_setting(key, str(_sent_today() + 1))
     return {"thread_id": res.get("threadId"), "message_id": res.get("id")}
 
 
@@ -129,6 +138,50 @@ def _header(msg: dict, name: str) -> str:
         if h.get("name", "").lower() == name.lower():
             return h.get("value", "")
     return ""
+
+
+def search(query: str, limit: int = 30) -> list[str]:
+    """Ids of the newest messages that match a Gmail search (read only)."""
+    r = _service().users().messages().list(userId="me", q=query, maxResults=max(1, min(int(limit), 100))).execute()
+    return [m["id"] for m in r.get("messages") or [] if m.get("id")]
+
+
+def _part_text(part: dict, want: str) -> str:
+    """All text of one MIME type inside a message part (parts can be nested any number of levels)."""
+    out = []
+    if (part.get("mimeType") or "").lower() == want:
+        data = (part.get("body") or {}).get("data")
+        if data:
+            try:
+                out.append(base64.urlsafe_b64decode(data + "=" * (-len(data) % 4)).decode("utf-8", "replace"))
+            except Exception:  # noqa: BLE001  (a damaged part is skipped, never an error)
+                pass
+    for p in part.get("parts") or []:
+        if isinstance(p, dict):
+            out.append(_part_text(p, want))
+    return "\n".join(x for x in out if x)
+
+
+def _html_to_text(h: str) -> str:
+    import html
+
+    h = re.sub(r"(?is)<(script|style)\b.*?</\1>", " ", h or "")
+    h = re.sub(r'(?is)<a\b[^>]*?href\s*=\s*["\']([^"\']+)["\'][^>]*>(.*?)</a>', r"\2 ( \1 ) ", h)  # keep where links go
+    h = re.sub(r"(?i)<\s*(br|/p|/div|/tr|/li|/h\d|/td)\s*/?>", "\n", h)
+    t = html.unescape(re.sub(r"<[^>]+>", " ", h))
+    return re.sub(r"\n\s*\n+", "\n", re.sub(r"[ \t\r\xa0]+", " ", t)).strip()
+
+
+def read_message(message_id: str) -> dict:
+    """One message as plain text: {id, thread_id, from, subject, date, snippet, text}. Never raises on an odd layout."""
+    m = _service().users().messages().get(userId="me", id=message_id, format="full").execute()
+    payload = m.get("payload") or {}
+    text = _part_text(payload, "text/plain")
+    if not text.strip():
+        text = _html_to_text(_part_text(payload, "text/html"))
+    return {"id": m.get("id") or message_id, "thread_id": m.get("threadId"), "from": _header(m, "From"),
+            "subject": _header(m, "Subject"), "date": _header(m, "Date"), "internal_ms": m.get("internalDate"),
+            "snippet": (m.get("snippet") or "")[:500], "text": (text or m.get("snippet") or "")[:20000]}
 
 
 def reply_in_thread(thread_id: str) -> dict | None:
