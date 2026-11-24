@@ -31,6 +31,7 @@ from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal,
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
 from .jobs import RESTORING, executor
+from .jobs import enter as job_enter, leave as job_leave
 from .keywords import suggest
 from .metadata import auto_metadata
 from .metadata import build as build_meta
@@ -49,6 +50,7 @@ PUBLIC_PATHS = {
     "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password", "/register", "/api/register",
     "/auth/reset/start", "/auth/callback",
     "/api/pay/razorpay/webhook",  # Razorpay's own call: checked with the webhook secret inside the route
+    "/helper/phone.py", "/helper/setup.sh",  # the Android phone helper, fetched with curl (public files of this repository)
 }
 SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
 _STATIC = Path(__file__).resolve().parent.parent / "static"
@@ -154,6 +156,20 @@ async def auth_gate(request: Request, call_next):
                     return JSONResponse({"detail": "Unknown helper"}, status_code=401)
                 if not found[1]:
                     return JSONResponse({"detail": "Waiting for approval in the dashboard"}, status_code=403)
+                ticket = request.headers.get("x-job-ticket")
+                if ticket is not None:  # the central helper delivers a job of another copy: the server-signed ticket says which
+                    t = workers.read_ticket(ticket)
+                    m = re.match(r"^/api/worker/(\w+)/(\d+)$", path)
+                    if (not t or tid != tenant.OWNER or not m or t["wid"] != found[0] or int(m.group(2)) != t["id"]
+                            or m.group(1) not in workers.TICKET_PATHS[t["kind"]] or not workers.is_central(found[0])):
+                        return JSONResponse({"detail": "This job ticket is not valid"}, status_code=403)
+                    if t["tid"] != tenant.OWNER and t["tid"] not in accounts.active_tenants():
+                        return JSONResponse({"detail": "That account is no longer active"}, status_code=410)
+                    if t["tid"] in RESTORING:
+                        return JSONResponse({"detail": "A backup is being restored. Try again in a minute."}, status_code=503)
+                    request.state.ticket = t
+                    with tenant.use(t["tid"]):
+                        return _secure(await call_next(request))
             return _secure(await call_next(request))
     if path == "/api/upload-video" and request.method == "POST":
         if size > MAX_VIDEO_BYTES + 1024 * 1024:
@@ -1208,7 +1224,7 @@ def make_tts(cid: int, body: TtsIn):
         try:
             synth(body.text, body.voice, str(path))
         except Exception as e:  # noqa: BLE001
-            if workers.any_recent():  # voice service refuses the server's IP: let the helper PC make it
+            if workers.any_recent("tts"):  # voice service refuses the server's IP: let the helper PC make it
                 c.voice_text, c.tts_pending = body.text, json.dumps({"text": body.text, "voice": body.voice})
                 s.commit()
                 return to_dict(c)
@@ -1692,14 +1708,17 @@ def _helper_state(s) -> dict:
                + s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").count()
                + s.query(Project).filter(Project.analysis_pending.is_(True)).count())
     online = sum(1 for w in ws if w["online"])
+    own = online
     if not online:
         # a helper in the middle of a long job (slow download, captions on the PC) does not call in until it is done:
         # it took a job a short while ago and was seen within the time a job may take -> it is working, not offline
         now = utcnow()
         busy = s.query(Clip).filter(Clip.job_lease.isnot(None), Clip.job_lease > now - JOB_LEASE).count()
         if busy and any(w.last_seen and w.last_seen > now - JOB_LEASE for w in rows):
-            online = 1
-    return {"approved": len(ws), "online": online, "waiting": waiting,
+            online = own = 1
+    # a customer without a helper of their own is served by the Super Admin's central helper (it downloads for everyone)
+    central = not online and workers.central_online("source")
+    return {"approved": len(ws), "online": online + (1 if central else 0), "own": own, "central": central, "waiting": waiting,
             "last_seen": max((w["last_seen"] for w in ws if w["last_seen"]), default=None)}
 
 
@@ -2913,7 +2932,8 @@ def setup_checklist():
         blocked=f"{thumbs_wait} thumbnail(s) were refused by YouTube — verify the channel's phone number; they are then sent again by themselves"
         if thumbs_wait else "")
     add("face", "Your face photo", faces.DEFAULT_FACE.exists(), "Put on every thumbnail.", {"go": "settings", "label": "Upload photo"})
-    add("helper", "Helper PC online", hp["online"], "Downloads videos, makes reels and captions from your home internet.",
+    add("helper", "Helper PC online", hp["online"], "Downloads videos, makes reels and captions from your home internet."
+        if not hp["central"] else "The shared helper downloads your videos; you need no helper of your own.",
         {"help": "helper", "label": "How to start it"}, blocked="" if hp["online"] else f"{hp['waiting']} job(s) are waiting for it")
     add("gmail", "Gmail connected", gmail.connected_email(), "Alerts to your inbox and permission mails to creators.",
         {"href": "/auth/gmail", "label": "Connect Gmail"})
@@ -3028,7 +3048,7 @@ def health():
         if hp["waiting"] and not hp["online"]:
             items.append({"level": "bad", "text": f"Helper PC is offline and {hp['waiting']} job(s) are waiting for it.",
                           "fix": "helper", "key": "helper_offline"})
-        elif not hp["approved"]:
+        elif not hp["approved"] and not hp["central"]:
             items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
                           "fix": "helper", "key": "no_helper"})
         failed = s.query(Clip).filter(Clip.status == "failed").count()
@@ -3133,7 +3153,7 @@ def clip_rewrite(cid: int):
             raise HTTPException(400, "Only reels written by the local AI can be written again.")
         if c.status in ("uploading", "uploaded"):
             raise HTTPException(409, "Already on YouTube; delete it there instead.")
-        if not _helper_state(s)["online"]:
+        if not _helper_state(s)["own"]:  # the central (phone) helper writes no scripts
             raise HTTPException(409, "The helper PC is offline — it writes the scripts. Start it and try again.")
         topic = (ch.script_wanted or {}).get("topic") or trending_phrase(ch)
         if not topic:
@@ -3438,6 +3458,9 @@ class WorkerFailIn(BaseModel):
 
 
 def _worker_or_401(request: Request) -> int:
+    t = getattr(request.state, "ticket", None)
+    if t:  # the central helper, already checked in auth_gate against its own copy; this request runs in the ticket's copy
+        return t["wid"]
     found = workers.authenticate(request.headers.get("x-worker-token", ""))
     if not found:
         raise HTTPException(401, "Unknown helper")
@@ -3474,34 +3497,87 @@ def worker_register(body: WorkerRegIn, request: Request):
 
 @app.get("/api/worker/jobs")
 def worker_jobs(request: Request):
-    _worker_or_401(request)
-    jobs, now = [], utcnow()
-    free = lambda lease: not lease or lease < now - JOB_LEASE  # noqa: E731
-    with SessionLocal() as s:  # remember whether this helper has a local AI (for the setup checklist)
-        w = s.query(Worker).filter(Worker.token_hash == workers.token_hash(request.headers.get("x-worker-token", ""))).first()
+    wid = _worker_or_401(request)
+    h, now = request.headers, utcnow()
+    can = workers.parse_can(h.get("x-worker-can"))  # None: an older helper (does everything, knows no tickets)
+    try:  # free places the helper has right now (the phone helper also calls in while busy, with 0, to say it is alive)
+        slots = max(0, min(HELPER_DOWNLOADS, int(h["x-worker-slots"]))) if "x-worker-slots" in h else None
+    except ValueError:
+        slots = None
+    central = False
+    with SessionLocal() as s:  # remember whether this helper has a local AI (for the setup checklist) and what it can do
+        w = s.query(Worker).filter(Worker.token_hash == workers.token_hash(h.get("x-worker-token", ""))).first()
         if w is not None:
-            w.llm = request.headers.get("x-worker-llm") == "1"
-            if "x-worker-ai" in request.headers:
-                w.ai_status = request.headers["x-worker-ai"][:200]
+            w.llm = h.get("x-worker-llm") == "1"
+            if "x-worker-ai" in h:
+                w.ai_status = h["x-worker-ai"][:200]
+            w.can = workers.can_text(can)
+            central = bool(w.central)
             s.commit()
+    room = {"dl": HELPER_DOWNLOADS if slots is None else slots, "all": slots}
+    llm = h.get("x-worker-llm") == "1"
+    jobs = _collect_jobs(can, room, llm, "x-worker-ai" in h, now)
+    if central and can is not None and tenant.current() == tenant.OWNER:
+        # the central helper: also the jobs of every active customer that has no helper of its own online right now
+        for tid in accounts.active_tenants():
+            if tid == tenant.OWNER or (room["all"] is not None and room["all"] <= 0):
+                continue
+            if not job_enter(tid):  # this copy is being restored from a backup right now
+                continue
+            try:
+                with tenant.use(tid):
+                    if workers.own_online():  # their own helper is preferred
+                        continue
+                    more = _collect_jobs(can, room, llm, False, now)
+            except Exception:  # noqa: BLE001  (one broken copy must not stop the others)
+                import logging
+
+                logging.getLogger(__name__).exception("central helper: jobs of customer %s", tid)
+                continue
+            finally:
+                job_leave(tid)
+            for j in more:
+                oid = j.get("clip_id") or j.get("project_id") or j.get("source_id")
+                j["ticket"] = workers.make_ticket(tid, j["type"], oid, wid)
+            jobs += more
+    return {"jobs": jobs, "version": SERVER_VERSION}
+
+
+def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]:
+    """The jobs of the copy this runs in that a helper able to do `can` may take now; leases and tries are set here.
+    room: {"dl": downloads still allowed, "all": jobs of any kind still allowed (None = no limit)}, counted down."""
+    jobs = []
+    free = lambda lease: not lease or lease < now - JOB_LEASE  # noqa: E731
+    fits = lambda dl=False: (room["all"] is None or room["all"] > 0) and (not dl or room["dl"] > 0)  # noqa: E731
+
+    def take(job, dl=False):
+        jobs.append(job)
+        if dl:
+            room["dl"] -= 1
+        if room["all"] is not None:
+            room["all"] -= 1
+
     want_ai = False
     ai_on, pexels_on = acl.feature("ai.reels"), acl.feature("pexels.use")  # switched off for this account: no such jobs
-    if ai_on and "x-worker-ai" in request.headers and request.headers.get("x-worker-llm") != "1":  # only helpers that know the job
+    if ai_on and knows_ai and not llm and workers.can_do(can, "setup_ai"):  # only helpers that know the job
         with SessionLocal() as s:
             want_ai = get_setting("ai_wanted") == "1" or s.query(Channel).filter(
                 Channel.kind == "reel", Channel.auto_scripts.is_(True)).count() > 0
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).limit(20):
-            if len(jobs) >= HELPER_DOWNLOADS or not free(c.job_lease):
+            if not fits(dl=True) or not free(c.job_lease):
                 continue
+            p = s.get(Project, c.project_id)
+            own_file = p.mode == "original" and (p.license or "").endswith("(my own video)")
+            if p.mode == "original" and not own_file and not workers.can_do(can, "reel"):
+                continue  # a reel is made by a helper with ReelGen (the PC), never by the phone
             if (c.fetch_tries or 0) >= MAX_JOB_TRIES:
                 c.status, c.job_lease = "failed", None
                 c.error = ("The helper PC could not get this video after 3 tries. Check the helper window/log, "
                            "then press Re-download video.")
                 continue
             c.job_lease, c.fetch_tries = now, (c.fetch_tries or 0) + 1
-            p = s.get(Project, c.project_id)
-            if p.mode == "original" and (p.license or "").endswith("(my own video)"):
+            if own_file:
                 c.status, c.job_lease = "failed", None  # an uploaded file cannot be made again by the helper
                 c.error = "The uploaded video file is no longer on the server. Upload the video again (Clips → Upload my video)."
                 continue
@@ -3511,34 +3587,37 @@ def worker_jobs(request: Request):
                 pk = _secret_setting("pexels_key") if pexels_on else ""
                 if pk:  # real stock photos instead of colour backgrounds
                     job["pexels_key"], job["photo_query"] = pk, (ch.query if ch and ch.query else "") or p.title
-                jobs.append(job)
+                take(job, dl=True)
                 continue
             job = {"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end}
-            if not c.captions and _wants_captions(s, p, c):  # no subtitles on YouTube: the helper writes them
+            if not c.captions and workers.can_do(can, "transcribe") and _wants_captions(s, p, c):
+                # no subtitles on YouTube: the helper writes them (a helper without Whisper sends the video without)
                 job["transcribe"], job["hint"] = True, f"{p.title} {' '.join(p.tags or [])} {(p.description or '')[:300]}"
-            jobs.append(job)
-        for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
-            if c.status == "fetching" or not free(c.job_lease):
-                continue
-            c.job_lease = now
-            t = json.loads(c.tts_pending)
-            jobs.append({"type": "tts", "clip_id": c.id, "text": t.get("text", ""), "voice": t.get("voice", "")})
-        for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(5):
-            if not free(p.analysis_lease):
-                continue
-            if (p.analysis_tries or 0) >= MAX_JOB_TRIES:
-                p.analysis_pending = False  # carry on without the helper's data
-                if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
-                    p.quick = {**p.quick, "helper_analysed": True}
-                executor.submit(resume_after_analysis, p.id)
-                continue
-            p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
-            jobs.append({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
-                         "captions": bool((p.quick or {}).get("captions", True))})
-        if ai_on and request.headers.get("x-worker-llm") == "1":
+            take(job, dl=True)
+        if workers.can_do(can, "tts"):
+            for c in s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").order_by(Clip.id).limit(5):
+                if c.status == "fetching" or not free(c.job_lease) or not fits():
+                    continue
+                c.job_lease = now
+                t = json.loads(c.tts_pending)
+                take({"type": "tts", "clip_id": c.id, "text": t.get("text", ""), "voice": t.get("voice", "")})
+        if workers.can_do(can, "analyze"):
+            for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(5):
+                if not free(p.analysis_lease) or not fits():
+                    continue
+                if (p.analysis_tries or 0) >= MAX_JOB_TRIES:
+                    p.analysis_pending = False  # carry on without the helper's data
+                    if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
+                        p.quick = {**p.quick, "helper_analysed": True}
+                    executor.submit(resume_after_analysis, p.id)
+                    continue
+                p.analysis_lease, p.analysis_tries = now, (p.analysis_tries or 0) + 1
+                take({"type": "analyze", "project_id": p.id, "video_id": p.video_id,
+                      "captions": bool((p.quick or {}).get("captions", True))})
+        if ai_on and llm and workers.can_do(can, "script"):
             for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto_scripts.is_(True), Channel.script_wanted.isnot(None)):
                 w = dict(ch.script_wanted or {})  # Postgres keeps an empty JSON value as 'null', which passes IS NOT NULL
-                if not w.get("topic"):
+                if not w.get("topic") or not fits():
                     continue
                 if re.search(r"[^\x00-\x7f]", w["topic"]) and not re.search(r"\w{3}", w["topic"]):
                     ch.script_wanted = None  # a topic broken out of a Hindi title: ask again on the next run
@@ -3547,11 +3626,11 @@ def worker_jobs(request: Request):
                     continue
                 w["lease"] = now.isoformat()
                 ch.script_wanted = w
-                jobs.append({"type": "script", "source_id": ch.id, "topic": w["topic"], "lang": ch.permission_note or "hi"})
+                take({"type": "script", "source_id": ch.id, "topic": w["topic"], "lang": ch.permission_note or "hi"})
         s.commit()
     if want_ai:  # the helper installs Ollama + the model by itself (it ignores this while already busy with it)
         jobs.append({"type": "setup_ai"})
-    return {"jobs": jobs, "version": SERVER_VERSION}
+    return jobs
 
 
 class ScriptIn(BaseModel):
@@ -3683,6 +3762,9 @@ def worker_voice(cid: int, request: Request, file: UploadFile = File(...)):
 @app.post("/api/worker/fail/{cid}")
 def worker_fail(cid: int, body: WorkerFailIn, request: Request):
     _worker_or_401(request)
+    t = getattr(request.state, "ticket", None)
+    if t and body.kind != t["kind"]:  # a ticket opens only the job it was given for
+        raise HTTPException(403, "This job ticket is not valid")
     if body.kind == "analyze":  # cid is a project id here: continue with a fallback slice
         with SessionLocal() as s:
             p = _get(s, Project, cid)
@@ -3713,6 +3795,42 @@ def worker_fail(cid: int, body: WorkerFailIn, request: Request):
 def list_workers():
     with SessionLocal() as s:
         return [workers.as_dict(w) for w in s.query(Worker).order_by(Worker.id)]
+
+
+class CentralIn(BaseModel):
+    on: bool = True
+
+
+@app.post("/api/admin/workers/{wid}/central")
+def admin_worker_central(wid: int, body: CentralIn):
+    """Super Admin: this helper of the Super Admin's own copy also does the jobs of every customer who has no helper
+    of their own online (each job goes with a signed ticket, so its result can only land in that customer's copy)."""
+    with tenant.use(tenant.OWNER), SessionLocal() as s:  # always the owner's helpers, also while viewing a customer
+        w = _get(s, Worker, wid)
+        if body.on and not w.approved:
+            raise HTTPException(400, "Approve this helper first.")
+        w.central = bool(body.on)
+        s.commit()
+        return workers.as_dict(w)
+
+
+PHONE_DIR = Path(__file__).resolve().parent.parent / "worker" / "phone"
+
+
+def _phone_file(name: str) -> Response:
+    """A file of the Android phone helper, exactly as it is in the repository (Termux fetches it with curl)."""
+    return Response((PHONE_DIR / name).read_bytes(), media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
+@app.get("/helper/phone.py")
+def helper_phone_py():
+    return _phone_file("phone.py")
+
+
+@app.get("/helper/setup.sh")
+def helper_setup_sh():
+    return _phone_file("setup.sh")
 
 
 @app.post("/api/workers/{wid}/approve")

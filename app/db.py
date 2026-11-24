@@ -231,6 +231,8 @@ class Worker(Base):
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
     llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
     ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
+    central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
+    can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
