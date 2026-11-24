@@ -153,6 +153,8 @@ ROUTES = [
     ("GET", "/terms", ANYONE, None),
     ("GET", "/about", ANYONE, None),
     ("GET", "/healthz", ANYONE, None),
+    ("GET", "/helper/phone.py", ANYONE, None),  # the Android phone helper: a public file of the repository, no secrets
+    ("GET", "/helper/setup.sh", ANYONE, None),
     ("GET", "/media/{cid}/{exp}/{sig}.mp4", ANYONE, None),  # signed, short-lived link for Instagram / Facebook
     ("POST", "/api/pay/razorpay/webhook", ANYONE, None),  # Razorpay's own call, proven by its signature (app/payments.py)
     # --- the account itself
@@ -161,6 +163,7 @@ ROUTES = [
     ("POST", "/api/account/upgrade", "account.upgrade", "Asked for more channels"),
     ("POST", "/api/account/brand", "account.rename", "Renamed the system"),
     ("GET", "/api/account/helper-code", "helper.manage", None),
+    ("POST", "/api/account/shared-helper", "helper.manage", "Changed whether the shared helper may download"),
     # --- plans and online payment (any customer may see the plans and pay; the amount always comes from the server)
     ("GET", "/api/plans", SIGNED, None),
     ("POST", "/api/pay/order", SIGNED, "Started an online payment"),
@@ -197,6 +200,7 @@ ROUTES = [
     ("POST", "/api/admin/users/{aid}/control", SUPER, None),
     ("DELETE", "/api/admin/users/{aid}/channels/{did}", SUPER, None),
     ("POST", "/api/admin/users/{aid}/delete-data", SUPER, None),
+    ("POST", "/api/admin/workers/{wid}/central", SUPER, None),  # a helper of the owner's copy serves every account
     # --- pages: what each one reads
     ("GET", "/api/overview", SIGNED, None),  # counts and channel list every page needs
     ("GET", "/api/stats", SIGNED, None),

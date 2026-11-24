@@ -218,13 +218,20 @@ def approve(account_id: int) -> dict:
         a = s.get(Account, account_id)
         if not a:
             raise KeyError(account_id)
-        if not a.tenant_id:
+        new = not a.tenant_id
+        if new:
             if a.id + 1 >= SELF_TEST_TENANT:
                 raise ValueError("No more accounts can be added.")
             a.tenant_id = a.id + 1  # tenant 1 is the Super Admin's own system
         s.commit()
         tid = a.tenant_id
     ensure_tenant(tid)
+    if new:  # a new account starts without a helper: the shared helper may also step in later when its PC is off
+        from .db import get_setting, set_setting
+
+        with tenant.use(tid):
+            if get_setting("shared_helper") is None:
+                set_setting("shared_helper", "1")
     with CoreSession() as s:
         a = s.get(Account, account_id)
         a.status, a.approved_at = "active", a.approved_at or utcnow()

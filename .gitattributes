@@ -4,3 +4,5 @@
 *.onnx binary
 *.jpg binary
 *.png binary
+worker/phone/*.sh text eol=lf
+worker/phone/*.py text eol=lf

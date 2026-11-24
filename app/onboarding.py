@@ -146,6 +146,10 @@ def state() -> dict:
     with SessionLocal() as s:
         has_channel = s.query(Destination).count() > 0
         helper_ok = s.query(Worker).filter(Worker.approved.is_(True)).count() > 0
+        if not helper_ok:  # the Super Admin's central helper downloads for every account: no helper of one's own needed
+            from . import workers
+
+            helper_ok = workers.central_online("source")
         helper_waiting = s.query(Worker).filter(Worker.approved.is_(False)).count()
         has_source = s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count() > 0
     if get_setting("onboarding") is None and has_channel and has_source:

@@ -165,7 +165,7 @@ def _process_video(s, ch: Channel, vid: str, log: list, mode: str | None = None,
     p.moments = rank_moments(p.duration, p.heatmap, secs, ch.clip_len, ch.clips_per_video)
     s.add(p)
     s.commit()
-    if not p.moments and workers.any_recent():
+    if not p.moments and workers.any_recent("analyze"):
         # the server can't see "most replayed" / comments (YouTube blocks it): the helper PC reads them
         p.analysis_pending, p.analysis_since, p.analysis_tries = True, utcnow(), 0
         s.commit()

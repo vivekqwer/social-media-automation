@@ -246,6 +246,8 @@ class Worker(Base):
     ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
     archive_dir = Column(String(300))  # where this helper keeps the saved videos (it tells the server on every poll)
     inventory_at = Column(DateTime)  # this helper was last asked to list its archive folder
+    central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
+    can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

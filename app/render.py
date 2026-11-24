@@ -383,7 +383,7 @@ def run_render(clip_id: int):
                     extra["thumb_note"] = f"Thumbnail could not be made: {str(te)[:150]}"
             apply_short_cover(clip)
         except Exception as e:  # noqa: BLE001
-            if (is_bot_block(e) or isinstance(e, NeedsHelper)) and workers.any_recent():
+            if (is_bot_block(e) or isinstance(e, NeedsHelper)) and workers.any_recent("reel" if isinstance(e, NeedsHelper) else "source"):
                 final = "fetching"  # the helper PC downloads the section, then we render
                 extra["fetch_since"] = clip.fetch_since or utcnow()
             else:

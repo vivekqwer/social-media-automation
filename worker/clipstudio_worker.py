@@ -719,8 +719,8 @@ def handle_all(jobs: list, headers: dict):
     from concurrent.futures import ThreadPoolExecutor
 
     def one(job):
-        try:
-            handle(job, headers)
+        try:  # a job of another account (this is the central helper) carries the server's ticket: sent back with the result
+            handle(job, {**headers, "x-job-ticket": job["ticket"]} if job.get("ticket") else headers)
         except Exception as e:  # noqa: BLE001  (one job's problem must never stop the others)
             log(f"job failed: {str(e)[:150]}")
 
@@ -747,7 +747,8 @@ def main():
     while True:
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-",
-                                                                "x-worker-archive": archive_header()}, timeout=30)
+                                                                "x-worker-archive": archive_header(), "x-worker-can": "all"},
+                          timeout=30)
             delay = POLL_SECONDS
             if r.status_code == 403:
                 if not waiting:
