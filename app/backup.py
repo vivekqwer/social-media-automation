@@ -52,8 +52,9 @@ FACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
 # settings that belong to the server, not to the data: never taken from a file, the current value stays
 # (passwords and sign-ins, Super Admin decisions, daily allowance counters)
 PROTECTED = {"admin_pw", "admin_emails", "session_gen", "reset_state", "oauth_state", "self_test", "shared_google",
-             "onboarding", "acl_plans", "pay_info", "razorpay", "plan_prices"}
-PROTECTED_PREFIX = ("quota", "gmail_sent:", "gmail_owner:")
+             "onboarding", "acl_plans", "pay_info", "razorpay", "plan_prices",
+             "strike_blocked", "strike_watch_init"}  # the never-use list after a strike: an older backup must not bring a struck creator back
+PROTECTED_PREFIX = ("quota", "gmail_sent:", "gmail_owner:", "strike_sent:")
 
 
 class BackupError(Exception):

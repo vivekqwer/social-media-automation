@@ -42,7 +42,7 @@ SessionLocal = _BudgetSession()
 
 PT = ZoneInfo("America/Los_Angeles")
 DAILY_UNITS = int(os.getenv("YT_DAILY_QUOTA") or "10000")
-COST = {"upload": 1600, "thumbnail": 50, "search": 100, "read": 1, "comment": 50}
+COST = {"upload": 1600, "thumbnail": 50, "search": 100, "read": 1, "comment": 50, "update": 50}
 UPLOAD_COST = COST["upload"] + COST["thumbnail"]
 RESERVE = 400  # kept free for the video monitor, lookups and topic searches
 
@@ -127,6 +127,14 @@ def can_comment(uploads_waiting: int = 0) -> bool:
     left = DAILY_UNITS - used() - RESERVE // 2
     need = min(max(0, int(uploads_waiting)), max(0, left // UPLOAD_COST)) * UPLOAD_COST
     return left - need >= COST["comment"] + 5 * COST["read"]
+
+
+def can_update(uploads_waiting: int = 0) -> bool:
+    """One videos.update (keeping a video private after a strike: 50 units + a read) fits in what is left today after
+    every upload that is waiting (as many as fit at all) and half the reserve — the same rule as can_comment."""
+    left = DAILY_UNITS - used() - RESERVE // 2
+    need = min(max(0, int(uploads_waiting)), max(0, left // UPLOAD_COST)) * UPLOAD_COST
+    return left - need >= COST["update"] + COST["read"]
 
 
 SEARCH_BUDGET = 400  # topic searches may use at most this much a day, so uploads keep their budget

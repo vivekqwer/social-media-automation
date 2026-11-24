@@ -120,6 +120,29 @@ HELP = [
     ("Uploads are paused",
      "After a copyright strike or a removed video the system stops uploading to protect the channel.",
      "Read the reason on the Dashboard. Remove risky sources, then press Resume. Three strikes close a channel — use only Creative Commons videos or creators who gave permission."),
+    ("A strike or a copyright complaint came on my channel",
+     "Only YouTube's own status of a video makes the system act: the video check (every 2 hours) sees the video removed, "
+     "or YouTube is asked about the video right after its notice mail. A mail alone only opens a case and tells you. "
+     "For a copyright removal the system protects the channel at once, with no switch: the creator goes on a never-use list "
+     "(no source uses their videos again), the source for their channel is stopped, every waiting clip made from their "
+     "videos is held, their videos that are already on YouTube but scheduled for later are set to private so they never go "
+     "public (within the day's YouTube allowance), and uploads to the channel are paused. Nothing is deleted. It also writes "
+     "a short, humble mail asking the creator to take the complaint back — an official way to clear a copyright strike. "
+     "For a Community Guidelines, Terms of Service, trademark or legal removal only the uploads are paused: that was not the "
+     "creator's complaint, so they are not stopped unless you press “Stop using this creator”. Videos that were already "
+     "removed before this feature first ran are history and change nothing. "
+     "What it cannot do: YouTube itself cannot be answered automatically. YouTube gives apps no way to see strikes, to "
+     "appeal, or to send a counter-notification; that only exists in YouTube Studio, and a counter-notification is a legal "
+     "statement that you must make yourself.",
+     "Open Alerts → Strikes & copyright. Each case says what happened, what was done and what is left for you. "
+     "To the creator: press “Send the request now” (or switch on “Send the humble request to the creator automatically” — "
+     "it then goes by itself only when the address is the one YouTube's own notice gives for the creator; at most 3 a day, "
+     "never twice for one video; their answer shows in the same card). No e-mail found: paste the address "
+     "from their channel's About page, or copy the text and send it yourself. "
+     "To YouTube: press “Copy the text for YouTube”, then “Open YouTube Studio” → Content → the video → Restrictions → "
+     "See details → Select action, and paste it (or Dashboard → Channel violations → Appeal). File a counter-notification "
+     "only if the licence or permission really covers the clip. When the strike is dealt with, press Resume uploads, "
+     "then “Mark as solved”. “Use this creator again” takes them off the never-use list and gives the held clips back."),
     ("Queued clips are not going up",
      "YouTube allows about 5–6 uploads a day through the API. The rest wait and go up after the daily reset (1:30 PM India time).",
      "Nothing. To upload fewer clips a day, lower the number in the source."),

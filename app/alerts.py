@@ -1,7 +1,8 @@
 """The Alerts page: every problem in one place, sorted into tabs.
 
   deleted  - a video is gone from YouTube (deleted by the owner, or by YouTube without a copyright reason)
-  strikes  - YouTube rejected / blocked a video (copyright, claim, guidelines...) and channels paused because of it
+  strikes  - YouTube rejected / blocked a video (copyright, claim, guidelines...) and channels paused because of it;
+             and the strike cases of strikes.py (what the system did, the request to the creator, the words for YouTube)
   broken   - things that need attention now: failed clips and uploads, the helper PC, sources, thumbnails, logins, keys
   system   - unexpected server / background-job errors (guide.record_error), newest first, with the repeat count
 
@@ -289,7 +290,16 @@ def board(health_items: list | None) -> dict:
             clips = []
         last = s.query(Clip.yt_checked_at).filter(Clip.yt_checked_at.isnot(None)).order_by(Clip.yt_checked_at.desc()).first()
         watching = s.query(Clip).filter(Clip.status == "uploaded", Clip.youtube_id.isnot(None)).count()
-    live = _now_items(health_items) + clips + _error_items()
+    cases, strike_set = [], None
+    try:  # strike cases (strikes.py): what happened, what the system did, what is left for the owner
+        from . import strikes
+
+        cases, strike_set = strikes.board_items(), strikes.settings_public()
+    except Exception as e:  # noqa: BLE001  (never an empty page because one list failed)
+        from .guide import record_error
+
+        record_error("Alerts: reading strike cases", e)
+    live = _now_items(health_items) + cases + clips + _error_items()
     seen = _seen_keys()
     current = {i["id"] for i in live}
     if health_items is not None and seen - current:  # a problem that went away and comes back later is new again
@@ -313,7 +323,7 @@ def board(health_items: list | None) -> dict:
     totals["all"] = sum(totals.values())
     badge = sum(1 for t in ("deleted", "strikes", "broken") for i in tabs[t] if not i["seen"] and i["level"] == "bad")
     return {"tabs": tabs, "counts": counts, "totals": totals, "badge": badge, "watching": watching,
-            "last_check": _iso(last[0]) if last else None,
+            "strike_reply": strike_set, "last_check": _iso(last[0]) if last else None,
             "failed_clips": sum(1 for i in clips if i["kind"] in ("clip_failed", "upload_failed"))}
 
 

@@ -138,6 +138,11 @@ def _process_video(s, ch: Channel, vid: str, log: list, mode: str | None = None,
     """Returns True if the video yielded clips. mode/note override the source's (viral picks: per video)."""
     mode = mode or ch.mode
     info = fetch_info(f"https://www.youtube.com/watch?v={vid}")
+    from . import strikes
+
+    if mode != "own" and strikes.is_blocked(info.get("channel_url")):  # every source type comes through here
+        log.append(f"skip {vid}: {info.get('channel') or 'this creator'} {strikes.BLOCKED_SKIP}")
+        return False
     if mode == "own":  # only videos that really are on one of my connected channels
         mine = {d.channel_id for d in s.query(Destination).all()}
         if not any(cid and cid in (info.get("channel_url") or "") for cid in mine):
@@ -296,6 +301,14 @@ def run_channel(channel_id: int):
                 else:
                     ch.resolved_url, ch.name = resolve_channel(ch.query)
                 s.commit()
+            from . import strikes
+
+            if not topic and ch.mode != "own" and (strikes.is_blocked(ch.resolved_url) or strikes.is_blocked(ch.query)):
+                # this creator is on the never-use list after a strike: the source stops for good (Alerts → Strikes can allow them again)
+                ch.auto, ch.last_run = False, utcnow()
+                ch.last_status = f"stopped: {ch.name or 'this creator'} {strikes.BLOCKED_SKIP}"
+                s.commit()
+                return
             backlog = s.query(Clip).filter(Clip.destination_id == ch.destination_id,
                                            Clip.status.in_(["queued", "fetching", "rendering"])).count()
             if backlog >= queue_cap():
@@ -334,6 +347,10 @@ def run_channel(channel_id: int):
                 try:
                     if _process_video(s, ch, vid, log):
                         made += 1
+                    elif not topic and log and strikes.BLOCKED_SKIP in log[-1]:
+                        ch.auto = False  # this channel's own videos are all from the struck creator: stop, do not go on
+                        log.append("source stopped")
+                        break
                 except Exception as e:  # noqa: BLE001
                     s.rollback()
                     log.append(f"{vid}: {str(e)[:150]}")

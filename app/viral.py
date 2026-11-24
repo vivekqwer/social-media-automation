@@ -171,6 +171,12 @@ def pick_today(extra: str | None = None) -> list:
     used |= {p["video_id"] for ps in allp.values() for p in ps}
     creators = permissions._load()
     cands = sorted(board.values(), key=lambda r: (r.get("gain", 0), r["views"]), reverse=True)
+    from . import strikes
+
+    struck = strikes.blocked()  # creators on the never-use list after a strike: never picked, never asked again
+    if extra and any(r["video_id"] == extra and r.get("channel_id") in struck for r in cands):
+        raise ValueError(strikes.blocked_message())
+    cands = [r for r in cands if r.get("channel_id") not in struck]
     if extra:
         cands = [r for r in cands if r["video_id"] == extra]
         if not cands:
