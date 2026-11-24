@@ -19,6 +19,11 @@ from .render import run_render
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog (the usual number; see queue_cap)
 QUEUE_CAP_RANGE = (10, 300)
 MIN_FREE_GB = 0.7  # the sources wait while the server's disk has less free space than this
+# customers' sources wait earlier, so a filling disk stops them before the owner's (the disk is shared)
+CUSTOMER_MIN_FREE_GB = float(os.getenv("CUSTOMER_MIN_FREE_GB") or "1.5")
+# clips waiting for approval are not in the upload queue (queue_cap) and the disk clean-up keeps them:
+# a source that makes review clips pauses while this many are waiting in its account
+REVIEW_CAP = int(os.getenv("REVIEW_CAP") or "40")
 OLDER_DEPTH = 300  # a channel source with nothing new goes back through this many of the channel's uploads
 
 
@@ -43,6 +48,27 @@ def disk_free_gb() -> float | None:
         return shutil.disk_usage(BASE_DATA_DIR).free / 1e9
     except OSError:
         return None
+
+
+def min_free_gb() -> float:
+    from . import tenant
+
+    return MIN_FREE_GB if tenant.current() == tenant.OWNER else max(MIN_FREE_GB, CUSTOMER_MIN_FREE_GB)
+
+
+def review_waiting(s) -> int:
+    """Clips of this account waiting for approval: rendered and not queued, or still being made for review."""
+    return s.query(Clip).filter((Clip.status == "rendered")
+                                | (Clip.status.in_(["fetching", "rendering"]) & Clip.autoqueue.isnot(True))).count()
+
+
+def review_full(s) -> str:
+    """'' or the plain status line when too many clips wait for review."""
+    n = review_waiting(s)
+    return (f"paused: {n} clips are waiting for your review (Clips → Review). New clips are made again when you "
+            "approve or discard some.") if n >= REVIEW_CAP else ""
+
+
 # clips that already own a publish time (incl. ones still waiting for the helper PC or rendering)
 HOLDS_SLOT = ["fetching", "rendering", "draft", "rendered", "queued", "uploading", "uploaded"]
 
@@ -278,6 +304,12 @@ def run_channel(channel_id: int):
                 ch.last_run = utcnow()
                 s.commit()
                 return
+            makes_review = bool(ch.review_first) or not acl.auto_upload()
+            full = review_full(s) if makes_review else ""
+            if full:  # unreviewed clips must not grow without end on the shared disk
+                ch.last_status, ch.last_run = full, utcnow()
+                s.commit()
+                return
             if ch.kind == "reel":
                 if ch.auto_scripts and not any(not x.get("used") for x in (ch.scripts or [])) and not ch.script_wanted:
                     topic = trending_phrase(ch)  # ask the helper's local AI for a script on today's trend
@@ -323,7 +355,7 @@ def run_channel(channel_id: int):
                 s.commit()
                 return
             free = disk_free_gb()
-            if free is not None and free < MIN_FREE_GB:  # a large waiting list must never fill the disk
+            if free is not None and free < min_free_gb():  # a large waiting list must never fill the disk (customers first)
                 ch.last_status = f"paused: the server's disk is almost full ({free:.1f} GB free) - new clips wait until uploads free some space"
                 ch.last_run = utcnow()
                 s.commit()
@@ -352,6 +384,10 @@ def run_channel(channel_id: int):
                                                Clip.status.in_(["queued", "fetching", "rendering"])).count()
                 if waiting >= queue_cap():  # several sources run at once: stop as soon as the list is full
                     log.append(f"paused: {waiting} clips already queued")
+                    break
+                full = review_full(s) if makes_review else ""
+                if full:
+                    log.append(full)
                     break
                 seen.add(vid)  # mark first, so a failing video is never retried forever or duplicated
                 ch.seen = list(seen)

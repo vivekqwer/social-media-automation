@@ -412,25 +412,27 @@ def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
             if vid and vid not in skip and vid not in out and not RISKY.search(title or ""):
                 out.append(vid)
 
-    entry = search_cache.get(topic)
+    q = search_cache.norm(topic)  # the words the cache is kept under are exactly the words searched
+    entry = search_cache.get(q)
     take(entry["items"] if entry else [])
+    project = search_cache.project_key(google_client()[0])  # page tokens are only reused by the project that got them
     yt, asked = None, 0
-    while len(out) < n and asked < pages and not search_cache.exhausted(entry):
+    while not out and asked < pages and not search_cache.exhausted(entry):  # only when no unused video is left
         why = quota.search_block()
         if why:
             quota.note_turn(False)
             SEARCH_NOTE.set(why)
             break
         yt = yt or client()
-        r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
-                             safeSearch="moderate", maxResults=50, pageToken=entry["token"] if entry else None,
+        r = yt.search().list(part="snippet", q=q, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
+                             safeSearch="moderate", maxResults=50, pageToken=search_cache.next_token(entry, project),
                              regionCode="IN", relevanceLanguage="hi").execute()  # Indian / Hindi videos first
         quota.spend("search")
         quota.note_search()
         quota.note_turn(True)
         asked += 1
         page = [((it.get("id") or {}).get("videoId"), (it.get("snippet") or {}).get("title", "")) for it in r.get("items", [])]
-        entry = search_cache.add_page(topic, page, r.get("nextPageToken"))
+        entry = search_cache.add_page(q, page, r.get("nextPageToken"), project)
         take(page)
     if not out and not SEARCH_NOTE.get() and entry and not asked:
         SEARCH_NOTE.set("every video found for this topic today is used already (searched again tomorrow)")

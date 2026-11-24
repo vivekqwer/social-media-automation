@@ -230,6 +230,9 @@ def note_turn(searched: bool):
     me = str(tenant.current())
     shared = on_shared_budget()
     with _lock, SessionLocal() as s:
+        if s.get(Setting, _turns_key()) is None:  # the first turn of a new day: earlier days' rows are dropped
+            s.query(Setting).filter(Setting.key.like("quota-turns:%"), Setting.key != _turns_key()).delete(
+                synchronize_session=False)
         d = _turns_load(s)
         o = d.get(me) or {"n": 0}
         if searched:

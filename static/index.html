@@ -1042,7 +1042,7 @@ function clipMini(c,actions){
 function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
 
 const FIXBTN={connect:['Connect / reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper'],
-  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys']};
+  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys'],review:['Open Clips']};
 async function loadHealth(h0,target){
   let h=h0;if(!h){try{h=await api('/api/health')}catch(e){return}}
   $(target||'#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
@@ -1057,6 +1057,7 @@ async function doFix(it){  // returns false when it only opened another page (no
   if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return false}
   if(it.fix==='add_source'){openAdd();return false}if(it.fix==='sources'){go('sources');return false}if(it.fix==='guide'){go('guide');return false}
   if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return false}
+  if(it.fix==='review'){go('clips');return false}
   if(it.fix==='resume'){await api(`/api/destinations/${+it.id}/resume`,'POST');toast('Uploads resumed')}
   else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
   else if(it.fix==='run_source'){await api(`/api/channels/${+it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
@@ -1188,10 +1189,10 @@ async function nichePicker(el,done,st){
   const act=new Set(st.mine.filter(m=>m.active).map(m=>m.key)),free=st.catalog.filter(n=>!act.has(n.key));
   el.innerHTML=`<div class="alert" style="margin-bottom:10px"><span>${esc(st.note)}</span></div>
     ${free.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">${free.map(n=>`<label class="card" style="padding:10px;cursor:pointer;display:block"><span class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-nz="${esc(n.key)}"><b>${esc(n.label)}</b></span><span class="mut sm" style="display:block;margin-top:4px">${esc(n.phrases.slice(0,3).join(' · '))}${n.trending&&st.trending_on?' · + trending':''}</span>${n.warning?'<span class="sm" style="display:block;margin-top:4px;color:var(--bad)">Few Creative Commons videos: expect fewer clips.</span>':''}</label>`).join('')}</div>`:''}
-    <label class="f" style="margin-top:10px">Or write your own topic<input class="nz-topic" maxlength="60" placeholder="e.g. indian street food · home gardening · cricket coaching"></label>
+    <label class="f" style="margin-top:10px">Or write your own topic<input class="nz-topic" maxlength="60" placeholder="e.g. indian street food · yoga at home · coding for beginners"></label>
     <div class="nz-prev mut sm" style="margin-top:4px"></div>
     <label class="row sm" style="gap:8px;margin-top:10px"><span class="switch"><input type="checkbox" class="nz-rev" checked><i></i></span>Check the first clips myself before they go up (Review first)</label>
-    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn nz-go">Make my sources</button><span class="mut sm">${st.room==null?'':st.room+' more source'+(st.room===1?'':'s')+' allowed on your plan'}</span></div>`;
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn nz-go">Make my sources</button><span class="mut sm">Up to ${st.max_niches} niches or own topics at once; together they make about ${st.per_day} clips a day.${st.room==null?'':' '+st.room+' more source'+(st.room===1?'':'s')+' allowed on your plan.'}</span></div>`;
   const inp=$('.nz-topic',el),prev=$('.nz-prev',el);let tm;
   inp.oninput=()=>{clearTimeout(tm);const t=inp.value.trim();if(!t){prev.innerHTML='';return}
     tm=setTimeout(async()=>{let p;try{p=(await api('/api/niches?topic='+encodeURIComponent(t))).preview}catch(e){return}if(!p||inp.value.trim()!==t)return;

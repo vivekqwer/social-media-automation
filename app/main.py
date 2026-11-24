@@ -10,7 +10,7 @@ from datetime import timedelta, timezone
 from datetime import datetime
 from pathlib import Path
 
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -2106,8 +2106,8 @@ TREND_CATS = {"": "all", "26": "food & how-to", "22": "people & blogs", "24": "e
 
 # ---------- "What is your channel about?": pick niches -> topic sources made for you (app/niche_sources.py) ----------
 class NicheIn(BaseModel):
-    keys: list[str] = Field(default_factory=list, max_length=20)
-    topic: str = Field("", max_length=120)
+    keys: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=20)
+    topic: str = Field("", max_length=60)
     review_first: bool = True
     tz_offset: int | None = Field(None, ge=-900, le=900)
 
@@ -2117,12 +2117,12 @@ class NicheOffIn(BaseModel):
 
 
 @app.get("/api/niches")
-def niches_state(topic: str = ""):
+def niches_state(topic: str = Query("", max_length=60)):
     from . import niche_sources
 
     out = niche_sources.state()
-    if topic.strip():
-        out["preview"] = niche_sources.preview(topic[:120])
+    if topic.strip():  # what people also search comes from the keyword helper: only with the Ideas page allowed
+        out["preview"] = niche_sources.preview(topic, suggest=acl.allowed("page.ideas"))
     return out
 
 
@@ -3347,8 +3347,16 @@ def health():
         if quota.summary()["uploads_left"] == 0 and s.query(Clip).filter(Clip.status == "queued").count():
             items.append({"level": "info", "text": "Today's upload budget is used; queued clips go up after the daily "
                                                   "reset (1:30 PM IST). Nothing to do.", "fix": None, "key": "quota"})
-        due = now - timedelta(hours=8)
+        from .autopilot import REVIEW_CAP, review_waiting
+
+        n_rev = review_waiting(s)
+        if n_rev >= REVIEW_CAP and s.query(Channel).filter(Channel.auto.is_(True)).count():
+            items.append({"level": "warn", "text": f"{n_rev} clips are waiting for your review. Sources that need your approval "
+                                                  "are paused until you approve or discard some (Clips → Review).",
+                          "fix": "review", "key": "review_full"})
         for ch in s.query(Channel).filter(Channel.auto.is_(True)).all():
+            # a source that runs only every 2 days (niche sources) is not "late" after 8 hours
+            due = now - max(timedelta(hours=8), timedelta(hours=(ch.interval_hours or 0) + 2))
             if ch.last_status and ch.last_status.startswith("error"):
                 items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” failed last time: "
                                                       f"{friendly_error(ch.last_status[7:])[:160]}", "fix": "run_source", "id": ch.id, "key": "source_failed"})

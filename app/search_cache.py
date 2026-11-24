@@ -30,30 +30,47 @@ def _key(phrase: str) -> str:
     return PREFIX + hashlib.sha1(norm(phrase).encode("utf-8")).hexdigest()[:32]
 
 
+def project_key(client_id: str) -> str:
+    """Which Google project asked (a hash of its client id): YouTube's page tokens are only reused by that project."""
+    return hashlib.sha1(str(client_id or "").encode("utf-8")).hexdigest()[:12]
+
+
 def get(phrase: str, now: datetime | None = None) -> dict | None:
-    """{"at", "q", "items": [[video_id, title], ...], "token", "pages"} while younger than 24 hours, else None."""
+    """{"at", "q", "items": [[video_id, title], ...], "pages", "done", "tokens": {project: {"token", "page"}}} while
+    younger than 24 hours, else None. pages = the most pages any project has read; done = YouTube has no more."""
     now = now or utcnow()
     try:
         with tenant.use(tenant.OWNER):
             d = json.loads(get_setting(_key(phrase)) or "")
         if norm(d.get("q")) != norm(phrase) or now - datetime.fromisoformat(d["at"]) >= timedelta(hours=HOURS):
             return None
+        pages = int(d.get("pages") or 0)
+        tokens = d.get("tokens") if isinstance(d.get("tokens"), dict) else {}  # (older rows: one token, project unknown)
+        done = bool(d["done"]) if "done" in d else (pages > 0 and not d.get("token"))
         return {"at": d["at"], "q": d["q"], "items": [list(x)[:2] for x in d.get("items") or []],
-                "token": d.get("token"), "pages": int(d.get("pages") or 0)}
+                "pages": pages, "done": done, "tokens": tokens}
     except Exception:  # noqa: BLE001
         return None
 
 
-def add_page(phrase: str, items: list, token: str | None) -> dict:
-    """Append one page of results (public id + title only) and return the updated entry."""
+def next_token(entry: dict | None, project: str) -> str | None:
+    """The page token this project should ask with (None = page 1)."""
+    return ((entry or {}).get("tokens") or {}).get(project, {}).get("token")
+
+
+def add_page(phrase: str, items: list, token: str | None, project: str) -> dict:
+    """Append one page of results (public id + title only) read by `project`, with that project's next-page token."""
     clean = [[str(i), str(t or "")[:200]] for i, t in items if i]
     with _lock:
         cur = get(phrase)
         if cur is None:
-            cur = {"at": utcnow().isoformat(), "q": norm(phrase), "items": [], "token": None, "pages": 0}
+            cur = {"at": utcnow().isoformat(), "q": norm(phrase), "items": [], "pages": 0, "done": False, "tokens": {}}
         have = {i for i, _t in cur["items"]}
         cur["items"] = cur["items"] + [x for x in clean if x[0] not in have]
-        cur["token"], cur["pages"] = token or None, cur["pages"] + 1
+        page = int((cur["tokens"].get(project) or {}).get("page") or 0) + 1
+        cur["tokens"][project] = {"token": token or None, "page": page}
+        cur["pages"] = max(cur["pages"], page)
+        cur["done"] = cur["done"] or not token  # the result list ends here (the same for every project)
         try:
             with tenant.use(tenant.OWNER):
                 set_setting(_key(phrase), json.dumps(cur, ensure_ascii=False))
@@ -65,7 +82,7 @@ def add_page(phrase: str, items: list, token: str | None) -> dict:
 
 def exhausted(entry: dict | None) -> bool:
     """Every page of this phrase is already known (or as many as are kept): searching again finds nothing new today."""
-    return bool(entry) and (entry["pages"] >= MAX_PAGES or (entry["pages"] > 0 and not entry["token"]))
+    return bool(entry) and (entry["pages"] >= MAX_PAGES or entry["done"])
 
 
 def _purge_daily():
