@@ -6,8 +6,9 @@ ffmpeg. It does two kinds of job: "source" (download a section, send it) and "an
 comments). Reels, voice-overs, captions and AI scripts stay with the Windows helper PC.
 
 Start:  python phone.py [SERVER_URL]       (worker/phone/setup.sh sets everything up and starts it on boot)
-The first start registers the phone; approve it in the dashboard (My channels -> Helper PC) with the pairing code
-it prints. The Super Admin can then mark it "central": it then downloads for every account without a helper.
+The first start registers the phone. With the account's helper key (enroll_key.txt, written by the dashboard's setup
+command, or handed over by the server once the phone is approved) it joins by itself; without it, approve it in the
+dashboard (My channels -> Helper PC) with the pairing code it prints. The Super Admin can then mark it "central": it then downloads for every account without a helper.
 """
 import hashlib
 import logging
@@ -33,7 +34,8 @@ CAN = "source,analyze"  # told to the server, which then never sends reels, voic
 PARALLEL = 2  # downloads side by side
 POLL_SECONDS = 20  # polite: one short call every 20 s while idle
 BUSY_POLL = 60  # while both places are busy: a call a minute only to say "alive" (it asks for 0 jobs)
-MAX_BACKOFF = 300  # offline: wait longer each time, up to 5 minutes
+MAX_BACKOFF = 300  # the server answers with an error: wait longer each time, up to 5 minutes
+NET_PROBE = 30  # no connection at all (Wi-Fi off, phone woke up): look every 30 s, call in as soon as it is back
 REFRESH_EVERY = 24 * 3600  # once a day (and whenever the server gets new code) start.sh updates yt-dlp and this file
 LOCK_PORT = 47623  # one phone helper at a time
 EXIT_REFRESH, EXIT_RUNNING, EXIT_STOP = 4, 5, 6  # start.sh: 4 = update and start again, 5 and 6 = stop
@@ -47,6 +49,8 @@ def _server() -> str:
 
 SERVER = _server()
 TOKEN_FILE = HOME / ".worker_token"
+ENROLL_FILE = HOME / "enroll_key.txt"  # the account's helper key: join without approval
+KEY_RE = re.compile(r"rk\d{1,9}\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}")
 
 log = logging.getLogger("raji-phone")
 
@@ -226,24 +230,73 @@ def pair_code(token: str) -> str:
     return str(int(hashlib.sha256(("pair:" + token).encode()).hexdigest(), 16) % 1_000_000).zfill(6)
 
 
+def enroll_key() -> str:
+    """The account's helper key (RAJI_KEY or enroll_key.txt), or "" when there is none."""
+    key = os.getenv("RAJI_KEY", "").strip()
+    if not key and ENROLL_FILE.exists():
+        try:
+            key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip()
+        except OSError:
+            key = ""
+    return key if KEY_RE.fullmatch(key) else ""
+
+
+def key_id() -> str:
+    key = enroll_key()
+    return key.split(".")[1] if key else "none"
+
+
+def save_enroll_key(key: str):
+    """Keep the key the server handed over (never written to the log)."""
+    if not KEY_RE.fullmatch(key or "") or key == enroll_key():
+        return
+    try:
+        tmp = ENROLL_FILE.with_suffix(".tmp")
+        tmp.write_text(key, encoding="utf-8")
+        try:
+            tmp.chmod(0o600)
+        except OSError:
+            pass
+        os.replace(tmp, ENROLL_FILE)
+        log.info("Saved this account's helper key: if the server ever forgets this phone, it joins again by itself.")
+    except OSError as e:
+        log.info("Could not save the helper key (%s).", str(e)[:80])
+
+
 def get_token(force_new: bool = False) -> str:
     if TOKEN_FILE.exists() and not force_new:
         tok = TOKEN_FILE.read_text(encoding="utf-8-sig").strip()
         if len(tok) >= 40:
             return tok
+    old = TOKEN_FILE.read_text(encoding="utf-8-sig").strip() if TOKEN_FILE.exists() else ""
     # a customer's phone carries the code from their dashboard (helper_code.txt); the Super Admin's own needs none
     claim = os.getenv("RAJI_HELPER_CODE", "").strip()
     code_file = HOME / "helper_code.txt"
     if not claim and code_file.exists():
         claim = code_file.read_text(encoding="utf-8-sig").strip()
-    r = httpx.post(f"{SERVER}/api/worker/register", json={"name": "Android phone"}, timeout=30,
-                   headers={"x-helper-claim": claim} if claim else {})
-    if r.status_code == 403:
-        log.info("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) and run the "
-                 "setup command again.")
-        sys.exit(EXIT_STOP)
+    body, r, key = {"name": "Android phone"}, None, enroll_key()
+    if key:  # the helper key: approved at once
+        h = {"x-helper-key": key}
+        if old:
+            h["x-old-helper"] = hashlib.sha256(old.encode()).hexdigest()
+        r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30, headers=h)
+        if r.status_code in (401, 403):
+            try:
+                why = str(r.json().get("detail", ""))[:200]
+            except Exception:  # noqa: BLE001
+                why = ""
+            log.info("The helper key was not accepted (%s). Registering with a pairing code instead.", why or r.status_code)
+            r = None
+    if r is None:
+        r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30,
+                       headers={"x-helper-claim": claim} if claim else {})
+        if r.status_code == 403:
+            log.info("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) and run the "
+                     "setup command again.")
+            sys.exit(EXIT_STOP)
     r.raise_for_status()
-    tok = r.json()["token"]
+    data = r.json()
+    tok = data["token"]
     tmp = TOKEN_FILE.with_suffix(".tmp")
     tmp.write_text(tok, encoding="utf-8")
     try:
@@ -251,9 +304,29 @@ def get_token(force_new: bool = False) -> str:
     except OSError:
         pass
     os.replace(tmp, TOKEN_FILE)
-    log.info("Registered this phone. In the dashboard open My channels -> Helper PC, press Approve and type "
-             "this pairing code: %s", pair_code(tok))
+    if data.get("approved"):
+        log.info("Connected this phone with the helper key - nothing to approve. Waiting for jobs...")
+    else:
+        log.info("Registered this phone. In the dashboard open My channels -> Helper PC, press Approve and type "
+                 "this pairing code: %s", pair_code(tok))
     return tok
+
+
+def network_up() -> bool:
+    """A cheap check that the server can be reached at all (name lookup + connect, nothing sent)."""
+    from urllib.parse import urlparse
+
+    u = urlparse(SERVER)
+    try:
+        socket.create_connection((u.hostname, u.port or (443 if u.scheme == "https" else 80)), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
+def is_offline(e: Exception) -> bool:
+    """No answer at all (no network, phone just woke up), as opposed to an answer with an error."""
+    return isinstance(e, (getattr(httpx, "TransportError", OSError), OSError))
 
 
 def _post(url: str, headers: dict, tries: int = 3, **kw):
@@ -335,11 +408,21 @@ def main():
     for old in (HOME / "tmp").iterdir():  # parts left by a crash or a power cut
         shutil.rmtree(old, ignore_errors=True)
     ffmpeg_bin()
-    tok = get_token()
+    delay = POLL_SECONDS
+    while True:  # a phone that starts without internet waits for it instead of stopping
+        try:
+            tok = get_token()
+            break
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001
+            delay = min(delay * 2, MAX_BACKOFF)
+            log.info("Could not register yet: %s (trying again)", str(e)[:150])
+            _sleep_until(delay, set(), is_offline(e))
     headers = {"x-worker-token": tok}
     log.info("Raji Studio phone helper running for %s (keep Termux open, phone on charger and Wi-Fi).", SERVER)
     pool, running = ThreadPoolExecutor(max_workers=PARALLEL), set()
-    waiting, delay, last_call, version, started = False, POLL_SECONDS, 0.0, None, time.time()
+    waiting, delay, last_call, version, started, offline = False, POLL_SECONDS, 0.0, None, time.time(), False
     while True:
         running = {f for f in running if not f.done()}
         free = PARALLEL - len(running)
@@ -349,8 +432,10 @@ def main():
         try:
             last_call = time.time()
             r = httpx.get(f"{SERVER}/api/worker/jobs", timeout=30,
-                          headers={**headers, "x-worker-can": CAN, "x-worker-slots": str(free)})
-            delay = POLL_SECONDS
+                          headers={**headers, "x-worker-can": CAN, "x-worker-slots": str(free), "x-worker-enroll": key_id()})
+            if offline:
+                log.info("Connected again.")
+            delay, offline = POLL_SECONDS, False
             if r.status_code == 403:
                 if not waiting:
                     log.info("Waiting for approval in the dashboard (My channels -> Helper PC). Pairing code: %s", pair_code(tok))
@@ -365,6 +450,8 @@ def main():
                     log.info("Approved. Waiting for jobs...")
                     waiting = False
                 data = r.json()
+                if data.get("enroll_key"):
+                    save_enroll_key(data["enroll_key"])
                 for job in data.get("jobs", [])[:max(free, 0)]:
                     running.add(pool.submit(_safe, job, headers))
                 v = data.get("version") or ""
@@ -375,8 +462,10 @@ def main():
                 version = v
         except Exception as e:  # noqa: BLE001
             delay = min(delay * 2, MAX_BACKOFF)
-            log.info("connection problem: %s (next try in %d s)", str(e)[:150], delay)
-        _sleep_until(delay, running)
+            offline = is_offline(e)  # no connection at all: look every 30 s, call in as soon as it is back
+            log.info("connection problem: %s (next try in %d s%s)", str(e)[:150], delay,
+                     ", sooner when the network is back" if offline else "")
+        _sleep_until(delay, running, offline)
 
 
 def _safe(job: dict, headers: dict):
@@ -386,13 +475,18 @@ def _safe(job: dict, headers: dict):
         log.info("job failed: %s", str(e)[:150])
 
 
-def _sleep_until(seconds: float, running: set):
-    """Sleep, but come back early when a download finishes (a place is free again)."""
-    end, busy = time.time() + seconds, len(running)
+def _sleep_until(seconds: float, running: set, offline: bool = False):
+    """Sleep, but come back early when a download finishes (a place is free again), or - while offline - when the
+    network is back (looked at every NET_PROBE seconds; a jump of the clock after the phone slept counts as waited)."""
+    end, busy, probe = time.time() + seconds, len(running), time.time() + NET_PROBE
     while time.time() < end:
         time.sleep(1)
         if busy and sum(1 for f in running if not f.done()) < busy:
             return
+        if offline and time.time() >= probe:
+            if network_up():
+                return
+            probe = time.time() + NET_PROBE
 
 
 if __name__ == "__main__":

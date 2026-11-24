@@ -5,7 +5,9 @@ server cannot: download the needed section of a video, and generate voice-overs.
 still happen on the server.
 
 Start it with run_worker.bat (Windows) or:  python worker/clipstudio_worker.py [SERVER_URL]
-The first start registers this PC; approve it in the dashboard under My channels -> Helper PC.
+The first start registers this PC. With the account's helper key (worker/enroll_key.txt, written by the dashboard's
+install command or the helper ZIP, or handed over by the server to an approved helper) it joins by itself, nothing to
+approve; without it, approve it in the dashboard under My channels -> Helper PC with its pairing code.
 """
 import errno
 import hashlib
@@ -37,9 +39,13 @@ SERVER = (sys.argv[1] if len(sys.argv) > 1 else os.getenv("CLIPSTUDIO_URL", DEFA
 if not (SERVER.startswith("https://") or re.match(r"^http://(localhost|127\.0\.0\.1)(:\d+)?$", SERVER)):
     sys.exit("The server address must start with https:// (the helper sends videos and its key there).")
 TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
+ENROLL_FILE = pathlib.Path(__file__).with_name("enroll_key.txt")  # the account's helper key: join without approval
+HELPER_KEY_RE = re.compile(r"rk\d{1,9}\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}")
 # ReelGen (text -> reel engine) lives in its own project folder on this PC
 REELGEN_DIR = pathlib.Path(os.getenv("CLIPSTUDIO_REELGEN", r"D:\video generator"))
 POLL_SECONDS = 8
+MAX_BACKOFF = 300  # the server answers with an error: wait longer each time, up to 5 minutes
+NET_PROBE = 30  # no connection (offline, asleep, Wi-Fi changed): look every 30 s and call the server as soon as it is back
 PARALLEL = 3  # video downloads at the same time (YouTube slows each single download down to about playing speed)
 UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
 EXPECTED_ORIGIN = "github.com/vivekqwer/social-media-automation"  # only ever update from this repository
@@ -85,7 +91,7 @@ except Exception:  # noqa: BLE001
 
 
 ZIP_ALLOWED = re.compile(r"(app/[a-z_]+\.py|worker/[a-z_]+\.(py|bat|txt)|helper_version\.txt|Start helper\.bat)")
-ZIP_KEEP = {"worker/helper_code.txt", "worker/server.txt", "worker/.worker_token"}  # this PC's own settings
+ZIP_KEEP = {"worker/helper_code.txt", "worker/server.txt", "worker/.worker_token", "worker/enroll_key.txt"}  # this PC's own settings
 WIN_DEVICES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 MAX_UPDATE_BYTES = 5 * 1024 * 1024
 
@@ -167,30 +173,113 @@ def pair_code(token: str) -> str:
     return str(int(hashlib.sha256(("pair:" + token).encode()).hexdigest(), 16) % 1_000_000).zfill(6)
 
 
+def enroll_key() -> str:
+    """The account's helper key (CLIPSTUDIO_KEY or worker/enroll_key.txt), or "" when there is none."""
+    key = os.getenv("CLIPSTUDIO_KEY", "").strip()
+    if not key and ENROLL_FILE.exists():
+        try:
+            key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip()
+        except OSError:
+            key = ""
+    return key if HELPER_KEY_RE.fullmatch(key) else ""
+
+
+def key_id() -> str:
+    """The public part of the key this PC has (the server hands over a newer key when it differs)."""
+    key = enroll_key()
+    return key.split(".")[1] if key else "none"
+
+
+def save_enroll_key(key: str):
+    """Keep the key the server handed over (never written to the log)."""
+    if not HELPER_KEY_RE.fullmatch(key or "") or key == enroll_key():
+        return
+    try:
+        tmp = ENROLL_FILE.with_suffix(".tmp")
+        tmp.write_text(key, encoding="utf-8")
+        os.replace(tmp, ENROLL_FILE)
+        log("Saved this account's helper key: if the server ever forgets this PC, it joins again by itself.")
+    except OSError as e:
+        log(f"Could not save the helper key ({str(e)[:80]}).")
+
+
 def get_token(force_new: bool = False) -> str:
     if TOKEN_FILE.exists() and not force_new:
         tok = TOKEN_FILE.read_text(encoding="utf-8-sig").strip()
         if len(tok) >= 40:
             return tok
+    old = TOKEN_FILE.read_text(encoding="utf-8-sig").strip() if TOKEN_FILE.exists() else ""
     # A customer's helper carries the code from their dashboard (My channels -> Helper PC), in the file
     # worker\helper_code.txt or the CLIPSTUDIO_CLAIM setting; the system owner's own helper needs none.
     claim = os.getenv("CLIPSTUDIO_CLAIM", "").strip()
     code_file = pathlib.Path(__file__).with_name("helper_code.txt")
     if not claim and code_file.exists():
         claim = code_file.read_text(encoding="utf-8-sig").strip()
-    r = httpx.post(f"{SERVER}/api/worker/register", json={"name": socket.gethostname()}, timeout=30,
-                   headers={"x-helper-claim": claim} if claim else {})
-    if r.status_code == 403:
-        sys.exit("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) into "
-                 "worker/helper_code.txt and start the helper again.")
+    body, r, key = {"name": socket.gethostname()}, None, enroll_key()
+    if key:  # the helper key: approved at once. The old token's hash lets the server refuse a helper it removed.
+        h = {"x-helper-key": key}
+        if old:
+            h["x-old-helper"] = hashlib.sha256(old.encode()).hexdigest()
+        r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30, headers=h)
+        if r.status_code in (401, 403):
+            try:
+                why = str(r.json().get("detail", ""))[:200]
+            except Exception:  # noqa: BLE001
+                why = ""
+            log(f"The helper key was not accepted ({why or r.status_code}). Registering with a pairing code instead.")
+            r = None
+    if r is None:
+        r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30,
+                       headers={"x-helper-claim": claim} if claim else {})
+        if r.status_code == 403:
+            sys.exit("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) into "
+                     "worker/helper_code.txt and start the helper again.")
     r.raise_for_status()
-    tok = r.json()["token"]
+    data = r.json()
+    tok = data["token"]
     tmp = TOKEN_FILE.with_suffix(".tmp")
     tmp.write_text(tok, encoding="utf-8")
     os.replace(tmp, TOKEN_FILE)
-    log("Registered this PC. Approve it in the dashboard: My channels -> Helper PC -> Approve, "
-        f"and type this pairing code: {pair_code(tok)}")
+    if data.get("approved"):
+        log("Connected this PC with the helper key - nothing to approve.")
+    else:
+        log("Registered this PC. Approve it in the dashboard: My channels -> Helper PC -> Approve, "
+            f"and type this pairing code: {pair_code(tok)}")
     return tok
+
+
+def network_up() -> bool:
+    """A cheap check that the server can be reached at all (name lookup + connect, nothing sent)."""
+    from urllib.parse import urlparse
+
+    u = urlparse(SERVER)
+    try:
+        socket.create_connection((u.hostname, u.port or (443 if u.scheme == "https" else 80)), timeout=5).close()
+        return True
+    except OSError:
+        return False
+
+
+def is_offline(e: Exception) -> bool:
+    """No answer at all (no network, PC just woke up, server unreachable), as opposed to an answer with an error."""
+    return isinstance(e, (getattr(httpx, "TransportError", OSError), OSError))
+
+
+def pause(seconds: float, offline: bool = False):
+    """Wait before the next call. While offline, look at the network every NET_PROBE seconds and return as soon as
+    it is back, so after sleep / wake or a network change the helper calls in within about 30 s, not after the back-off.
+    A jump of the clock (the PC slept) counts as time waited."""
+    if not offline:
+        time.sleep(seconds)
+        return
+    waited = 0.0
+    while waited < seconds:
+        step = min(NET_PROBE, seconds - waited)
+        t0 = time.time()
+        time.sleep(step)
+        waited += max(step, time.time() - t0)
+        if network_up():
+            return
 
 
 def _post(url: str, headers: dict, tries: int = 3, **kw):
@@ -737,25 +826,42 @@ def handle_all(jobs: list, headers: dict):
         one(j)
 
 
+def first_token() -> str:
+    """The token, registering first if needed; a PC that starts without internet waits for it instead of stopping."""
+    delay = POLL_SECONDS
+    while True:
+        try:
+            return get_token()
+        except SystemExit:
+            raise
+        except Exception as e:  # noqa: BLE001
+            delay = min(delay * 2, MAX_BACKOFF)
+            log(f"Could not register yet: {str(e)[:150]} (trying again)")
+            pause(delay, offline=is_offline(e))
+
+
 def main():
     _lock = single_instance()  # noqa: F841  (held for the life of the process)
-    tok = get_token()
+    tok = first_token()
     headers = {"x-worker-token": tok}
     last_update_check = time.time()  # first check after a while: a fresh start never loops straight into an update
     log(f"Raji Studio helper running for {SERVER}. Keep this window open.")
-    waiting, delay = False, POLL_SECONDS
+    waiting, delay, offline = False, POLL_SECONDS, False
     while True:
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-",
-                                                                "x-worker-archive": archive_header(), "x-worker-can": "all"},
+                                                                "x-worker-archive": archive_header(), "x-worker-can": "all",
+                                                                "x-worker-enroll": key_id()},
                           timeout=30)
-            delay = POLL_SECONDS
+            if offline:
+                log("Connected again.")
+            delay, offline = POLL_SECONDS, False
             if r.status_code == 403:
                 if not waiting:
                     log(f"Waiting for approval in the dashboard (My channels -> Helper PC). Pairing code: {pair_code(tok)}")
                     waiting = True
             elif r.status_code == 401:
-                log("The server does not know this helper (removed in the dashboard?). Registering again...")
+                log("The server does not know this helper (removed in the dashboard, or its data was restored). Registering again...")
                 tok = get_token(force_new=True)
                 headers = {"x-worker-token": tok}
                 waiting = False
@@ -765,15 +871,19 @@ def main():
                     log("Approved. Waiting for jobs...")
                     waiting = False
                 data = r.json()
+                if data.get("enroll_key"):
+                    save_enroll_key(data["enroll_key"])
                 handle_all(data.get("jobs", []), headers)
                 backup_daily(headers)
                 if time.time() - last_update_check > UPDATE_EVERY:
                     last_update_check = time.time()
                     maybe_update(data.get("version", ""))
         except Exception as e:  # noqa: BLE001
-            delay = min(delay * 2, 300)  # server down: wait longer each time, up to 5 minutes
-            log(f"connection problem: {str(e)[:150]} (next try in {delay} s)")
-        time.sleep(delay)
+            delay = min(delay * 2, MAX_BACKOFF)  # wait longer each time, up to 5 minutes...
+            offline = is_offline(e)  # ...but with no connection at all, look every 30 s and call in as soon as it is back
+            log(f"connection problem: {str(e)[:150]} (next try in {delay} s"
+                + (f", sooner when the network is back)" if offline else ")"))
+        pause(delay, offline)
 
 
 if __name__ == "__main__":

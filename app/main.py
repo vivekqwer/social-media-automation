@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import accounts, acl, archive, auth, payments, quota, scheduler, tenant, workers, youtube
+from . import accounts, acl, archive, auth, enroll, payments, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
@@ -51,7 +51,9 @@ PUBLIC_PATHS = {
     "/auth/reset/start", "/auth/callback",
     "/api/pay/razorpay/webhook",  # Razorpay's own call: checked with the webhook secret inside the route
     "/helper/phone.py", "/helper/setup.sh",  # the Android phone helper, fetched with curl (public files of this repository)
+    "/helper/install.ps1",  # the Windows helper's one-time setup (a public file; the key is given to it on the command line)
 }
+ENROL_PATHS = {"/api/worker/register", "/api/worker/package"}  # a helper without a token yet: key or helper code
 SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
@@ -140,21 +142,28 @@ async def auth_gate(request: Request, call_next):
         if size > cap:
             return JSONResponse({"detail": "Too large"}, status_code=413)
         tok = request.headers.get("x-worker-token", "")
-        if path == "/api/worker/register":
-            claim = request.headers.get("x-helper-claim", "")
+        if path in ENROL_PATHS:  # no token yet: the copy comes from the helper key, else from the helper code
+            claim, key = request.headers.get("x-helper-claim", ""), request.headers.get("x-helper-key", "").strip()
             tid = workers.tenant_from_claim(claim) if claim else tenant.OWNER
+            if key:  # the key itself is checked inside its own copy (in the route); here only which copy it names
+                ktid = enroll.tenant_of_key(key)
+                tid = ktid if ktid is not None and (not claim or ktid == tid) else None
+            elif path != "/api/worker/register":
+                tid = None  # the helper package is only given for a key
             if tid is not None and tid != tenant.OWNER and tid not in accounts.active_tenants():
                 tid = None  # the account is blocked or gone
             if tid is None:
-                return JSONResponse({"detail": "This helper code is not valid. Copy it again from My channels → Helper PC."}, status_code=403)
+                return JSONResponse({"detail": "This helper key is not valid. Copy the command again from My channels → Helper PC."
+                                     if key else "This helper code is not valid. Copy it again from My channels → Helper PC."},
+                                    status_code=403)
         else:
             tid = workers.tenant_of(tok)
             if tid != tenant.OWNER and tid not in accounts.active_tenants():
                 return JSONResponse({"detail": "Unknown helper"}, status_code=401)
-        if tid in RESTORING and path != "/api/worker/register":  # the copy is being restored from a backup: come back later
+        if tid in RESTORING and path not in ENROL_PATHS:  # the copy is being restored from a backup: come back later
             return JSONResponse({"detail": "A backup is being restored. Try again in a minute."}, status_code=503)
         with tenant.use(tid):  # the helper sees and serves only its own customer's copy
-            if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
+            if path not in ENROL_PATHS:  # only approved helpers may send anything (checked before the body is read)
                 found = workers.authenticate(tok)
                 if not found:
                     return JSONResponse({"detail": "Unknown helper"}, status_code=401)
@@ -3547,6 +3556,9 @@ def _helper_zip(tid: int, with_code: bool = True) -> bytes:
         z.writestr("helper_version.txt", SERVER_VERSION or "dev")  # written last on the PC: marks a complete update
         if with_code and tid != tenant.OWNER:
             z.writestr("worker/helper_code.txt", workers.claim_code(tid))
+        key = enroll.current_key() if with_code else None
+        if key:  # the helper joins by itself: nothing to approve (only in the account admin's own download)
+            z.writestr("worker/enroll_key.txt", key)
     return buf.getvalue()
 
 
@@ -3700,6 +3712,24 @@ def worker_register(body: WorkerRegIn, request: Request):
     if auth.rate_limited(ip, "helper"):
         raise HTTPException(429, "Too many attempts")
     auth.note_fail(ip, "helper")  # helper registrations have their own counter
+    name = (body.name.strip() or "helper")[:60]
+    key = request.headers.get("x-helper-key", "").strip()
+    if key:  # the account's helper key: approved at once, no pairing code, no button
+        try:
+            kid = enroll.check(key, request.headers.get("x-old-helper", "")[:64])
+        except enroll.EnrollError as e:
+            raise HTTPException(e.status, str(e))
+        tok = secrets.token_urlsafe(32)
+        if tenant.current() != tenant.OWNER:
+            tok = f"t{tenant.current()}.{tok}"
+        with SessionLocal() as s:
+            w = Worker(name=name, token_hash=workers.token_hash(tok), approved=True, enrolled=kid, last_seen=utcnow(), ip=ip[:60])
+            s.add(w)
+            s.commit()
+            wid = w.id
+        enroll.note_use()
+        enroll.log_join(name, ip)
+        return {"worker_id": wid, "token": tok, "approved": True}
     with SessionLocal() as s:
         s.query(Worker).filter(Worker.approved.is_(False), Worker.created_at < utcnow() - timedelta(minutes=30)).delete()
         s.commit()
@@ -3708,15 +3738,29 @@ def worker_register(body: WorkerRegIn, request: Request):
         tok = secrets.token_urlsafe(32)
         if tenant.current() != tenant.OWNER:
             tok = f"t{tenant.current()}.{tok}"  # tells the server which customer this helper belongs to
-        w = Worker(name=(body.name.strip() or "helper")[:60], token_hash=workers.token_hash(tok), approved=False,
+        w = Worker(name=name, token_hash=workers.token_hash(tok), approved=False,
                    last_seen=utcnow(), ip=ip[:60], pair_hash=workers.token_hash(workers.pair_code(tok)))
         s.add(w)
         s.commit()
-        return {"worker_id": w.id, "token": tok}
+        return {"worker_id": w.id, "token": tok, "approved": False}
+
+
+@app.get("/api/worker/package")
+def worker_package(request: Request):
+    """The helper program for a new Windows PC, for the one-line install command (the helper key in x-helper-key)."""
+    ip = _client_ip(request)
+    if auth.rate_limited(ip, "helper"):
+        raise HTTPException(429, "Too many attempts")
+    auth.note_fail(ip, "helper")
+    key = request.headers.get("x-helper-key", "").strip()
+    cur = enroll.current_key(create=False)
+    if not cur or not secrets.compare_digest(enroll.key_hash(key), enroll.key_hash(cur)):
+        raise HTTPException(403, "This helper key is not valid any more. Copy the command again from the dashboard.")
+    return Response(_helper_zip(tenant.current()), media_type="application/zip", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/worker/jobs")
-def worker_jobs(request: Request):
+def worker_jobs(request: Request, response: Response):
     wid = _worker_or_401(request)
     h, now = request.headers, utcnow()
     can = workers.parse_can(h.get("x-worker-can"))  # None: an older helper (does everything, knows no tickets)
@@ -3775,7 +3819,17 @@ def worker_jobs(request: Request):
                 oid = j.get("clip_id") or j.get("project_id") or j.get("source_id")
                 j["ticket"] = workers.make_ticket(tid, j["type"], oid, wid)
             jobs += more
-    return {"jobs": jobs, "version": SERVER_VERSION}
+    out = {"jobs": jobs, "version": SERVER_VERSION}
+    has = h.get("x-worker-enroll")
+    if has is not None and getattr(request.state, "ticket", None) is None:
+        # a helper that knows helper keys and has not got this account's current one: hand it over, so that it can
+        # join again by itself if its token is ever lost (the owner's PC needs nothing typed). Only to an approved
+        # helper of this same copy, only when its key is missing or old; never logged.
+        key = enroll.current_key()
+        if key and enroll.kid_of(key) != has.strip():
+            out["enroll_key"] = key
+            response.headers["Cache-Control"] = "no-store"
+    return out
 
 
 _central_turn = [0]  # which customer the central helper looks at first (moves on each call)
@@ -4210,6 +4264,13 @@ def helper_setup_sh():
     return _phone_file("setup.sh")
 
 
+@app.get("/helper/install.ps1")
+def helper_install_ps1():
+    """The Windows helper's one-time setup (the dashboard's "Laptop helper" command runs it). No secrets inside."""
+    return Response((PHONE_DIR.parent / "install.ps1").read_bytes(), media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/workers/{wid}/approve")
 def approve_worker(wid: int, body: PairIn):
     _need_step("helper")
@@ -4226,9 +4287,45 @@ def approve_worker(wid: int, body: PairIn):
 @app.delete("/api/workers/{wid}")
 def delete_worker(wid: int):
     with SessionLocal() as s:
-        s.delete(_get(s, Worker, wid))
+        w = _get(s, Worker, wid)
+        enroll.remember_removed(w.token_hash)  # it never joins again by itself with the helper key
+        s.delete(w)
         s.commit()
         return {"deleted": True}
+
+
+# ---------- helper key: helpers join by themselves (app/enroll.py) ----------
+def _key_response(key: str) -> JSONResponse:
+    return JSONResponse({**enroll.commands(key, BASE_URL), **enroll.summary()},
+                        headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
+
+
+@app.get("/api/helper/key")
+def helper_key_state():
+    """Is there a helper key, and which helpers joined with it (never the key itself)."""
+    return enroll.summary()
+
+
+@app.post("/api/helper/key/show")
+def helper_key_show():
+    """The account's admin: the key and the one-line install commands (made the first time)."""
+    key = enroll.current_key()
+    if not key:
+        raise HTTPException(409, "The helper key is switched off. Press “New key” to make one.")
+    return _key_response(key)
+
+
+@app.post("/api/helper/key/rotate")
+def helper_key_rotate():
+    """A new key; the old one stops at once. Helpers already connected keep working (and are handed the new key)."""
+    return _key_response(enroll.rotate())
+
+
+@app.post("/api/helper/key/revoke")
+def helper_key_revoke():
+    """Switch the key off: no helper joins by itself until a new key is made. Connected helpers keep working."""
+    enroll.revoke()
+    return enroll.summary()
 
 
 class AnalysisIn(BaseModel):

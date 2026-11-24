@@ -1,10 +1,11 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Raji Studio phone helper: one-time setup on an Android phone, inside Termux (installed from F-Droid).
 #
-#   curl -fsSL https://YOUR-SERVER/helper/setup.sh | bash -s -- https://YOUR-SERVER
+#   curl -fsSL https://YOUR-SERVER/helper/setup.sh | RAJI_KEY='rk1.xxxx.yyyy' bash -s -- https://YOUR-SERVER
 #
-# A customer's own phone asks for the helper code (My channels -> Helper PC shows it); the Super Admin presses Enter.
-# The code is typed at the prompt (or put in ~/raji-helper/helper_code.txt), never on the command line.
+# The dashboard's command (My channels -> Helper PC -> Show) carries the account's helper key in RAJI_KEY: the phone
+# then joins by itself, nothing to approve. The key is kept in ~/raji-helper/enroll_key.txt (only you can read it).
+# Without a key (an older command), a customer's phone asks for the helper code and is approved with a pairing code.
 # Running it again is safe: it updates everything and restarts the helper.
 set -u
 SERVER="${1:-https://social-media-automation-production-f5543fa3.up.railway.app}"
@@ -20,7 +21,17 @@ esac
 say() { printf '\n== %s\n' "$1"; }
 
 mkdir -p "$DIR" "$BOOT"
-if [ ! -s "$DIR/helper_code.txt" ] && [ -r /dev/tty ]; then
+KEY="${RAJI_KEY:-}"
+unset RAJI_KEY   # the helper reads it from the file, never from the start command
+if [ -n "$KEY" ]; then
+  case "$KEY" in
+    rk[0-9]*.*.*) ;;
+    *) echo "This helper key does not look right - copy the command again from the dashboard."; exit 1 ;;
+  esac
+  (umask 077; printf '%s\n' "$KEY" > "$DIR/enroll_key.txt")
+  chmod 600 "$DIR/enroll_key.txt"
+fi
+if [ -z "$KEY" ] && [ ! -s "$DIR/enroll_key.txt" ] && [ ! -s "$DIR/helper_code.txt" ] && [ -r /dev/tty ]; then
   printf 'Helper code (only for a customer'"'"'s phone; the owner just presses Enter): '
   CODE=""
   read -r CODE </dev/tty || CODE=""
@@ -95,13 +106,15 @@ pkill -f raji-helper/start.sh 2>/dev/null; pkill -f "phone.py" 2>/dev/null; slee
 nohup bash "$DIR/start.sh" >/dev/null 2>&1 &
 for i in $(seq 1 60); do
   sleep 2
-  if [ -f "$DIR/helper.log" ] && grep -q "pairing code\|Waiting for jobs\|running for" "$DIR/helper.log"; then break; fi
+  if [ -f "$DIR/helper.log" ] && grep -q "pairing code\|Waiting for jobs\|running for\|nothing to approve" "$DIR/helper.log"; then break; fi
 done
 echo
 tail -n 5 "$DIR/helper.log" 2>/dev/null
 CODE6="$(grep -o 'pairing code: [0-9]\{6\}' "$DIR/helper.log" 2>/dev/null | tail -n 1 | grep -o '[0-9]\{6\}')"
 echo
-if [ -n "$CODE6" ]; then
+if grep -q "nothing to approve" "$DIR/helper.log" 2>/dev/null; then
+  echo "Connected by itself - nothing to approve. It appears in the dashboard under My channels -> Helper PC."
+elif [ -n "$CODE6" ]; then
   echo "Now open the dashboard -> My channels -> Helper PC -> Approve, and type: $CODE6"
 else
   echo "The helper is running. See $DIR/helper.log"
