@@ -120,13 +120,19 @@ def _next_slot(s, gap_hours: int, dest_id, post_times: str | None = None, tz_off
     base = max(last, now) if last else now
     slot = _slot_from_times(base, post_times, tz_offset) if post_times else None
     slot = slot or (base + timedelta(hours=gap_hours))
-    # all channels share one daily upload budget: move to the next day while that day is full
+    return fit_capacity(s, slot, post_times, tz_offset)
+
+
+def fit_capacity(s, slot, post_times: str | None = None, tz_offset: int = 0, skip_id: int | None = None):
+    """All channels share one daily upload budget: move the slot to the next day while its day is full."""
     cap = quota.capacity()
     for _ in range(60):
         day = quota.pt_day_of(slot)
         lo, hi = slot - timedelta(hours=36), slot + timedelta(hours=36)
-        load = sum(1 for (t,) in s.query(Clip.publish_at).filter(
-            Clip.status.in_(HOLDS_SLOT), Clip.publish_at.between(lo, hi)) if quota.pt_day_of(t) == day)
+        q = s.query(Clip.publish_at).filter(Clip.status.in_(HOLDS_SLOT), Clip.publish_at.between(lo, hi))
+        if skip_id:
+            q = q.filter(Clip.id != skip_id)
+        load = sum(1 for (t,) in q if quota.pt_day_of(t) == day)
         if load < cap:
             break
         nxt = slot + timedelta(days=1)

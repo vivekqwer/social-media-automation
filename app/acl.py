@@ -370,7 +370,8 @@ ROUTES = [
     ("POST", "/api/worker/voice/{cid}", HELPER, None),
     ("GET", "/api/worker/archive/{cid}/{name}", HELPER, None),  # an uploaded clip's video, for the copy on the PC
     ("POST", "/api/worker/archived/{cid}", HELPER, None),
-    ("POST", "/api/worker/restore/{cid}", HELPER, None),
+    ("POST", "/api/worker/restore/{cid}/{name}", HELPER, None),
+    ("POST", "/api/worker/archive-inventory", HELPER, None),
     ("POST", "/api/worker/fail/{cid}", HELPER, None),
     ("POST", "/api/worker/analysis/{pid}", HELPER, None),
 ]

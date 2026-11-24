@@ -84,6 +84,9 @@ def find(topic: str) -> dict:
         except Exception as e:  # noqa: BLE001  (a failed search never stops the upload)
             log.warning("own video topic search: %s", str(e)[:200])
             source, why = "saved", "YouTube's search did not answer just now"
+            if "quotaExceeded" in str(e) or "dailyLimitExceeded" in str(e):
+                quota.exhaust()  # the Google project's budget is used up (other apps may share it): show it as full
+                why = "YouTube's daily budget is used up (it resets at 1:30 PM IST)"
     at = utcnow().isoformat() + "Z"
     if source == "saved":
         try:
@@ -190,12 +193,16 @@ def best_slot(s, clip: Clip, now=None):
     hours = m.get("hours") or []
     if m.get("enough") and hours and hours[0].get("ratio", 0) >= 1.2:
         h = int(hours[0]["key"])
+        from .autopilot import fit_capacity
+
         t = (now + IST + timedelta(hours=2)).replace(minute=0, second=0, microsecond=0)
         for _ in range(48):
             if t.hour == h:
                 break
             t += timedelta(hours=1)
-        return t - IST, (f"{h:02d}:00 India time — your videos published at that hour get {hours[0]['ratio']}× your usual "
+        # the same daily upload budget as every other clip: a full day moves it to the same hour on the next day
+        slot = fit_capacity(s, t - IST, f"{h:02d}:00", int(IST.total_seconds() // -60), skip_id=clip.id)
+        return slot, (f"{h:02d}:00 India time — your videos published at that hour get {hours[0]['ratio']}× your usual "
                          f"views ({hours[0]['n']} videos, Ideas → What works)")
     from .autopilot import _next_slot
 

@@ -1344,7 +1344,10 @@ async function loadWorkers(){
       ${!w.approved?'<span class="badge queued">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
       ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}">Approve</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Start worker\\run_worker.bat on your computer.');
     const hp=(OV&&OV.helper)||{},na=+hp.archived||0;
-    $('#wk-arch').innerHTML=`${ico('check')} <b>${na}</b> uploaded video${na===1?'':'s'} saved on your PC, in <b>${esc(hp.archive_dir||'the folder “archive” next to the helper')}</b>. The server keeps a video only while it waits for its upload; open a clip and press <b>Get the video back from the PC</b> to bring one back.`;
+    $('#wk-arch').innerHTML=(L.some(w=>w.approved)&&hp.archive_ready===false)
+      ?`<span style="color:var(--warn)">${ico('alert')} <b>Update the helper PC so it can save uploaded videos — until then they stay on the server.</b> It updates itself while it runs; otherwise start <b>worker\\run_worker.bat</b> once.</span>`
+      :`${ico('check')} <b>${na}</b> uploaded video${na===1?'':'s'} saved on your PC, in <b>${esc(hp.archive_dir||'the folder RajiStudioArchive in your user folder')}</b>. The server keeps a video only while it waits for its upload; open a clip and press <b>Get the video back from the PC</b> to bring one back.`
+        +(hp.archive_missing?` <span style="color:var(--warn)">${ico('alert')} ${+hp.archive_missing} saved video(s) are missing from that folder — nothing was deleted; put the folder back if you moved it.</span>`:'');
     $$('[data-wa]').forEach(b=>b.onclick=()=>once(async()=>{const code=prompt('Type the 6-digit pairing code shown in the helper window on your PC (also in worker'+String.fromCharCode(92)+'helper.log):');if(code===null)return;await api(`/api/workers/${b.dataset.wa}/approve`,'POST',{code});toast('Helper approved');loadWorkers()}));
     $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper PC?')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
   }catch(e){}
@@ -1766,7 +1769,7 @@ const limTxt=(v,one,many)=>v==null?'No limit on '+many:v+' '+(v===1?one:many);
 async function loadOffers(){
   const el=$('#pp-box');if(!el)return;const d=await api('/api/plans');const ends=d.expires?new Date(d.expires):null;
   if(d.current)$('#plan-sub').textContent=`Your plan: ${d.current}`+(ends?` — active until ${ends.toLocaleDateString([], {dateStyle:'medium'})}`:'')+`. It allows ${d.channel_limit||1} YouTube channel${(d.channel_limit||1)===1?'':'s'}.`;
-  const upBox=$('#own-box');if(upBox)upBox.style.display=d.plans.length?'none':'';/* plans for sale: the plan tiles are the way to pay (style, not .hide: that one belongs to the switches) */
+  const upBox=$('#up-box');if(upBox)upBox.style.display=d.plans.length?'none':'';/* plans for sale: the plan tiles are the way to pay (style, not .hide: that one belongs to the switches) */
   if(!d.plans.length){el.innerHTML='';return}
   const isCust=ME.role==='user',canPay=d.online&&isCust,manual=!d.online&&isCust&&can('account.upgrade'),pay=ME.pay||{},lim=d.channel_limit||1;
   const chTxt=c=>c==null?`${lim} YouTube channel${lim===1?'':'s'}, the same as you have now`:limTxt(c,'YouTube channel','YouTube channels');/* a plan without a channel number leaves the account's own number (acl.apply_plan) */

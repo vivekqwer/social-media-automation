@@ -137,6 +137,13 @@ def save_frame(clip, project, variant: int):
         _frame(Path(clip.output_path), W, H, workdir / f"thumb_frame_v{variant}.png", variant)
 
 
+def frame_ready(clip, project) -> bool:
+    """A thumbnail can be made: the video is here, or a frame was kept for this when it went to the PC."""
+    workdir, src, _w, _h = _thumb_source(clip, project)
+    variant = int(getattr(clip, "thumb_variant", 0) or 0)
+    return src.exists() or (workdir / f"thumb_frame_v{variant}.png").exists()
+
+
 def make_thumbnail(clip, project) -> Path:
     workdir, src, W, H = _thumb_source(clip, project)
     portrait = clip.aspect == "9:16"

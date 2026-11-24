@@ -171,6 +171,10 @@ class Clip(Base):
     archive_lease = Column(DateTime)  # a helper took this clip's archive/restore job at
     restore_wanted = Column(DateTime)  # "Get the video back from the PC" was pressed at
     archive_note = Column(String(300))  # what last happened to the PC copy, in plain words
+    archived_by = Column(Integer)  # the helper (workers.id) that holds the PC copy; "Get back" asks that one
+    archived_size = Column(Integer)  # bytes of out.mp4 as saved (a file sent back may be at most 10% larger)
+    archived_src_size = Column(Integer)  # bytes of src/upload.mp4 as saved
+    archive_missing = Column(DateTime)  # the helper's daily folder list did not have this clip's file (nothing deleted)
     held_was = Column(String(20))  # status before the strike responder held this clip (status "held": it will not upload)
     kept_private = Column(Boolean)  # already on YouTube with a future publish time: set to private after a strike (strikes.py)
     # draft | rendering | rendered | queued | uploading | uploaded | failed | held (after a strike from its creator)
@@ -240,7 +244,8 @@ class Worker(Base):
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
     llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
     ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
-    archive_dir = Column(String(300))  # where this helper keeps the saved videos (the folder "archive" next to it)
+    archive_dir = Column(String(300))  # where this helper keeps the saved videos (it tells the server on every poll)
+    inventory_at = Column(DateTime)  # this helper was last asked to list its archive folder
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

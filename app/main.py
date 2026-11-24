@@ -130,7 +130,7 @@ async def auth_gate(request: Request, call_next):
         size = 0
     if path.startswith("/api/worker/"):
         cap = 900 * 1024 * 1024 if path.startswith(("/api/worker/source/", "/api/worker/restore/")) else 30 * 1024 * 1024 \
-            if path.startswith(("/api/worker/voice/", "/api/worker/analysis/")) else 64 * 1024
+            if path.startswith(("/api/worker/voice/", "/api/worker/analysis/", "/api/worker/archive-inventory")) else 64 * 1024
         if size > cap:
             return JSONResponse({"detail": "Too large"}, status_code=413)
         tok = request.headers.get("x-worker-token", "")
@@ -1463,10 +1463,13 @@ def clip_get_back(cid: int):
         if c.status != "uploaded" or not c.archived_at:
             raise HTTPException(409, "This video was not saved on your PC, so there is nothing to get back. "
                                      "“Upload again” downloads it from the source instead.")
-        if archive.on_server(c) and not (c.archived_src_sha and not archive.source_path(c).exists()):
+        if archive.all_back(c):
             raise HTTPException(409, "The video is still on the server — nothing to get back.")
+        w, why = archive.saver(s, c)
+        if c.archived_by and not w:  # that helper was removed: say where the file is
+            raise HTTPException(409, why)
         c.restore_wanted, c.archive_lease = utcnow(), None
-        c.archive_note = "Waiting for your helper PC to send the video back."
+        c.archive_note = (why or f"Waiting for your helper PC{f' ({w.name})' if w else ''} to send the video back.")[:300]
         s.commit()
         return _clip_card(c, {c.project_id: s.get(Project, c.project_id)})
 
@@ -1749,7 +1752,8 @@ def _helper_state(s) -> dict:
                    if w.archive_dir), None)
     return {"approved": len(ws), "online": online, "waiting": waiting,
             "last_seen": max((w["last_seen"] for w in ws if w["last_seen"]), default=None),
-            "archived": s.query(Clip).filter(Clip.archived_at.isnot(None)).count(), "archive_dir": folder}
+            "archived": s.query(Clip).filter(Clip.archived_at.isnot(None)).count(), "archive_dir": folder,
+            "archive_ready": archive.helpers_can_save(s), "archive_missing": archive.missing(s)}
 
 
 @app.post("/api/destinations/{did}/pause")
@@ -1898,6 +1902,9 @@ def reupload_clip(cid: int, body: ReuploadIn):
                                      "can bring another strike (3 strikes close the channel), so it is blocked.")
         if not body.confirm:
             raise HTTPException(400, "Confirm first")
+        if c.archived_at and not archive.all_back(c) and archive.own_upload(s.get(Project, c.project_id)):
+            raise HTTPException(409, "Get the video back from your PC first — your own video is only on your PC now "
+                                     "(press “Get the video back from the PC”, then Upload again).")
         acl.need_clip_room()
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
@@ -1913,12 +1920,13 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new_dir.mkdir(parents=True, exist_ok=True)
         old_out = Path(c.output_path) if c.output_path else Path(old_dir / "out.mp4")
         has_source = (old_dir / "src").exists() and any(
-            f.suffix == ".mp4" for f in Path(old_dir / "src").iterdir() if not f.name.endswith(".part"))
+            f.is_file() and f.suffix == ".mp4" for f in Path(old_dir / "src").iterdir() if not f.name.endswith(".part"))
         if (old_dir / "src").exists():  # reuse the downloaded source: no new download needed
             shutil.copytree(old_dir / "src", new_dir / "src", dirs_exist_ok=True)
         if c.voice_path and Path(c.voice_path).exists():
             new.voice_path = str(shutil.copy(c.voice_path, new_dir / Path(c.voice_path).name))
-        ready = not has_source and old_out.exists()  # e.g. brought back from the PC: the finished video as it was
+        # only a video brought back from the PC is used as it is; everything else is made again with the current look
+        ready = not has_source and old_out.exists() and Path(old_dir / "restored").exists()
         if ready:
             new.output_path = str(shutil.copyfile(old_out, Path(new_dir / "out.mp4")))
             new.status = "rendered"
@@ -1960,6 +1968,8 @@ def approve_clip(cid: int, body: ApproveIn):
             c.publish_at = _future_time(body.publish_at)
         elif c.status == "queued" and c.publish_at and c.publish_at > utcnow():
             pass  # Re-queue without a new time keeps the clip's existing time
+        elif (c.kw or {}).get("basis") and c.publish_at and c.publish_at > utcnow() + timedelta(minutes=15):
+            pass  # my own video: the time proposed from the topic search (app/owntopic.py) is kept
         else:
             ch = s.get(Channel, p.channel_ref) if p.channel_ref else None
             c.publish_at = _next_slot(s, ch.gap_hours if ch else 12, c.destination_id,
@@ -3185,13 +3195,19 @@ def health():
                                                   "number at youtube.com/verify — they are then sent again by themselves.",
                           "fix": "verify", "key": "thumbs"})
         try:
-            n_late = archive.late(s)
+            n_late, n_gone, can_save = archive.late(s), archive.missing(s), archive.helpers_can_save(s)
         except Exception:  # noqa: BLE001
-            n_late = 0
+            n_late, n_gone, can_save = 0, 0, True
         if n_late:
             items.append({"level": "warn", "text": f"{n_late} uploaded video(s) are not saved on your PC {archive.LATE_DAYS} days after "
-                                                  "their upload, so they stay on the server and fill its disk. Keep the helper PC on.",
+                                                  "their upload, so they stay on the server and fill its disk. "
+                                                  + ("Keep the helper PC on." if can_save else archive.OLD_HELPER),
                           "fix": "helper", "key": "archive_late"})
+        if n_gone:
+            items.append({"level": "warn", "text": f"{n_gone} video(s) saved on your PC are missing from its archive folder (they are no "
+                                                  "longer on the server either). Nothing was deleted — if you moved or renamed the "
+                                                  "folder, put it back; the helper checks again every day.",
+                          "fix": "helper", "key": "archive_missing"})
         if dests and not s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count():
             items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source", "key": "no_source"})
         for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto.is_(True)).all():
@@ -3627,7 +3643,7 @@ def worker_register(body: WorkerRegIn, request: Request):
 
 @app.get("/api/worker/jobs")
 def worker_jobs(request: Request):
-    _worker_or_401(request)
+    wid = _worker_or_401(request)
     jobs, now = [], utcnow()
     free = lambda lease: not lease or lease < now - JOB_LEASE  # noqa: E731
     with SessionLocal() as s:  # remember whether this helper has a local AI (for the setup checklist)
@@ -3704,7 +3720,7 @@ def worker_jobs(request: Request):
                 ch.script_wanted = w
                 jobs.append({"type": "script", "source_id": ch.id, "topic": w["topic"], "lang": ch.permission_note or "hi"})
         if request.headers.get("x-worker-archive"):  # only a helper that knows these jobs (an old one would only drop them)
-            jobs += archive.jobs(s, now, JOB_LEASE)  # after the downloads; the helper runs them one at a time, last
+            jobs += archive.jobs(s, now, JOB_LEASE, wid)  # after the downloads; the helper runs them one at a time, last
         s.commit()
     if want_ai:  # the helper installs Ollama + the model by itself (it ignores this while already busy with it)
         jobs.append({"type": "setup_ai"})
@@ -3855,56 +3871,103 @@ class ArchivedIn(BaseModel):
 @app.post("/api/worker/archived/{cid}")
 def worker_archived(cid: int, body: ArchivedIn, request: Request):
     """The PC saved the clip's files: recorded only when every sha256 matches the server's file."""
-    _worker_or_401(request)
+    wid = _worker_or_401(request)
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
-        done, why = archive.confirm(c, body.files)
+        done, why = archive.confirm(c, body.files, wid)
         s.commit()
     if not done:
         raise HTTPException(409, why)
     return {"ok": True}
 
 
-@app.post("/api/worker/restore/{cid}")
-def worker_restore(cid: int, request: Request, video: UploadFile | None = File(None), source: UploadFile | None = File(None)):
-    """The PC sends a saved video back ("Get the video back from the PC"): checked by sha256, then put in place."""
-    _worker_or_401(request)
+def _restore_check(cid: int, name: str, wid: int) -> tuple[int, Path]:
+    """Before a byte is saved: this clip was asked back, from this helper, and this file is the one missing."""
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         if not c.restore_wanted:
             raise HTTPException(409, "Nothing was asked back for this clip")
-        tmps = {}
-        try:
-            for name, f in (("video", video), ("source", source)):
-                if f is not None:
-                    tmps[name] = archive.folder(c) / f"{name}.{secrets.token_hex(4)}.part"
-                    _save_upload(f, tmps[name], 900 * 1024 * 1024)
-            if not tmps:
-                raise HTTPException(400, "No file was sent")
-            done, why = archive.put_back(c, tmps)
-            if not done:  # not the file that was saved: stop asking, and say so
-                c.restore_wanted, c.archive_note = None, why
-            s.commit()
-        finally:
-            for t in tmps.values():
-                Path(t).unlink(missing_ok=True)
+        if c.archived_by and c.archived_by != wid:
+            raise HTTPException(409, "Another helper PC saved this video")
+        if name not in [f["name"] for f in archive.restore_needs(c)]:
+            raise HTTPException(409, f"The {name} file is not missing on the server")
+        return archive.restore_cap(c, name), archive.folder(c) / f"{name}.{secrets.token_hex(4)}.part"
+
+
+def _restore_finish(cid: int, name: str, tmp: Path) -> tuple[bool, str]:
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        if not c.restore_wanted:
+            return False, "Nothing was asked back for this clip"
+        done, why = archive.put_back(c, {name: tmp})
+        if not done:  # not the file that was saved: stop asking, and say so
+            c.restore_wanted, c.archive_lease, c.archive_note = None, None, why
+        s.commit()
+        return done, why
+
+
+@app.post("/api/worker/restore/{cid}/{name}")
+async def worker_restore(cid: int, name: str, request: Request):
+    """The PC sends one saved file back ("Get the video back from the PC") as the raw request body. It is counted while
+    it arrives (a body without a length cannot get round the limit: saved size + 10%, at most 500 MB), then checked by
+    sha256 and put in place."""
+    from starlette.concurrency import run_in_threadpool
+
+    wid = await run_in_threadpool(_worker_or_401, request)
+    if name not in archive.NAMES:
+        raise HTTPException(404, "Unknown file")
+    cap, tmp = await run_in_threadpool(_restore_check, cid, name, wid)
+    try:
+        if int(request.headers.get("content-length") or 0) > cap:
+            raise HTTPException(413, "This file is larger than the one that was saved")
+    except ValueError:
+        pass
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    size = 0
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > cap:
+                    raise HTTPException(413, "This file is larger than the one that was saved")
+                f.write(chunk)
+        if not size:
+            raise HTTPException(400, "No file was sent")
+        done, why = await run_in_threadpool(_restore_finish, cid, name, tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
     if not done:
         raise HTTPException(409, why)
     return {"ok": True}
 
 
+class InventoryIn(BaseModel):
+    names: list[str] = Field(default_factory=list, max_length=200000)  # file names in the helper's archive folder(s)
+
+
+@app.post("/api/worker/archive-inventory")
+def worker_archive_inventory(body: InventoryIn, request: Request):
+    """Once a day: what the helper's archive folder still holds. Missing copies are marked; nothing is deleted."""
+    wid = _worker_or_401(request)
+    with SessionLocal() as s:
+        out = archive.inventory(s, wid, [n[:200] for n in body.names])
+        s.commit()
+    return out
+
+
 @app.post("/api/worker/fail/{cid}")
 def worker_fail(cid: int, body: WorkerFailIn, request: Request):
-    _worker_or_401(request)
+    wid = _worker_or_401(request)
     if body.kind in ("archive", "restore"):
         with SessionLocal() as s:
             c = _get(s, Clip, cid)
             if body.kind == "restore":
-                c.restore_wanted = None
-                c.archive_note = "Your PC could not send the saved video back: " + body.error[:200]
-            else:  # the lease stays: the next try comes after it runs out, not on the next poll
+                if c.restore_wanted and (not c.archived_by or c.archived_by == wid):  # only the helper that has it
+                    c.restore_wanted, c.archive_lease = None, None
+                    c.archive_note = "Your PC could not send the saved video back: " + body.error[:200]
+            elif not c.archived_at:  # a late failure from another helper never overwrites a saved copy
                 c.archive_note = "Saving the video on your PC failed (it is tried again later): " + body.error[:200]
-            s.commit()
+            s.commit()  # (the lease stays: the next try comes after it runs out, not on the next poll)
         return {"ok": True}
     if body.kind == "analyze":  # cid is a project id here: continue with a fallback slice
         with SessionLocal() as s:
@@ -4140,7 +4203,11 @@ def thumb_generate(cid: int, body: ThumbIn):
         c = _get(s, Clip, cid)
         p = _get(s, Project, c.project_id)
         if not c.output_path or not Path(c.output_path).exists():
-            raise HTTPException(400, "Render the clip first")
+            from .thumbs import frame_ready
+
+            if not (c.output_path and frame_ready(c, p)):  # an archived clip: a frame was kept for this
+                raise HTTPException(400, "This video is saved on your PC — get it back first." if c.archived_at
+                                    else "Render the clip first")
         c.thumb_text = body.text.strip() or None
         if body.face is not None:
             c.thumb_face = body.face

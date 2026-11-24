@@ -137,6 +137,12 @@ def cleanup_disk():
     except Exception:  # noqa: BLE001  (unknown: treat a cross-post as possible, so the file is kept)
         meta_on = True
     with SessionLocal() as s:
+        try:  # an ask to get a video back that no helper answered in 3 days ends, with a plain note
+            archive.expire_restores(s, now)
+            s.commit()
+        except Exception as e:  # noqa: BLE001
+            s.rollback()
+            log.warning("archive: ending old get-back asks: %s", str(e)[:200])
         clips = {c.id: c for c in s.query(Clip).all()}
         for d in root.iterdir():
             if not d.is_dir() or not d.name.isdigit():
@@ -164,7 +170,7 @@ def cleanup_disk():
         if c.status == "uploaded":
             if c.attempted_at and c.attempted_at < now - timedelta(days=3) and src.exists():
                 for f in src.iterdir():  # a downloaded section can be fetched again; my own file cannot
-                    if f.name != "upload.mp4":
+                    if f.is_file() and f.name != "upload.mp4":
                         f.unlink(missing_ok=True)
                 (d / "body.mp4").unlink(missing_ok=True)  # out.mp4 has the same video
             continue  # out.mp4 stays until the PC has a confirmed copy (archive.free_uploaded above)
@@ -173,13 +179,16 @@ def cleanup_disk():
             # ready and waiting for its upload: only the finished video and thumbnail are needed. The downloaded part
             # can be fetched again by itself if the clip is ever edited; this keeps a big queue inside the server disk
             for f in (src.iterdir() if src.exists() else []):
-                f.unlink(missing_ok=True)
+                if f.is_file():
+                    f.unlink(missing_ok=True)
             if (d / "out.mp4").exists():
                 (d / "body.mp4").unlink(missing_ok=True)
             continue
         keep = f"src_{int(c.start or 0)}_{int(c.end or 0) + 1}.mp4"
         if src.exists():
             for f in src.iterdir():
+                if not f.is_file():
+                    continue  # never a folder (unlink would stop the whole clean-up)
                 stale = (time.time() - f.stat().st_mtime) / 3600 > 24
                 if f.name not in (keep, "upload.mp4", "reel.mp4") and (stale or not f.name.endswith(".part")):
                     if f.name.endswith(".part") and not stale:
