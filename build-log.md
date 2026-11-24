@@ -473,3 +473,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Consent: account setting shared_helper; jobs go to the shared helper only if the account has no approved helper of its own, or switched on "Use the shared helper when my PC is off" (new accounts: ON at approval; existing accounts: off). POST /api/account/shared-helper (helper.manage); switch + line in the Helper card; /api/account/helper-code returns shared / shared_chosen / shared_online.
 - Also: errors of helper requests go to that helper's (or the ticket's) account; customers served in turn (rotating start); start.sh: crash back-off 30 s doubling to 30 min, yt-dlp update at most once an hour; setup.sh refuses non-https and asks for the helper code at a prompt (no code on the command line).
 - Tests: test_central_helper 65/65, test_phone_helper 50/50; test_acl_routes 19, test_acl 65, test_acl_bg 38, test_security 18, test_helper_parallel 7, test_helper_busy 4, test_onboarding 41, test_upload_lead 14 — no failures; node --check page OK, no 0x08.
+
+## 2026-11-24 — Task 72: sources overshot the waiting-list limit (410 instead of 195)
+- Seen live: between 08:30 and 11:30 IST all channel sources ran at once and made ~200 extra clips; the limit was checked once per run, and each run makes up to 5 videos × 3 clips. 34 of them failed after 24 h ("no helper fetched this video").
+- app/autopilot.py: the limit is checked before EVERY video of a run.
+- New Super Admin route POST /api/admin/park-waiting {keep}: the newest clips still waiting for the helper become drafts with a plain note (nothing deleted; Render then Approve makes one again).
+- Test: test_park.py 7/7; test_acl_routes 19, test_queue_cap 10, test_older_videos 7.

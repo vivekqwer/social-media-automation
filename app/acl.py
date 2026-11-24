@@ -307,6 +307,7 @@ ROUTES = [
     ("GET", "/api/settings/queue-cap", SIGNED, None),
     ("GET", "/api/settings/upload-lead", SIGNED, None),
     ("POST", "/api/admin/upload-lead", SUPER, "Changed how early clips are sent to YouTube"),
+    ("POST", "/api/admin/park-waiting", SUPER, "Parked clips that were waiting to be made"),
     ("POST", "/api/admin/queue-cap", SUPER, "Changed how many clips may wait before the sources pause"),
     ("GET", "/api/settings/reminder", SIGNED, None),
     ("GET", "/api/phone", SIGNED, None),

@@ -2397,6 +2397,27 @@ def queue_cap_get():
     return {"cap": autopilot.queue_cap(), "usual": autopilot.MAX_QUEUED_PER_DEST, "range": list(autopilot.QUEUE_CAP_RANGE)}
 
 
+class ParkIn(BaseModel):
+    keep: int = Field(ge=0, le=2000)  # how many of the waiting-to-be-made clips stay (the oldest ones)
+
+
+@app.post("/api/admin/park-waiting")
+def park_waiting(body: ParkIn):
+    """Too many clips are waiting for the helper PC: the newest ones beyond `keep` become drafts (nothing is deleted).
+    A parked draft is made again with its Render button, then Approve."""
+    n = 0
+    with SessionLocal() as s:
+        rows = s.query(Clip).filter(Clip.status == "fetching").order_by(Clip.id).all()
+        for c in rows[body.keep:]:
+            res = s.execute(update(Clip).where(Clip.id == c.id, Clip.status == "fetching")
+                            .values(status="draft", autoqueue=False, job_lease=None, fetch_since=None, publish_at=None,
+                                    error="Parked: too many clips were waiting to be made. Press Render to make it, then Approve."))
+            n += res.rowcount
+        s.commit()
+    acl.record_here("admin.park", f"Parked {n} clip(s) that were waiting to be made")
+    return {"parked": n, "kept": min(len(rows), body.keep)}
+
+
 @app.post("/api/admin/queue-cap")
 def queue_cap_set(body: QueueCapIn):
     """How many clips may wait for one YouTube channel before the sources pause (usually 30). Raising it makes a large

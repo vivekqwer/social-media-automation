@@ -341,6 +341,11 @@ def run_channel(channel_id: int):
             for vid in ids:
                 if made >= ch.videos_per_run:
                     break
+                waiting = s.query(Clip).filter(Clip.destination_id == ch.destination_id,
+                                               Clip.status.in_(["queued", "fetching", "rendering"])).count()
+                if waiting >= queue_cap():  # several sources run at once: stop as soon as the list is full
+                    log.append(f"paused: {waiting} clips already queued")
+                    break
                 seen.add(vid)  # mark first, so a failing video is never retried forever or duplicated
                 ch.seen = list(seen)
                 s.commit()
