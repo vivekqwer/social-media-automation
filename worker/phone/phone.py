@@ -16,6 +16,7 @@ import logging.handlers
 import os
 import pathlib
 import re
+import secrets
 import shutil
 import socket
 import subprocess
@@ -35,6 +36,8 @@ PARALLEL = 2  # downloads side by side
 POLL_SECONDS = 20  # polite: one short call every 20 s while idle
 BUSY_POLL = 60  # while both places are busy: a call a minute only to say "alive" (it asks for 0 jobs)
 MAX_BACKOFF = 300  # the server answers with an error: wait longer each time, up to 5 minutes
+MAX_REREGISTER = 1800  # registering again keeps failing: wait longer each time, up to 30 minutes
+KEY_RETRY = 1800  # a key that could not be used (too many joins) is tried again after 30 minutes
 NET_PROBE = 30  # no connection at all (Wi-Fi off, phone woke up): look every 30 s, call in as soon as it is back
 REFRESH_EVERY = 24 * 3600  # once a day (and whenever the server gets new code) start.sh updates yt-dlp and this file
 LOCK_PORT = 47623  # one phone helper at a time
@@ -50,6 +53,8 @@ def _server() -> str:
 SERVER = _server()
 TOKEN_FILE = HOME / ".worker_token"
 ENROLL_FILE = HOME / "enroll_key.txt"  # the account's helper key: join without approval
+REFUSED_FILE = HOME / "enroll_key.refused"  # a key the server refused, set aside
+ID_FILE = HOME / "helper_id.txt"  # this install's random id (stays when the token changes)
 KEY_RE = re.compile(r"rk\d{1,9}\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}")
 
 log = logging.getLogger("raji-phone")
@@ -231,13 +236,11 @@ def pair_code(token: str) -> str:
 
 
 def enroll_key() -> str:
-    """The account's helper key (RAJI_KEY or enroll_key.txt), or "" when there is none."""
-    key = os.getenv("RAJI_KEY", "").strip()
-    if not key and ENROLL_FILE.exists():
-        try:
-            key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip()
-        except OSError:
-            key = ""
+    """The account's helper key (enroll_key.txt, written by setup.sh), or "" when there is none."""
+    try:
+        key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip() if ENROLL_FILE.exists() else ""
+    except OSError:
+        key = ""
     return key if KEY_RE.fullmatch(key) else ""
 
 
@@ -246,21 +249,49 @@ def key_id() -> str:
     return key.split(".")[1] if key else "none"
 
 
+def install_id() -> str:
+    """A random id for this install (helper_id.txt): a phone removed in the dashboard never joins again by itself."""
+    try:
+        v = ID_FILE.read_text(encoding="utf-8-sig").strip().lower() if ID_FILE.exists() else ""
+    except OSError:
+        v = ""
+    if not re.fullmatch(r"[0-9a-f]{32}", v):
+        v = secrets.token_hex(16)
+        try:
+            ID_FILE.write_text(v, encoding="utf-8")
+        except OSError:
+            pass
+    return v
+
+
 def save_enroll_key(key: str):
-    """Keep the key the server handed over (never written to the log)."""
+    """Keep the key the server handed over (never written to the log); only this user may read the file."""
     if not KEY_RE.fullmatch(key or "") or key == enroll_key():
         return
     try:
-        tmp = ENROLL_FILE.with_suffix(".tmp")
-        tmp.write_text(key, encoding="utf-8")
+        ENROLL_FILE.write_text(key, encoding="utf-8")
         try:
-            tmp.chmod(0o600)
+            ENROLL_FILE.chmod(0o600)
         except OSError:
             pass
-        os.replace(tmp, ENROLL_FILE)
         log.info("Saved this account's helper key: if the server ever forgets this phone, it joins again by itself.")
     except OSError as e:
         log.info("Could not save the helper key (%s).", str(e)[:80])
+
+
+_KEY_TRY = {"key": "", "at": 0.0}
+
+
+def key_worth_trying() -> bool:
+    key = enroll_key()
+    return bool(key) and (key != _KEY_TRY["key"] or time.time() - _KEY_TRY["at"] > KEY_RETRY)
+
+
+def _detail(r) -> str:
+    try:
+        return str(r.json().get("detail", ""))[:200]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def get_token(force_new: bool = False) -> str:
@@ -274,22 +305,35 @@ def get_token(force_new: bool = False) -> str:
     code_file = HOME / "helper_code.txt"
     if not claim and code_file.exists():
         claim = code_file.read_text(encoding="utf-8-sig").strip()
-    body, r, key = {"name": "Android phone"}, None, enroll_key()
+    body, r, key, ident = {"name": "Android phone"}, None, enroll_key(), {"x-helper-id": install_id()}
     if key:  # the helper key: approved at once
-        h = {"x-helper-key": key}
+        _KEY_TRY.update(key=key, at=time.time())
+        h = {**ident, "x-helper-key": key}
         if old:
             h["x-old-helper"] = hashlib.sha256(old.encode()).hexdigest()
         r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30, headers=h)
-        if r.status_code in (401, 403):
+        customer = not key.startswith("rk1.")
+        if r.status_code in (401, 403):  # refused for good: set the key aside
             try:
-                why = str(r.json().get("detail", ""))[:200]
-            except Exception:  # noqa: BLE001
-                why = ""
-            log.info("The helper key was not accepted (%s). Registering with a pairing code instead.", why or r.status_code)
+                os.replace(ENROLL_FILE, REFUSED_FILE)
+            except OSError:
+                pass
+            log.info("The helper key was not accepted (%s). It is set aside (enroll_key.refused); this phone now needs "
+                     "approval by a person.", _detail(r) or r.status_code)
+            if customer and not claim:  # never fall back into the system owner's copy
+                log.info("This key belongs to a customer account and the phone has no helper code. Copy the setup "
+                         "command and the key again from the dashboard (My channels -> Helper PC) and run it again.")
+                sys.exit(EXIT_STOP)
+            r = None
+        elif r.status_code == 429:
+            log.info("The helper key cannot be used right now (%s). Registering with a pairing code instead; the key is "
+                     "tried again later.", _detail(r) or "too many helpers")
+            if customer and not claim:
+                raise RuntimeError("the helper key cannot be used right now; trying again later")
             r = None
     if r is None:
         r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30,
-                       headers={"x-helper-claim": claim} if claim else {})
+                       headers={**ident, "x-helper-claim": claim} if claim else ident)
         if r.status_code == 403:
             log.info("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) and run the "
                      "setup command again.")
@@ -423,6 +467,7 @@ def main():
     log.info("Raji Studio phone helper running for %s (keep Termux open, phone on charger and Wi-Fi).", SERVER)
     pool, running = ThreadPoolExecutor(max_workers=PARALLEL), set()
     waiting, delay, last_call, version, started, offline = False, POLL_SECONDS, 0.0, None, time.time(), False
+    reg_delay = 0
     while True:
         running = {f for f in running if not f.done()}
         free = PARALLEL - len(running)
@@ -435,17 +480,27 @@ def main():
                           headers={**headers, "x-worker-can": CAN, "x-worker-slots": str(free), "x-worker-enroll": key_id()})
             if offline:
                 log.info("Connected again.")
-            delay, offline = POLL_SECONDS, False
-            if r.status_code == 403:
+            offline = False
+            if r.status_code == 401 or (r.status_code == 403 and key_worth_trying()):
+                log.info("The server does not know this phone (removed in the dashboard?). Registering again..."
+                         if r.status_code == 401 else "A helper key was saved for this phone. Joining with it...")
+                try:
+                    tok = get_token(force_new=True)
+                    headers, waiting, reg_delay, delay = {"x-worker-token": tok}, False, 0, POLL_SECONDS
+                except SystemExit:
+                    raise
+                except Exception as e:  # noqa: BLE001  (keeps failing: 30 s, 1, 2, 4 ... up to 30 minutes)
+                    reg_delay = min(max(reg_delay * 2, 30), MAX_REREGISTER)
+                    delay, offline = reg_delay, is_offline(e)
+                    log.info("Could not register again: %s (next try in %d s)", str(e)[:150], delay)
+            elif r.status_code == 403:
+                delay = POLL_SECONDS
                 if not waiting:
                     log.info("Waiting for approval in the dashboard (My channels -> Helper PC). Pairing code: %s", pair_code(tok))
                     waiting = True
-            elif r.status_code == 401:
-                log.info("The server does not know this phone (removed in the dashboard?). Registering again...")
-                tok = get_token(force_new=True)
-                headers, waiting = {"x-worker-token": tok}, False
             else:
                 r.raise_for_status()
+                delay = POLL_SECONDS  # only an answer without an error ends the back-off
                 if waiting:
                     log.info("Approved. Waiting for jobs...")
                     waiting = False

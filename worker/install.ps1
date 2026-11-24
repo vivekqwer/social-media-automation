@@ -1,33 +1,77 @@
 # Raji Studio helper for a Windows PC: one-time setup. The dashboard (My channels -> Helper PC -> Show) gives the
-# one-line command that runs this file with the server address and the account's helper key:
+# one-line command that runs this file with the server address (the command holds NO key):
 #
-#   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((iwr -UseBasicParsing 'https://SERVER/helper/install.ps1').Content)) -Server 'https://SERVER' -Key 'rk<n>....'"
+#   powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((iwr -UseBasicParsing 'https://SERVER/helper/install.ps1').Content)) -Server 'https://SERVER'"
+#
+# It then asks for the account's helper key: press "Copy key" in the dashboard and it is taken from the clipboard
+# (the clipboard is emptied afterwards), or type / paste it at the hidden prompt. So the key is never on a command
+# line and never in PowerShell's history. (-Key or the RAJI_KEY variable also work for scripts; then any line of the
+# PowerShell history file that contains the key is removed - close that PowerShell window afterwards.)
 #
 # What it does:
 #  * A helper of the same account already starts with Windows on this PC (for example the owner's own copy of the
 #    project): only the key is saved next to it (worker\enroll_key.txt). Nothing else changes.
-#  * Otherwise: the helper is downloaded from the server (with the key, never in the address) into
+#  * Otherwise: the helper is downloaded from the server (with the key in a header, never in the address) into
 #    %LOCALAPPDATA%\RajiHelper\<account>, Python is found (or installed with winget), the helper's packages are
 #    installed once, and it is set to start hidden at every Windows sign-in, then started.
 # The helper then joins by itself with the key: nothing to approve, no pairing code. This file holds no secrets.
 param(
     [Parameter(Mandatory = $true)][string]$Server,
-    [Parameter(Mandatory = $true)][string]$Key,
+    [string]$Key = "",
     [string]$Dir = ""
 )
 $ErrorActionPreference = "Continue"  # native programs (python, pip, winget) may write to stderr; checked by exit code
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Server = $Server.Trim().TrimEnd("/")
-$Key = $Key.Trim()
+$KeyRx = '^rk(\d{1,9})\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}$'
 
 function Say([string]$msg) { Write-Host ""; Write-Host "== $msg" }
 
 if ($Server -notmatch '^https://' -and $Server -notmatch '^http://(localhost|127\.0\.0\.1)(:\d+)?$') {
     Write-Host "The server address must start with https:// - copy the command again from the dashboard."; exit 1
 }
-$m = [regex]::Match($Key, '^rk(\d{1,9})\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}$')
-if (-not $m.Success) { Write-Host "This helper key does not look right - copy the command again from the dashboard."; exit 1 }
+
+$fromLine = $false
+if (-not $Key -and $env:RAJI_KEY) { $Key = $env:RAJI_KEY }
+Remove-Item Env:RAJI_KEY -ErrorAction SilentlyContinue
+if ($Key) { $fromLine = $true }
+if (-not $Key) {
+    Write-Host ""
+    Write-Host "Now open the dashboard: My channels -> Helper PC -> Show -> press 'Copy key'."
+    Write-Host "Waiting for the key on the clipboard (up to 3 minutes; press Enter to type or paste it instead)..."
+    for ($i = 0; $i -lt 180 -and -not $Key; $i++) {
+        try { $clip = [string](Get-Clipboard -Raw) } catch { $clip = "" }
+        if ($clip -and $clip.Trim() -match $KeyRx) {
+            $Key = $clip.Trim()
+            try { Set-Clipboard -Value " " } catch { }  # the key does not stay on the clipboard
+            Write-Host "Got the key from the clipboard."
+            break
+        }
+        $typed = $false
+        try { $typed = [Console]::KeyAvailable } catch { }
+        if ($typed) { try { [void][Console]::ReadKey($true) } catch { }; break }
+        Start-Sleep -Seconds 1
+    }
+    if (-not $Key) {
+        $sec = Read-Host -AsSecureString "Helper key (nothing is shown)"
+        $Key = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($sec))
+    }
+}
+$Key = $Key.Trim()
+$m = [regex]::Match($Key, $KeyRx)
+if (-not $m.Success) { Write-Host "This helper key does not look right - copy it again from the dashboard (Show -> Copy key)."; exit 1 }
 $tid = [int]$m.Groups[1].Value
+if ($fromLine) {
+    # the key was on a command line: take every line that contains it out of PowerShell's saved history
+    $hist = Join-Path $env:APPDATA "Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt"
+    if (Test-Path $hist) {
+        try {
+            $lines = @(Get-Content $hist | Where-Object { $_ -notlike "*$Key*" })
+            Set-Content -Path $hist -Value $lines -Encoding UTF8
+            Write-Host "The key was removed from PowerShell's saved history. Close this PowerShell window when done."
+        } catch { Write-Host "Could not clean PowerShell's history ($hist): remove the line with the key by hand." }
+    }
+}
 
 function Get-Account([string]$root) {
     # which account a helper folder belongs to: its helper code starts with the account's number; none = the owner (1)
@@ -73,7 +117,7 @@ if (-not (Test-Path (Join-Path $Dir "worker\clipstudio_worker.py"))) {
 # the key, next to the helper (only this Windows user may read it); the helper reads it when it registers
 $keyFile = Join-Path $Dir "worker\enroll_key.txt"
 [IO.File]::WriteAllText($keyFile, $Key, (New-Object Text.UTF8Encoding($false)))
-try { & icacls $keyFile /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null } catch { }
+try { & icacls $keyFile /inheritance:r /grant:r "$($env:USERNAME):F" | Out-Null } catch { }  # again on every run
 if (-not (Test-Path (Join-Path $Dir ".git"))) {
     [IO.File]::WriteAllText((Join-Path $Dir "worker\server.txt"), $Server, (New-Object Text.UTF8Encoding($false)))
 }

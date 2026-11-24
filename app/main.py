@@ -153,9 +153,8 @@ async def auth_gate(request: Request, call_next):
             if tid is not None and tid != tenant.OWNER and tid not in accounts.active_tenants():
                 tid = None  # the account is blocked or gone
             if tid is None:
-                return JSONResponse({"detail": "This helper key is not valid. Copy the command again from My channels → Helper PC."
-                                     if key else "This helper code is not valid. Copy it again from My channels → Helper PC."},
-                                    status_code=403)
+                return JSONResponse({"detail": enroll.INVALID if key else
+                                     "This helper code is not valid. Copy it again from My channels → Helper PC."}, status_code=403)
         else:
             tid = workers.tenant_of(tok)
             if tid != tenant.OWNER and tid not in accounts.active_tenants():
@@ -3754,25 +3753,29 @@ def worker_register(body: WorkerRegIn, request: Request):
     ip = _client_ip(request)
     if auth.rate_limited(ip, "helper"):
         raise HTTPException(429, "Too many attempts")
-    auth.note_fail(ip, "helper")  # helper registrations have their own counter
     name = (body.name.strip() or "helper")[:60]
     key = request.headers.get("x-helper-key", "").strip()
+    iid = request.headers.get("x-helper-id", "").strip().lower()
+    iid = iid if enroll.ID_RE.match(iid) else None  # the helper's install id (a file on the PC / phone)
     if key:  # the account's helper key: approved at once, no pairing code, no button
         try:
-            kid = enroll.check(key, request.headers.get("x-old-helper", "")[:64])
+            kid = enroll.check(key, iid or "", request.headers.get("x-old-helper", "")[:64])
         except enroll.EnrollError as e:
+            auth.note_fail(ip, "helper")  # only refused key joins count against the shared limit
             raise HTTPException(e.status, str(e))
         tok = secrets.token_urlsafe(32)
         if tenant.current() != tenant.OWNER:
             tok = f"t{tenant.current()}.{tok}"
         with SessionLocal() as s:
-            w = Worker(name=name, token_hash=workers.token_hash(tok), approved=True, enrolled=kid, last_seen=utcnow(), ip=ip[:60])
+            w = Worker(name=name, token_hash=workers.token_hash(tok), approved=True, enrolled=kid, install_id=iid,
+                       last_seen=utcnow(), ip=ip[:60])
             s.add(w)
             s.commit()
             wid = w.id
-        enroll.note_use()
+        enroll.note_use(kid)
         enroll.log_join(name, ip)
         return {"worker_id": wid, "token": tok, "approved": True}
+    auth.note_fail(ip, "helper")  # helper registrations without a key have their own counter
     with SessionLocal() as s:
         s.query(Worker).filter(Worker.approved.is_(False), Worker.created_at < utcnow() - timedelta(minutes=30)).delete()
         s.commit()
@@ -3781,7 +3784,7 @@ def worker_register(body: WorkerRegIn, request: Request):
         tok = secrets.token_urlsafe(32)
         if tenant.current() != tenant.OWNER:
             tok = f"t{tenant.current()}.{tok}"  # tells the server which customer this helper belongs to
-        w = Worker(name=name, token_hash=workers.token_hash(tok), approved=False,
+        w = Worker(name=name, token_hash=workers.token_hash(tok), approved=False, install_id=iid,
                    last_seen=utcnow(), ip=ip[:60], pair_hash=workers.token_hash(workers.pair_code(tok)))
         s.add(w)
         s.commit()
@@ -3794,11 +3797,11 @@ def worker_package(request: Request):
     ip = _client_ip(request)
     if auth.rate_limited(ip, "helper"):
         raise HTTPException(429, "Too many attempts")
-    auth.note_fail(ip, "helper")
     key = request.headers.get("x-helper-key", "").strip()
     cur = enroll.current_key(create=False)
-    if not cur or not secrets.compare_digest(enroll.key_hash(key), enroll.key_hash(cur)):
-        raise HTTPException(403, "This helper key is not valid any more. Copy the command again from the dashboard.")
+    if not cur or not secrets.compare_digest(enroll.key_hash(key), enroll.key_hash(cur)) or not enroll.allowed():
+        auth.note_fail(ip, "helper")
+        raise HTTPException(403, enroll.INVALID)
     return Response(_helper_zip(tenant.current()), media_type="application/zip", headers={"Cache-Control": "no-store"})
 
 
@@ -3868,7 +3871,10 @@ def worker_jobs(request: Request, response: Response):
         # a helper that knows helper keys and has not got this account's current one: hand it over, so that it can
         # join again by itself if its token is ever lost (the owner's PC needs nothing typed). Only to an approved
         # helper of this same copy, only when its key is missing or old; never logged.
-        key = enroll.current_key()
+        with SessionLocal() as s:
+            w = s.get(Worker, wid)
+            key = enroll.hand_over(w) if w is not None and w.approved else None
+            s.commit()
         if key and enroll.kid_of(key) != has.strip():
             out["enroll_key"] = key
             response.headers["Cache-Control"] = "no-store"
@@ -4324,6 +4330,7 @@ def approve_worker(wid: int, body: PairIn):
             raise HTTPException(400, "Wrong code. Type the 6-digit pairing code shown in the helper's window or log.")
         w.approved = True
         s.commit()
+        enroll.forget_removed(w.install_id)  # approved by a person again: it may use the key again later
         return workers.as_dict(w)
 
 
@@ -4331,7 +4338,7 @@ def approve_worker(wid: int, body: PairIn):
 def delete_worker(wid: int):
     with SessionLocal() as s:
         w = _get(s, Worker, wid)
-        enroll.remember_removed(w.token_hash)  # it never joins again by itself with the helper key
+        enroll.remember_removed(w.token_hash, w.install_id)  # it never joins again by itself with the helper key
         s.delete(w)
         s.commit()
         return {"deleted": True}
@@ -4358,9 +4365,22 @@ def helper_key_show():
     return _key_response(key)
 
 
+class RotateIn(BaseModel):
+    leaked: bool = False
+
+
 @app.post("/api/helper/key/rotate")
-def helper_key_rotate():
-    """A new key; the old one stops at once. Helpers already connected keep working (and are handed the new key)."""
+def helper_key_rotate(body: RotateIn | None = None):
+    """A new key; the old one stops at once. Helpers approved by a person, and helpers that joined with the key being
+    replaced, keep working and are handed the new key. leaked=True: first switch the key off and remove every helper
+    that joined by key (they never come back by themselves), then make the new key."""
+    if body and body.leaked:
+        enroll.revoke()
+        with SessionLocal() as s:
+            for w in s.query(Worker).filter(Worker.enrolled.isnot(None)).all():
+                enroll.remember_removed(w.token_hash, w.install_id)
+                s.delete(w)
+            s.commit()
     return _key_response(enroll.rotate())
 
 

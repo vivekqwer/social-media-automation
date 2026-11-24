@@ -14,6 +14,7 @@ import hashlib
 import os
 import pathlib
 import re
+import secrets
 import socket
 import subprocess
 import sys
@@ -40,11 +41,15 @@ if not (SERVER.startswith("https://") or re.match(r"^http://(localhost|127\.0\.0
     sys.exit("The server address must start with https:// (the helper sends videos and its key there).")
 TOKEN_FILE = pathlib.Path(__file__).with_name(".worker_token")
 ENROLL_FILE = pathlib.Path(__file__).with_name("enroll_key.txt")  # the account's helper key: join without approval
+REFUSED_FILE = pathlib.Path(__file__).with_name("enroll_key.refused")  # a key the server refused, set aside
+ID_FILE = pathlib.Path(__file__).with_name("helper_id.txt")  # this install's random id (stays when the token changes)
 HELPER_KEY_RE = re.compile(r"rk\d{1,9}\.[0-9a-f]{8}\.[A-Za-z0-9_-]{43}")
 # ReelGen (text -> reel engine) lives in its own project folder on this PC
 REELGEN_DIR = pathlib.Path(os.getenv("CLIPSTUDIO_REELGEN", r"D:\video generator"))
 POLL_SECONDS = 8
 MAX_BACKOFF = 300  # the server answers with an error: wait longer each time, up to 5 minutes
+MAX_REREGISTER = 1800  # registering again keeps failing: wait longer each time, up to 30 minutes
+KEY_RETRY = 1800  # a key that could not be used (too many joins) is tried again after 30 minutes
 NET_PROBE = 30  # no connection (offline, asleep, Wi-Fi changed): look every 30 s and call the server as soon as it is back
 PARALLEL = 3  # video downloads at the same time (YouTube slows each single download down to about playing speed)
 UPDATE_EVERY = 600  # seconds between "is the server on newer code?" checks
@@ -91,7 +96,7 @@ except Exception:  # noqa: BLE001
 
 
 ZIP_ALLOWED = re.compile(r"(app/[a-z_]+\.py|worker/[a-z_]+\.(py|bat|txt)|helper_version\.txt|Start helper\.bat)")
-ZIP_KEEP = {"worker/helper_code.txt", "worker/server.txt", "worker/.worker_token", "worker/enroll_key.txt"}  # this PC's own settings
+ZIP_KEEP = {"worker/helper_code.txt", "worker/server.txt", "worker/.worker_token", "worker/enroll_key.txt", "worker/helper_id.txt"}  # this PC's own settings
 WIN_DEVICES = {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
 MAX_UPDATE_BYTES = 5 * 1024 * 1024
 
@@ -174,13 +179,11 @@ def pair_code(token: str) -> str:
 
 
 def enroll_key() -> str:
-    """The account's helper key (CLIPSTUDIO_KEY or worker/enroll_key.txt), or "" when there is none."""
-    key = os.getenv("CLIPSTUDIO_KEY", "").strip()
-    if not key and ENROLL_FILE.exists():
-        try:
-            key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip()
-        except OSError:
-            key = ""
+    """The account's helper key (worker/enroll_key.txt), or "" when there is none."""
+    try:
+        key = ENROLL_FILE.read_text(encoding="utf-8-sig").strip() if ENROLL_FILE.exists() else ""
+    except OSError:
+        key = ""
     return key if HELPER_KEY_RE.fullmatch(key) else ""
 
 
@@ -190,17 +193,48 @@ def key_id() -> str:
     return key.split(".")[1] if key else "none"
 
 
+def install_id() -> str:
+    """A random id for this install, kept in worker/helper_id.txt: the server remembers it when the helper is removed,
+    so a removed helper never joins again by itself, whatever token it has."""
+    try:
+        v = ID_FILE.read_text(encoding="utf-8-sig").strip().lower() if ID_FILE.exists() else ""
+    except OSError:
+        v = ""
+    if not re.fullmatch(r"[0-9a-f]{32}", v):
+        v = secrets.token_hex(16)
+        try:
+            ID_FILE.write_text(v, encoding="utf-8")
+        except OSError:
+            pass
+    return v
+
+
 def save_enroll_key(key: str):
-    """Keep the key the server handed over (never written to the log)."""
+    """Keep the key the server handed over (never written to the log). Written in place, so the file keeps the
+    access rights the installer gave it (only this Windows user)."""
     if not HELPER_KEY_RE.fullmatch(key or "") or key == enroll_key():
         return
     try:
-        tmp = ENROLL_FILE.with_suffix(".tmp")
-        tmp.write_text(key, encoding="utf-8")
-        os.replace(tmp, ENROLL_FILE)
+        ENROLL_FILE.write_text(key, encoding="utf-8")
         log("Saved this account's helper key: if the server ever forgets this PC, it joins again by itself.")
     except OSError as e:
         log(f"Could not save the helper key ({str(e)[:80]}).")
+
+
+_KEY_TRY = {"key": "", "at": 0.0}  # the key last tried and when (a waiting helper retries only a new key, or after a while)
+
+
+def key_worth_trying() -> bool:
+    """Waiting for approval or unknown to the server: is there a key (perhaps written since) worth a try?"""
+    key = enroll_key()
+    return bool(key) and (key != _KEY_TRY["key"] or time.time() - _KEY_TRY["at"] > KEY_RETRY)
+
+
+def _detail(r) -> str:
+    try:
+        return str(r.json().get("detail", ""))[:200]
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def get_token(force_new: bool = False) -> str:
@@ -215,22 +249,34 @@ def get_token(force_new: bool = False) -> str:
     code_file = pathlib.Path(__file__).with_name("helper_code.txt")
     if not claim and code_file.exists():
         claim = code_file.read_text(encoding="utf-8-sig").strip()
-    body, r, key = {"name": socket.gethostname()}, None, enroll_key()
-    if key:  # the helper key: approved at once. The old token's hash lets the server refuse a helper it removed.
-        h = {"x-helper-key": key}
+    body, r, key, ident = {"name": socket.gethostname()}, None, enroll_key(), {"x-helper-id": install_id()}
+    if key:  # the helper key: approved at once
+        _KEY_TRY.update(key=key, at=time.time())
+        h = {**ident, "x-helper-key": key}
         if old:
             h["x-old-helper"] = hashlib.sha256(old.encode()).hexdigest()
         r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30, headers=h)
-        if r.status_code in (401, 403):
+        customer = not key.startswith("rk1.")
+        if r.status_code in (401, 403):  # refused for good (removed, key changed or switched off): set it aside
             try:
-                why = str(r.json().get("detail", ""))[:200]
-            except Exception:  # noqa: BLE001
-                why = ""
-            log(f"The helper key was not accepted ({why or r.status_code}). Registering with a pairing code instead.")
+                os.replace(ENROLL_FILE, REFUSED_FILE)
+            except OSError:
+                pass
+            log(f"The helper key was not accepted ({_detail(r) or r.status_code}). It is set aside "
+                "(worker/enroll_key.refused); this PC now needs approval by a person.")
+            if customer and not claim:  # never fall back into the system owner's copy
+                sys.exit("This helper key belongs to a customer account and this PC has no helper code. Copy the "
+                         "command again from the dashboard (My channels -> Helper PC) and run it again.")
+            r = None
+        elif r.status_code == 429:  # caps of the key: later
+            log(f"The helper key cannot be used right now ({_detail(r) or 'too many helpers'}). "
+                "Registering with a pairing code instead; the key is tried again later.")
+            if customer and not claim:
+                raise RuntimeError("the helper key cannot be used right now; trying again later")
             r = None
     if r is None:
         r = httpx.post(f"{SERVER}/api/worker/register", json=body, timeout=30,
-                       headers={"x-helper-claim": claim} if claim else {})
+                       headers={**ident, "x-helper-claim": claim} if claim else ident)
         if r.status_code == 403:
             sys.exit("The helper code is not valid. Copy it again from the dashboard (My channels -> Helper PC) into "
                      "worker/helper_code.txt and start the helper again.")
@@ -846,7 +892,7 @@ def main():
     headers = {"x-worker-token": tok}
     last_update_check = time.time()  # first check after a while: a fresh start never loops straight into an update
     log(f"Raji Studio helper running for {SERVER}. Keep this window open.")
-    waiting, delay, offline = False, POLL_SECONDS, False
+    waiting, delay, offline, reg_delay = False, POLL_SECONDS, False, 0
     while True:
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-",
@@ -855,18 +901,28 @@ def main():
                           timeout=30)
             if offline:
                 log("Connected again.")
-            delay, offline = POLL_SECONDS, False
-            if r.status_code == 403:
+            offline = False
+            if r.status_code == 401 or (r.status_code == 403 and key_worth_trying()):
+                # unknown to the server, or waiting while a helper key was saved since: register (again)
+                log("The server does not know this helper (removed in the dashboard, or its data was restored). Registering again..."
+                    if r.status_code == 401 else "A helper key was saved for this PC. Joining with it...")
+                try:
+                    tok = get_token(force_new=True)
+                    headers, waiting, reg_delay, delay = {"x-worker-token": tok}, False, 0, POLL_SECONDS
+                except SystemExit:
+                    raise
+                except Exception as e:  # noqa: BLE001  (keeps failing: 30 s, 1, 2, 4 ... up to 30 minutes)
+                    reg_delay = min(max(reg_delay * 2, 30), MAX_REREGISTER)
+                    delay, offline = reg_delay, is_offline(e)
+                    log(f"Could not register again: {str(e)[:150]} (next try in {delay} s)")
+            elif r.status_code == 403:
+                delay = POLL_SECONDS
                 if not waiting:
                     log(f"Waiting for approval in the dashboard (My channels -> Helper PC). Pairing code: {pair_code(tok)}")
                     waiting = True
-            elif r.status_code == 401:
-                log("The server does not know this helper (removed in the dashboard, or its data was restored). Registering again...")
-                tok = get_token(force_new=True)
-                headers = {"x-worker-token": tok}
-                waiting = False
             else:
                 r.raise_for_status()
+                delay = POLL_SECONDS  # only an answer without an error ends the back-off
                 if waiting:
                     log("Approved. Waiting for jobs...")
                     waiting = False

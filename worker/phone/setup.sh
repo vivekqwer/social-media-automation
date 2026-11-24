@@ -1,11 +1,12 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # Raji Studio phone helper: one-time setup on an Android phone, inside Termux (installed from F-Droid).
 #
-#   curl -fsSL https://YOUR-SERVER/helper/setup.sh | RAJI_KEY='rk1.xxxx.yyyy' bash -s -- https://YOUR-SERVER
+#   curl -fsSL https://YOUR-SERVER/helper/setup.sh | bash -s -- https://YOUR-SERVER
 #
-# The dashboard's command (My channels -> Helper PC -> Show) carries the account's helper key in RAJI_KEY: the phone
-# then joins by itself, nothing to approve. The key is kept in ~/raji-helper/enroll_key.txt (only you can read it).
-# Without a key (an older command), a customer's phone asks for the helper code and is approved with a pairing code.
+# It asks for the account's helper key (dashboard: My channels -> Helper PC -> Show -> Copy key) and keeps it in
+# ~/raji-helper/enroll_key.txt (only you can read it): the phone then joins by itself, nothing to approve. The key is
+# typed at the prompt (hidden), never on the command line, so it is not in the shell history.
+# No key (Enter): a customer's phone asks for the helper code and is approved with a pairing code, as before.
 # Running it again is safe: it updates everything and restarts the helper.
 set -u
 SERVER="${1:-https://social-media-automation-production-f5543fa3.up.railway.app}"
@@ -21,13 +22,19 @@ esac
 say() { printf '\n== %s\n' "$1"; }
 
 mkdir -p "$DIR" "$BOOT"
-KEY="${RAJI_KEY:-}"
-unset RAJI_KEY   # the helper reads it from the file, never from the start command
+KEY_RX='^rk[0-9]{1,9}[.][0-9a-f]{8}[.][A-Za-z0-9_-]{43}$'   # exactly the shape the server makes
+KEY=""
+if [ -r /dev/tty ]; then
+  echo "Helper key (dashboard: My channels -> Helper PC -> Show -> Copy key). Paste it and press Enter"
+  printf '(nothing is shown; just Enter if this phone has one already or you use a helper code): '
+  read -r -s KEY </dev/tty || KEY=""
+  echo
+  KEY="$(printf '%s' "$KEY" | tr -d '[:space:]')"
+fi
 if [ -n "$KEY" ]; then
-  case "$KEY" in
-    rk[0-9]*.*.*) ;;
-    *) echo "This helper key does not look right - copy the command again from the dashboard."; exit 1 ;;
-  esac
+  if ! [[ "$KEY" =~ $KEY_RX ]]; then
+    echo "This helper key does not look right - copy it again from the dashboard (Show -> Copy key)."; exit 1
+  fi
   (umask 077; printf '%s\n' "$KEY" > "$DIR/enroll_key.txt")
   chmod 600 "$DIR/enroll_key.txt"
 fi
