@@ -333,10 +333,11 @@ def run_channel(channel_id: int):
             used = {v for (v,) in s.query(Project.video_id).filter(Project.video_id.isnot(None))}
             seen |= used
             if topic:  # Creative Commons videos only, found by YouTube search
+                youtube.SEARCH_NOTE.set("")
                 ids = youtube.api_search_cc(search_q, seen, ch.videos_per_run * 3)
                 if not ids:
-                    log.append("no new Creative Commons videos found for this topic" if quota.can_search()
-                               else "search skipped: today's YouTube quota is kept for uploads")
+                    why = youtube.SEARCH_NOTE.get()
+                    log.append(f"search skipped: {why}" if why else "no new Creative Commons videos found for this topic")
             else:
                 ids = [i for i in list_video_ids(ch.resolved_url, ch.videos_per_run * 4) if i not in seen]
                 if not ids:  # the newest videos are all used: go back through the channel's older uploads

@@ -263,6 +263,10 @@ ROUTES = [
     ("POST", "/api/channels/{chid}/destination", "sources.edit", "Changed which channel a source uploads to"),
     ("POST", "/api/channels/{chid}/run", "sources.run", "Ran a source"),
     ("DELETE", "/api/channels/{chid}", "sources.delete", "Deleted a source"),
+    # "What is your channel about?" (Get started and Sources): niches -> topic sources (topic switch, source limit inside)
+    ("GET", "/api/niches", SIGNED, None),
+    ("POST", "/api/niches", "sources.add", "Picked niches (topic sources made for them)"),
+    ("POST", "/api/niches/remove", "sources.edit", "Removed a niche (its sources switched off)"),
     ("POST", "/api/insights/autotune", "sources.edit", "Switched auto-tune on / off"),  # auto-tune changes sources
     ("POST", "/api/insights/undo", "sources.edit", "Undid auto-tune (sources back to their own settings)"),
     ("POST", "/api/viral/pick", "source.viral", "Picked a viral video"),

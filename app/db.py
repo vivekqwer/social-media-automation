@@ -212,6 +212,7 @@ class Channel(Base):
     review_first = Column(Boolean, default=False)  # True: clips wait for my approval instead of auto-queueing
     seen = Column(JSON, default=list)
     seen_topics = Column(JSON, default=list)  # trending sources: topics already used
+    niche = Column(String(40))  # made by "What is your channel about?" (app/niches.py key, or custom:<topic>)
     auto_scripts = Column(Boolean, default=False)  # reel source: the helper's local AI writes scripts on trending topics
     script_wanted = Column(JSON)  # {"topic":..., "since":...} waiting for the helper's local AI
     last_run = Column(DateTime)
