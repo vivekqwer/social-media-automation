@@ -329,7 +329,10 @@ def _history(s, changed) -> dict:
             now = {}
             for part in _chunks(ids):
                 now.update({str(i): st for i, st in s.query(Clip.id, Clip.yt_state).filter(Clip.id.in_(part))})
-            kept = {k: v for k, v in hist.items() if now.get(k) == v}
+            # stays history while the video still shows that rejection or a passing state (removed for a while, a
+            # check that did not see it); it leaves only when YouTube shows it fine again or rejected for a new reason
+            kept = {k: v for k, v in hist.items()
+                    if now.get(k) == v or (now.get(k) != "ok" and now.get(k) not in KIND_OF_STATE)}
             if kept != hist:
                 set_setting(INIT_KEY, json.dumps({**raw, "history": kept}))
             hist = kept
@@ -364,6 +367,10 @@ def scan_monitor(changed=()) -> list[int]:
             elif case.status == "open" and not (case.data or {}).get("confirmed"):
                 _confirm(s, case, c.yt_state, fresh)
                 out.append(case.id)
+            elif case.status != "open" and not (case.data or {}).get("confirmed"):
+                # the earlier case was only a mail (marked solved / taken back) and YouTube now really rejected the
+                # video: a new strike, with the full protection
+                out.append(_new_case(s, c, KIND_OF_STATE[c.yt_state], c.yt_state, fresh, True).id)
         for case in s.query(StrikeCase).filter(StrikeCase.status == "open", StrikeCase.clip_id.isnot(None)).all():
             d = case.data or {}
             seen = d.get("yt_seen") or ""
@@ -425,12 +432,12 @@ _NEW_REMOVAL = re.compile(r"taken down|take[\s-]?down notice|removed from youtub
 # not a strike: Content ID, a removed comment / playlist / post, a video someone shared
 _CONTENT_ID = re.compile(r"copyright[\s-]protected content|not a copyright strike|this is not a strike|content\s?id|"
                          r"claim(s|ed)? (was |were |has been |have been )?(released|removed|dropped)|claimed some", re.I)
-_NOT_STRIKE = re.compile(r"\b(your|a) comments? (was|were|has been|have been) (removed|deleted|held)|\bremoved (a|your) comments?\b|"
+_NOT_STRIKE = re.compile(r"\bcommented on\b|\breplied to\b|\bnew comments?\b|\b(your|a) comments? (was|were|has been|have been) (removed|deleted|held)|\bremoved (a|your) comments?\b|"
                          r"\bcomments? you (posted|left|made)|\bshared an? (private |unlisted )?video with you|"
                          r"\bhas shared (a|an) |\bshared a (private |unlisted )?video\b|"
                          r"\b(your|a) (playlist|post|community post) (was|has been) (removed|deleted)|"
                          r"\bremoved your (playlist|post|community post)", re.I)
-_NOT_A_VIDEO = re.compile(r"\bcomments?\b|\bplaylists?\b|\bpost\b|\bshared\b", re.I)
+_NOT_A_VIDEO = re.compile(r"\bcomment(s|ed|ing)?\b|\brepl(y|ies|ied)\b|\bmention(s|ed)?\b|\bplaylists?\b|\bpost\b|\bshared\b", re.I)
 _STRIKE_WORDS = re.compile(r"strike|take[\s-]?down|taken down|removed|removal|deleted", re.I)
 _CLAIMANT = [
     re.compile(r"(?im)^[ \t>*•\-]*(?:claimant|copyright owner|complainant|removed by|content removed by|claimed by|"
