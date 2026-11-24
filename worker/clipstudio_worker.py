@@ -609,9 +609,13 @@ def _archive_dir() -> pathlib.Path:
 
 ARCHIVE_DIR = _archive_dir()
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-import pc_folder  # noqa: E402  (the folder of videos on this PC -> the dashboard's "From my PC" list)
+try:  # the folder of videos on this PC -> the dashboard's "From my PC" list (never stops the helper or its update)
+    import pc_folder  # noqa: E402
 
-PC = pc_folder.Folder(pathlib.Path(os.environ["DATA_DIR"]) / "pc_folder.json", log=lambda m: log(m))
+    PC = pc_folder.Folder(pathlib.Path(os.environ["DATA_DIR"]) / "pc_folder.json", log=lambda m: log(m))
+except Exception as _e:  # noqa: BLE001
+    pc_folder, PC = None, None
+    print(f"PC folder is not available ({str(_e)[:120]}); everything else works.", flush=True)
 OLD_ARCHIVE_DIR = ROOT / "archive"  # where the first version kept them: still read (never written)
 KEY_RE = re.compile(r"t\d{1,9}-c\d{1,12}")
 SAVE_KINDS = ("pc_send", "inventory", "restore", "archive")  # run after every other job of a poll, one at a time
@@ -642,7 +646,7 @@ def _find_saved(key: str, name: str, sha: str) -> pathlib.Path | None:
         for p in (d / _saved_name(key, name), d / _saved_name(key, name, sha)):
             if p.exists() and _sha256(p) == sha:
                 return p
-    return PC.path_for(sha) if name == "video" else None  # a video from the PC folder stays where it is
+    return PC.path_for(sha) if name == "video" and PC is not None else None  # a PC-folder video stays where it is
 
 
 def send_inventory(headers: dict):
@@ -732,6 +736,8 @@ def handle(job: dict, headers: dict):
         return start_ai_setup()
     if job["type"] == "pc_send":  # a video of the PC folder, shortly before its upload
         try:
+            if PC is None:
+                raise RuntimeError("this helper cannot read its PC folder (pc_folder.py is missing; it updates itself)")
             return PC.send_file(job, SERVER, headers, httpx)
         except Exception as e:  # noqa: BLE001
             log(f"PC folder: could not send a video: {str(e)[:150]}")
@@ -883,13 +889,27 @@ def handle_all(jobs: list, headers: dict):
         one(j)
 
 
+_PC_THREAD = [None]
+
+
 def pc_tick(folder: str, headers: dict):
-    """Look at the folder of videos (the dashboard decides which; "" = none) and tell the dashboard what is new."""
-    try:
-        PC.set_root(folder or None)
-        PC.tick(SERVER, headers, httpx)
-    except Exception as e:  # noqa: BLE001  (the folder must never stop the helper's other work)
-        log(f"PC folder: {str(e)[:150]}")
+    """Look at the folder of videos (the dashboard decides which; "" = none) and tell the dashboard what is new — in
+    its own thread, so a first look at many big files (hashing, ffmpeg) never holds up the other jobs."""
+    if PC is None:
+        return
+    th = _PC_THREAD[0]
+    if th is not None and th.is_alive():
+        return
+
+    def run():
+        try:
+            PC.set_root(folder or None)
+            PC.tick(SERVER, dict(headers), httpx)
+        except Exception as e:  # noqa: BLE001  (the folder must never stop the helper's other work)
+            log(f"PC folder: {str(e)[:150]}")
+
+    _PC_THREAD[0] = threading.Thread(target=run, name="pc-folder", daemon=True)
+    _PC_THREAD[0].start()
 
 
 def first_token() -> str:

@@ -425,3 +425,8 @@ def migrate(tenant_id: int = tenant.OWNER, metadata=None):
                 full = f'"{sch}".{table.name}' if sch else table.name
                 with (engine if not IS_SQLITE else eng).begin() as conn:
                     conn.execute(text(f"ALTER TABLE {full} ADD COLUMN {col.name} {ddl}"))
+        for col in table.columns:  # an index of a column added above (create_all only makes indexes of new tables)
+            if col.index:
+                full = f'"{sch}".{table.name}' if sch else table.name
+                with (engine if not IS_SQLITE else eng).begin() as conn:
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table.name}_{col.name} ON {full} ({col.name})"))

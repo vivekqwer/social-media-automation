@@ -159,6 +159,12 @@ def cleanup_disk():
     for d in root.iterdir():
         if not d.is_dir() or not d.name.isdigit():
             continue
+        for part in d.glob("pc.*.part"):  # a PC video that broke off while it was being sent (asked again later)
+            try:
+                if time.time() - part.stat().st_mtime > 2 * 3600:
+                    part.unlink(missing_ok=True)
+            except OSError:
+                pass
         c = clips.get(int(d.name))
         age_h = (time.time() - d.stat().st_mtime) / 3600  # real clock: a naive UTC datetime's .timestamp() reads as local time
         if c is None:
@@ -269,11 +275,16 @@ def process_queue():
                 c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
                 from .comments import after_upload
                 after_upload(c)  # first comment: posted by post_due once the video is public
-                if c.pc_item_id:  # from the PC folder: the server's copy goes now (the video stays on the PC)
+                s.commit()  # saved at once: a crash now must never upload the video twice
+                if c.pc_item_id:  # from the PC folder: only now (uploaded is saved) the server's copy goes
                     from . import pcfolder
 
-                    pcfolder.after_upload(s, c)
-                s.commit()  # saved at once: a crash now must never upload the video twice
+                    try:
+                        pcfolder.after_upload(s, c)
+                        s.commit()
+                    except Exception as e:  # noqa: BLE001  (the clean-up deletes it later: it is saved on the PC)
+                        s.rollback()
+                        log.warning("PC video of clip %s: after the upload: %s", c.id, str(e)[:200])
                 acl.record_here("uploads.youtube", f"Uploaded to YouTube: {(c.title or '')[:120]} (#{c.id})")
                 _tg(f"⬆️ Uploaded: <b>{_e(c.title)}</b>\nhttps://youtu.be/{c.youtube_id}"
                     + (f"\nGoes live {c.publish_at:%d %b %H:%M} UTC" if publish_at else "\nLive now"))

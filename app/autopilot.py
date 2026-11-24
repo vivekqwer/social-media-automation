@@ -16,6 +16,7 @@ from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
 from .render import run_render
 
+SLOT_LOCK = __import__("threading").RLock()  # one hand-out of publish slots at a time (PC folder, un-parking)
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog (the usual number; see queue_cap)
 QUEUE_CAP_RANGE = (10, 300)
 MIN_FREE_GB = 0.7  # the sources wait while the server's disk has less free space than this
@@ -589,11 +590,16 @@ def unpark_due(force: int | None = None) -> dict:
     if force is None and get_setting("unpark_day") == day:
         return out
     free = disk_free_gb()
-    with SessionLocal() as s:
+    from .pcfolder import claimed_clips
+
+    with SLOT_LOCK, SessionLocal() as s:
         rows = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).order_by(Clip.id).all()
+        mine = claimed_clips(s)  # made on the PC and waiting in Clips -> From my PC: not made again here
         for c in rows:
             if out["started"] >= per_day:
                 break
+            if c.id in mine:
+                continue
             other = same_moment(s, c)
             if other is not None:
                 c.error = (f"Parked, not used: it repeats the moment of clip #{other.id} (same video, same part), "

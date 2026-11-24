@@ -4295,17 +4295,39 @@ class PcSeenIn(BaseModel):
 class PcReportIn(BaseModel):
     folder: str = Field("", max_length=300)
     exists: bool = True
-    items: list[PcFileIn] = Field(default_factory=list, max_length=100)
-    present: list[PcSeenIn] | None = Field(None, max_length=20000)  # every video in the folder now (moved / missing)
+    items: list = Field(default_factory=list, max_length=100)  # PcFileIn each, checked one by one
+    present: list | None = Field(None, max_length=20000)  # PcSeenIn each: every video in the folder now
 
 
 @app.post("/api/worker/pc-items")
 def worker_pc_items(body: PcReportIn, request: Request):
-    """The helper's folder: details of new videos (never the video), and which are still there."""
+    """The helper's folder: details of new videos (never the video), and which are still there. Item by item: a bad
+    item is named in "errors" and never stops the others."""
+    from pydantic import ValidationError
+
     wid = _own_helper(request)
+    good, errors = [], {}
+    for it in body.items:
+        if not isinstance(it, dict):
+            errors["?"] = "not an item"
+            continue
+        try:
+            good.append(PcFileIn.model_validate(it).model_dump())
+        except ValidationError as e:
+            errors[str(it.get("sha") or "?")[:64]] = "invalid: " + "; ".join(
+                f"{'.'.join(str(x) for x in er['loc'])} {er['msg']}" for er in e.errors()[:3])[:200]
+    present = None
+    if body.present is not None:
+        present = []
+        for p in body.present:
+            try:
+                present.append(PcSeenIn.model_validate(p).model_dump())
+            except ValidationError:
+                continue
     with SessionLocal() as s:
-        out = pcfolder.report(s, wid, body.model_dump())
+        out = pcfolder.report(s, wid, {"folder": body.folder, "exists": body.exists, "items": good, "present": present})
         s.commit()
+    out["errors"] = {**errors, **out.get("errors", {})}
     return out
 
 
@@ -4425,21 +4447,10 @@ def pc_item_approve(iid: int, body: PcApproveIn):
 
 @app.post("/api/pc-items/approve-all")
 def pc_items_approve_all():
-    """Every waiting video (also the ones marked "approve": "manual" — this is the owner's own press)."""
-    out = {"approved": 0, "not": []}
-    with SessionLocal() as s:
-        for row in s.query(PcItem).filter(PcItem.state == "new", PcItem.missing_at.is_(None)).order_by(PcItem.id).all():
-            stop = acl.clip_block(1)
-            if stop:
-                out["not"].append({"id": row.id, "why": stop})
-                break
-            words = "" if row.info else (row.topic or pcfolder.topic_from_name(row.folder or row.name))
-            c, why = pcfolder.approve(s, row, words)
-            if c is None:
-                out["not"].append({"id": row.id, "why": why})
-            else:
-                out["approved"] += 1
-    return out
+    """Every waiting video (also the ones marked "approve": "manual" — this is the owner's own press), in the
+    background: GET /api/pc-items shows the progress ("bulk")."""
+    acl.need_clip_room()
+    return pcfolder.approve_all_start()
 
 
 @app.post("/api/pc-items/{iid}/skip")
@@ -4484,6 +4495,8 @@ def worker_pc_folder(wid: int, body: PcFolderIn):
     f = body.folder.strip().strip('"').strip()
     if f and not re.match(r"^([A-Za-z]:[\\/]|\\\\[^\\/]|/|~)", f):
         raise HTTPException(400, r"Write the whole folder, for example D:\youtube")
+    if f and re.fullmatch(r"([A-Za-z]:[\\/]*|[\\/]+|~[\\/]*)", f):
+        raise HTTPException(400, r"Not a whole drive: choose a folder of videos, for example D:\youtube")
     with SessionLocal() as s:
         w = _get(s, Worker, wid)
         w.pc_folder = None if body.default else f

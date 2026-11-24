@@ -1477,15 +1477,20 @@ async function loadPc(){
   $('#pc-all').classList.toggle('hide',W.filter(x=>x.state==='new'&&!x.missing).length<2);
   $('#pc-body').innerHTML=`<div class="mut sm" style="line-height:1.6">${ico('alert')} ${esc(r.notice)}</div>
     <label class="row" style="gap:10px;font-weight:500;margin:10px 0"><span class="switch"><input type="checkbox" id="pc-auto" ${r.auto?'checked':''}><i></i></span><span>Videos I add to the PC folder go up by themselves</span></label>
-    <div class="mut sm" style="margin-bottom:8px">${r.auto?'New videos get the next free day (one a day, 6 PM) by themselves. A video whose info.json says <b>"approve": "manual"</b> still waits for you.':'Every new video waits here for Approve.'} Folder${H.length===1?'':'s'}: ${fold||'no helper PC yet (My channels → Helper PC)'}</div>`
+    <div class="mut sm" style="margin-bottom:8px">${r.auto?'New loose videos (straight in the folder) get the next free day (one a day, 6 PM) by themselves. A video in its own sub-folder goes by itself only when its info.json says <b>"approve": "auto"</b>; every other one waits for you.':'Every new video waits here for Approve.'} Folder${H.length===1?'':'s'}: ${fold||'no helper PC yet (My channels → Helper PC)'}</div>`
     +(W.length?W.map(tile).join(''):'<div class="mut sm">Nothing is waiting.</div>')
     +(R.length?`<details style="margin-top:10px"><summary class="sm">Approved and done (${R.length})</summary>${R.map(line).join('')}</details>`:'');
   $('#pc-auto').onchange=e=>once(async()=>{await api('/api/pc-items/auto','POST',{on:e.target.checked});toast(e.target.checked?'New videos in the folder now go up by themselves':'New videos now wait for Approve');loadPc()});
   $$('[data-pca]').forEach(b=>b.onclick=()=>once(async()=>{const i=$(`[data-pct="${b.dataset.pca}"]`);const x=await api(`/api/pc-items/${b.dataset.pca}/approve`,'POST',{topic:i?i.value.trim():''});toast('Approved — '+(x.publish_at?'goes live '+when(x.publish_at):'queued'));loadPc()},b));
   $$('[data-pcs]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcs}/skip`,'POST');toast('Skipped — it stays on your PC');loadPc()},b));
   $$('[data-pcu]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcu}/unskip`,'POST');loadPc()},b));
-  $('#pc-all').onclick=()=>once(async()=>{const n=W.filter(x=>x.state==='new'&&!x.missing).length;if(!confirm(`Approve all ${n} waiting videos? Each gets its own day, one a day after the last scheduled one.`))return;
-    const x=await api('/api/pc-items/approve-all','POST');toast(`${x.approved} approved`+(x.not.length?` — ${x.not.length} not: ${x.not[0].why}`:''));loadPc()},$('#pc-all'));
+  $('#pc-all').onclick=()=>once(async()=>{const ok=W.filter(x=>x.state==='new'&&!x.missing),m=ok.filter(x=>x.manual).length;
+    if(!confirm(`Approve all ${ok.length} waiting videos?`+(m?` This includes ${m} marked “approve: manual” — the ones that wait for you.`:'')+` Each gets its own day, one a day (6 PM) after the last scheduled one.`))return;
+    await api('/api/pc-items/approve-all','POST');toast('Approving in the background…');loadPc()},$('#pc-all'));
+  const B=r.bulk||{};clearTimeout(window.PC_POLL);
+  if(B.total!==undefined){const bx=document.createElement('div');bx.className='sm';bx.style.margin='8px 0';
+    bx.textContent=B.running?`Approving… ${B.done} of ${B.total} done (${B.approved} approved).`:`Approve all: ${B.approved} of ${B.total} approved`+(B.not&&B.not.length?` — ${B.not.length} not: ${B.not[0].why}`:'')+'.';
+    $('#pc-body').prepend(bx);if(B.running){$('#pc-all').classList.add('hide');window.PC_POLL=setTimeout(()=>{if(!$('#p-clips').classList.contains('hide'))loadPc()},2000)}}
   $$('[data-pcf]').forEach(b=>b.onclick=()=>once(async()=>{const f=prompt('Folder of videos on that PC (empty = do not watch a folder):',b.dataset.cur);if(f===null)return;
     await api(`/api/workers/${b.dataset.pcf}/pc-folder`,'POST',{folder:f.trim()});toast('Saved — the helper reads it within a minute');loadPc()},b));
 }

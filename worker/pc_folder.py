@@ -14,6 +14,7 @@ import os
 import pathlib
 import re
 import subprocess
+import threading
 import time
 
 VIDEO_EXT = (".mp4", ".mov", ".mkv")
@@ -27,6 +28,13 @@ BATCH = 20  # videos per report
 INFO_MAX = 256 * 1024
 DESC_MAX = 20000
 THUMB_MAX = 2 * 1024 * 1024  # YouTube's thumbnail limit
+BACKOFF_MAX = 1800  # the server keeps refusing / failing: wait longer each time, up to 30 minutes
+
+
+class PostError(Exception):
+    def __init__(self, code: int, text: str = ""):
+        super().__init__(f"HTTP {code} {text[:150]}")
+        self.code = code
 
 
 def sha256(path) -> str:
@@ -159,6 +167,8 @@ class Folder:
         self.log, self.now, self.probe, self.frame = log, now, prober, framer
         self.root: pathlib.Path | None = None
         self.last_scan, self.last_full, self.last_present, self.missing_said = 0.0, 0.0, None, False
+        self.lock = threading.RLock()  # the look at the folder may run in its own thread; sending a file waits for it
+        self.backoff_until, self.fail_delay = 0.0, 0.0
         try:
             self.state = json.loads(self.state_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
@@ -218,6 +228,13 @@ class Folder:
                 shas[f"{e['size']}:{e['mtime']}"] = sha
             e["sha"] = st["sha"]
             stable.append(e)
+        # the same file in two places: ONE entry, the copy that has an info.json (it says whether it may go by itself)
+        best = {}
+        for e in stable:
+            has = any(x[0] == "info.json" for x in e["extra"])
+            if e["sha"] not in best or (has and not best[e["sha"]][0]):
+                best[e["sha"]] = (has, e)
+        stable = [e for _h, e in best.values()]
         if len(shas) > 5000:  # forget the oldest remembered hashes
             for k in list(shas)[:len(shas) - 5000]:
                 shas.pop(k)
@@ -257,15 +274,28 @@ class Folder:
 
     def tick(self, server: str, headers: dict, http, force: bool = False) -> dict:
         """Look at the folder (every SCAN_EVERY s) and tell the server what is new / moved / gone. Returns a summary."""
+        with self.lock:
+            return self._tick(server, headers, http, force)
+
+    def _backoff(self, why: str):
+        self.fail_delay = min(max(self.fail_delay * 2, 60), BACKOFF_MAX)
+        self.backoff_until = self.now() + self.fail_delay
+        self.log(f"PC folder: the dashboard did not take the list ({why[:120]}); trying again in {int(self.fail_delay)} s")
+
+    def _tick(self, server: str, headers: dict, http, force: bool) -> dict:
         now = self.now()
-        out = {"sent": 0, "thumbs": 0}
-        if self.root is None or (not force and now - self.last_scan < SCAN_EVERY):
+        out = {"sent": 0, "thumbs": 0, "refused": 0}
+        if self.root is None or (not force and (now - self.last_scan < SCAN_EVERY or now < self.backoff_until)):
             return out
         self.last_scan = now
         if not self.root.is_dir():
             if not self.missing_said or now - self.last_full > FULL_EVERY:
                 self.log(f"PC folder: {self.root} is not on this PC (create it, or change it in the dashboard)")
-                self._post(server, headers, http, {"folder": str(self.root), "exists": False, "items": []})
+                try:
+                    self._post(server, headers, http, {"folder": str(self.root), "exists": False, "items": []})
+                except Exception as e:  # noqa: BLE001
+                    self._backoff(str(e))
+                    return out
                 self.missing_said, self.last_full = True, now
             return out
         self.missing_said = False
@@ -279,26 +309,63 @@ class Folder:
         batches = [new[i:i + BATCH] for i in range(0, len(new), BATCH)] or [[]]
         by_sha = {e["sha"]: e for e in stable}
         for i, part in enumerate(batches):
+            last = i == len(batches) - 1
             body = {"folder": str(self.root), "exists": True, "items": [self.item(e) for e in part]}
-            if i == len(batches) - 1:
+            if last:
                 body["present"] = present
-            r = self._post(server, headers, http, body)
-            for e in part:
-                sent[e["sha"]] = self.info_sig(e)
-            out["sent"] += len(part)
-            for sha in (r or {}).get("thumbs") or []:
-                iid = ((r or {}).get("ids") or {}).get(sha)
-                e = by_sha.get(sha)
-                if not iid or e is None:
-                    continue
-                try:
-                    data, kind = self.thumb(e)
-                    if data:
-                        http.post(f"{server}/api/worker/pc-thumb/{int(iid)}?kind={kind}", content=data, timeout=60,
-                                  headers={**headers, "content-type": "application/octet-stream"})
-                        out["thumbs"] += 1
-                except Exception as ex:  # noqa: BLE001  (a picture is not worth stopping the list for)
-                    self.log(f"PC folder: picture of {e['name']} not sent ({str(ex)[:80]})")
+            try:
+                answers = [(part, self._post(server, headers, http, body))]
+            except PostError as e:
+                if not (400 <= e.code < 500) or len(part) < 2:
+                    if 400 <= e.code < 500 and part:  # the server will never take this one: do not send it again
+                        for x in part:
+                            sent[x["sha"]] = self.info_sig(x)
+                        out["refused"] += len(part)
+                        self.log(f"PC folder: {part[0]['rel']} was refused by the dashboard ({e})")
+                        continue
+                    self._backoff(str(e))
+                    self.save()
+                    return out
+                answers = []  # one bad item in the batch: send them one by one, the bad one is set aside
+                for x in part:
+                    try:
+                        answers.append(([x], self._post(server, headers, http, {"folder": str(self.root), "exists": True,
+                                                                                  "items": [self.item(x)]})))
+                    except PostError as e1:
+                        if not 400 <= e1.code < 500:
+                            self._backoff(str(e1))
+                            self.save()
+                            return out
+                        sent[x["sha"]] = self.info_sig(x)
+                        out["refused"] += 1
+                        self.log(f"PC folder: {x['rel']} was refused by the dashboard ({e1})")
+            except Exception as e:  # noqa: BLE001  (no connection: the main loop's own back-off applies too)
+                self._backoff(str(e))
+                self.save()
+                return out
+            for sub, r in answers:
+                errors = (r or {}).get("errors") or {}
+                for x in sub:
+                    sent[x["sha"]] = self.info_sig(x)  # also a refused one: it is sent again only when its details change
+                    if x["sha"] in errors:
+                        out["refused"] += 1
+                        self.log(f"PC folder: {x['rel']} was refused by the dashboard ({str(errors[x['sha']])[:120]})")
+                    else:
+                        out["sent"] += 1
+                for sha in (r or {}).get("thumbs") or []:
+                    iid = ((r or {}).get("ids") or {}).get(sha)
+                    e = by_sha.get(sha)
+                    if not iid or e is None:
+                        continue
+                    try:
+                        data, kind = self.thumb(e)
+                        if data:
+                            http.post(f"{server}/api/worker/pc-thumb/{int(iid)}?kind={kind}", content=data, timeout=60,
+                                      headers={**headers, "content-type": "application/octet-stream"})
+                            out["thumbs"] += 1
+                    except Exception as ex:  # noqa: BLE001  (a picture is not worth stopping the list for)
+                        self.log(f"PC folder: picture of {e['name']} not sent ({str(ex)[:80]})")
+        self.fail_delay, self.backoff_until = 0.0, 0.0
         self.last_present, self.last_full = rels, now
         self.save()
         if out["sent"]:
@@ -307,7 +374,9 @@ class Folder:
 
     def _post(self, server, headers, http, body) -> dict:
         r = http.post(f"{server}/api/worker/pc-items", headers=headers, json=body, timeout=120)
-        r.raise_for_status()
+        code = int(getattr(r, "status_code", 200) or 200)
+        if code >= 400:
+            raise PostError(code, str(getattr(r, "text", "") or ""))
         try:
             return r.json()
         except Exception:  # noqa: BLE001
@@ -334,7 +403,9 @@ class Folder:
         sha = str(job.get("sha") or "").lower()
         p = self.path_for(sha, str(job.get("rel") or ""))
         if p is None and self.root is not None and self.root.is_dir():
-            self.scan()  # moved since the last look: look again (a moved file keeps its size and time, so no new hash)
+            with self.lock:  # moved since the last look: look again (a moved file keeps its size and time: no new hash)
+                self.scan()
+                self.save()
             p = self.path_for(sha)
         if p is None:
             raise RuntimeError("the video is not in the folder on this PC any more (moved out, renamed outside it, or deleted)")
