@@ -24,7 +24,8 @@ KEY = "creators"
 PER_DAY = 5
 # music labels, film studios and TV networks: they never give fan pages permission and their Content ID strikes
 LABELS = re.compile(r"music|records|songs|films|movies|studios|pictures|t-series|zee|sony|star |colors|tips official|"
-                    r"saregama|aditya|lahari|speed records|bhajan|bhakti|aarti|wave|yrf|dharma|netflix|prime video|news", re.I)
+                    r"saregama|aditya|lahari|speed records|bhajan|bhakti|aarti|wave|yrf|dharma|netflix|prime video|news|"
+                    r"rajshri|eros|shemaroo|ultra|venus|goldmines|pen movies|wynk|jio", re.I)
 
 # Written like a person would write it: short, plain, a little informal, different for each creator,
 # naming the video the owner actually liked. No emojis or polished marketing lines.
