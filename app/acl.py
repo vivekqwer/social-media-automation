@@ -163,6 +163,7 @@ ROUTES = [
     ("POST", "/api/account/upgrade", "account.upgrade", "Asked for more channels"),
     ("POST", "/api/account/brand", "account.rename", "Renamed the system"),
     ("GET", "/api/account/helper-code", "helper.manage", None),
+    ("POST", "/api/account/shared-helper", "helper.manage", "Changed whether the shared helper may download"),
     # --- plans and online payment (any customer may see the plans and pay; the amount always comes from the server)
     ("GET", "/api/plans", SIGNED, None),
     ("POST", "/api/pay/order", SIGNED, "Started an online payment"),

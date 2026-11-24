@@ -32,11 +32,14 @@ those. A clip from the phone goes up without automatic captions.
    curl -fsSL https://YOUR-SERVER/helper/setup.sh | bash -s -- https://YOUR-SERVER
    ```
 
-   The first time it takes a few minutes. If it asks a question, press Enter.
+   First it asks for a "helper code": the Super Admin's phone just presses Enter; a customer's phone pastes
+   the code shown in their dashboard. Then it takes a few minutes. If it asks another question, press Enter.
 7. **Approve the phone.** At the end Termux shows a 6-digit pairing code. In the dashboard: My channels →
    Helper PC → the new "Android phone" → **Approve** → type the code.
 8. **Super Admin only: make it the central helper.** In the same list press **Make central**. From now on the
-   phone also downloads for every customer who has no helper of their own switched on.
+   phone also downloads for every customer who has no helper of their own, and for customers who switched on
+   "Use the shared helper when my PC is off" while their PC is off. It only downloads and analyses for them.
+   (A helper that is too old cannot be made central; start it once so it updates itself.)
 9. **Leave the phone alone.** Keep it on the charger and on Wi-Fi. You can close the Termux window; a small
    Termux notification stays — that is the helper running.
 

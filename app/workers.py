@@ -67,20 +67,47 @@ RECENT_WINDOW = timedelta(days=2)
 
 
 def any_recent(kind: str = "source") -> bool:
-    """An approved helper that was online lately — only then is it worth waiting for it. A customer without a helper
-    of their own is also served by the Super Admin's central helper, if that one can do this kind of job."""
+    """An approved helper that can do `kind` was online lately — only then is it worth waiting for it. A customer
+    who allows it is also served by the Super Admin's shared (central) helper, for downloads and analysis only."""
     with SessionLocal() as s:
-        if s.query(Worker).filter(Worker.approved.is_(True), Worker.last_seen >= utcnow() - RECENT_WINDOW).count() > 0:
+        rows = s.query(Worker).filter(Worker.approved.is_(True), Worker.last_seen >= utcnow() - RECENT_WINDOW).all()
+        if any(can_do(w.can, kind) for w in rows):
             return True
     return central_online(kind, RECENT_WINDOW)
 
 
+CAPTION_WINDOW = timedelta(minutes=30)
+
+
+def captioner_recent() -> bool:
+    """A helper of this copy that writes captions (Whisper / caption tracks) was seen in the last 30 minutes: jobs
+    that want captions wait for it instead of going to a helper that would send them without."""
+    with SessionLocal() as s:
+        rows = s.query(Worker).filter(Worker.approved.is_(True), Worker.last_seen >= utcnow() - CAPTION_WINDOW).all()
+        return any(can_do(w.can, "transcribe") for w in rows)
+
+
 # ---------------------------------------------------------------- central helper (one helper for every account)
 KINDS = ("source", "transcribe", "analyze", "reel", "tts", "script", "setup_ai")
-TICKET_TTL = 6 * 3600  # seconds a central helper has to deliver a job it was given (a slow phone upload included)
+# The only kinds of job another account's work is ever given out as, whatever the helper says it can do: a stolen
+# central token then reaches downloads and video analysis, never voice-over text, script topics or keys.
+CENTRAL_KINDS = frozenset({"source", "analyze"})
+TICKET_TTL = 40 * 60  # = the job lease (main.JOB_LEASE): after that the job may be handed to someone else anyway
 # which delivery addresses (/api/worker/<name>/<id>) a job's ticket opens
-TICKET_PATHS = {"source": ("source", "captions", "fail"), "reel": ("source", "fail"), "tts": ("voice", "fail"),
-                "analyze": ("analysis", "fail"), "script": ("script", "fail")}
+TICKET_PATHS = {"source": ("source", "fail"), "analyze": ("analysis", "fail")}
+SHARED_SETTING = "shared_helper"  # per account: "1" = use the shared helper also while my own PC is off
+
+
+def shared_allowed() -> bool:
+    """May the shared helper do this account's jobs? Always when the account has no approved helper of its own;
+    with one, only if the customer switched on "Use the shared helper when my PC is off"."""
+    from .db import get_setting
+
+    v = get_setting(SHARED_SETTING)
+    if v == "1":
+        return True
+    with SessionLocal() as s:
+        return s.query(Worker).filter(Worker.approved.is_(True)).count() == 0
 
 
 def parse_can(header: str | None) -> frozenset | None:
@@ -116,9 +143,11 @@ def central_online(kind: str = "source", window: timedelta = ONLINE_WINDOW) -> b
     """For a customer's copy: is the Super Admin's central helper around, and can it do `kind`?"""
     from . import tenant
 
-    if tenant.current() == tenant.OWNER:
-        return False  # the owner's own helpers are counted as they are
+    if tenant.current() == tenant.OWNER or kind not in CENTRAL_KINDS:
+        return False  # the owner's own helpers are counted as they are; the shared one only downloads and analyses
     try:
+        if not shared_allowed():
+            return False
         with tenant.use(tenant.OWNER), SessionLocal() as s:
             rows = s.query(Worker).filter(Worker.central.is_(True), Worker.approved.is_(True), Worker.can.isnot(None),
                                           Worker.last_seen >= utcnow() - window).all()
@@ -155,6 +184,8 @@ def make_ticket(tenant_id: int, kind: str, obj_id: int, worker_id: int, ttl: int
     The helper sends it back with the result; the server reads the copy from here, never from the helper."""
     import time
 
+    if kind not in TICKET_PATHS:
+        raise ValueError(f"no tickets for {kind} jobs")
     payload = f"{int(tenant_id)}|{kind}|{int(obj_id)}|{int(worker_id)}|{int(time.time()) + int(ttl)}"
     return _b64(payload.encode()) + "." + _ticket_sig(payload)
 

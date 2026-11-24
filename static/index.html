@@ -409,6 +409,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div class="mut sm" style="margin-top:10px;line-height:1.7">Keep the downloaded file somewhere safe (Google Drive, a pen drive). <b>Channel logins in a backup only work on this same server</b> — after restoring on a new server, press <b>Reconnect</b> on each channel. Restoring replaces everything with the backup; a safety backup of what is there now is made first.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
               <div id="wk-claim" class="hide" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"></div>
+              <label class="row sm hide" id="wk-shared" style="gap:8px;margin-bottom:10px"><span class="switch"><input type="checkbox" id="wk-shared-on"><i></i></span><span id="wk-shared-txt">Use the shared helper when my PC is off</span></label>
               <div id="wk-list"></div>
               <div class="tabs" id="wk-tabs" style="margin-top:12px"><button class="tab on" data-wt="pc">Windows PC</button><button class="tab" data-wt="phone">Android phone</button></div>
               <div class="mut sm" id="wk-pc" style="margin-top:10px;line-height:1.7"><b>Start automatically (recommended, once):</b> in the project folder double-click <b>worker\install_autostart.bat</b>. The helper then runs hidden whenever your PC is on, restarts itself if it stops, and updates itself when the server gets new code.<br>Manual start: <b>worker\run_worker.bat</b>. New helpers appear here — press <b>Approve</b>.</div>
@@ -1085,7 +1086,7 @@ async function loadDash(){
   else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
   if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
   (DESTS.filter(d=>d.paused)).forEach(d=>{al+=`<div class="alert bad">${ico('alert')}<span><b>Uploads to ${esc(d.name)} are paused.</b> ${esc(d.paused_reason||'')} Clips stay queued until you resume.</span><button class="btn sm" data-resume="${d.id}">Resume uploads</button></div>`});
-  const hp=OV.helper||{};if(hp.waiting&&!hp.online)al+=`<div class="alert bad">${ico('alert')}<span><b>Helper PC is offline</b> — ${hp.waiting} job${hp.waiting===1?'':'s'} waiting${hp.last_seen?' (last seen '+when(hp.last_seen)+')':''}. Start it, or run <b>worker\\install_autostart.bat</b> once so it always starts by itself.</span></div>`;
+  const hp=OV.helper||{},hst=hp.stuck!=null?hp.stuck:(hp.online?0:hp.waiting);if(hst)al+=`<div class="alert bad">${ico('alert')}<span><b>Helper PC is offline</b> — ${hst} job${hst===1?'':'s'} waiting${hp.last_seen?' (last seen '+when(hp.last_seen)+')':''}. Start it, or run <b>worker\\install_autostart.bat</b> once so it always starts by itself.</span></div>`;
   if(OV.thumbs_pending)al+=`<div class="alert">${ico('image')}<span><b>${OV.thumbs_pending} thumbnail${OV.thumbs_pending===1?' is':'s are'} waiting.</b> YouTube allows custom thumbnails only after the channel's phone number is verified. Verify once — they are sent automatically (checked every 30 minutes).</span><a class="btn sm" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Verify phone</a></div>`;
   if(OV.alerts_unseen)al+=`<div class="alert bad">${ico('bell')}${OV.alerts_unseen} of your uploaded videos had a problem on YouTube (deleted, copyright or blocked).<button class="btn sm" onclick="go('alerts')">See details</button></div>`;
   $('#alerts').innerHTML=al;loadHealth();loadSetup();
@@ -1351,9 +1352,13 @@ async function loadWorkers(){
 }
 $$('#wk-tabs [data-wt]').forEach(b=>b.onclick=()=>{$$('#wk-tabs .tab').forEach(x=>x.classList.toggle('on',x===b));$('#wk-pc').classList.toggle('hide',b.dataset.wt!=='pc');$('#wk-phone').classList.toggle('hide',b.dataset.wt!=='phone')});
 async function phoneCmd(){
-  const el=$('#wk-cmd');if(!el)return;const o=location.origin;let code='';
-  try{code=(await api('/api/account/helper-code')).code||''}catch(e){}
-  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}${code?' '+code:''}`;el.textContent=cmd;
+  const el=$('#wk-cmd');if(!el)return;const o=location.origin;let r={};
+  try{r=await api('/api/account/helper-code')}catch(e){}
+  const sh=$('#wk-shared');
+  if(sh&&r.code){sh.classList.remove('hide');$('#wk-shared-on').checked=!!r.shared_chosen;
+    $('#wk-shared-txt').textContent='Use the shared helper when my PC is off'+(r.shared?' — the shared helper downloads your videos now'+(r.shared_online?'':' (it is offline at the moment)'):' — off: only your own helper PC downloads')+'. It never makes your reels, voice-overs or captions.';
+    $('#wk-shared-on').onchange=e=>once(async()=>{await api('/api/account/shared-helper','POST',{on:e.target.checked});toast('Saved');phoneCmd()})}
+  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}`;el.textContent=cmd+(r.code?'   (when it asks for the helper code, paste: '+r.code+')':'');
   $('#wk-cmd-copy').onclick=async()=>{try{await navigator.clipboard.writeText(cmd);toast('Copied')}catch(e){prompt('Copy this command:',cmd)}};
 }
 async function loadCookies(){
@@ -1717,7 +1722,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
-  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,#wk-phone-cmd,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){

@@ -87,7 +87,11 @@ async def unexpected_error(request: Request, exc: Exception):
     from .guide import record_error
 
     who = getattr(request.state, "who", None) or {}
-    with tenant.use(who.get("tenant") or tenant.OWNER):
+    tid = who.get("tenant")
+    if not tid and request.url.path.startswith("/api/worker/"):  # a helper: the copy it works for (a ticket's copy)
+        t = getattr(request.state, "ticket", None)
+        tid = t["tid"] if t else workers.tenant_of(request.headers.get("x-worker-token", ""))
+    with tenant.use(tid or tenant.OWNER):
         record_error(f"{request.method} {request.url.path}", exc)
     return JSONResponse({"detail": "Something went wrong on the server. Try again in a minute. If it keeps happening, open "
                                    f"Setup guide → “If something goes wrong” and press Copy details. ({type(exc).__name__})"},
@@ -501,7 +505,23 @@ def account_brand(body: BrandIn, request: Request):
 def account_helper_code():
     """The code that attaches a new helper PC to this account's copy (the owner's helpers need none)."""
     tid = tenant.current()
-    return {"code": None if tid == tenant.OWNER else workers.claim_code(tid)}
+    if tid == tenant.OWNER:
+        return {"code": None}
+    return {"code": workers.claim_code(tid), "shared": workers.shared_allowed(),
+            "shared_chosen": get_setting(workers.SHARED_SETTING) == "1", "shared_online": workers.central_online("source")}
+
+
+class SharedIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/account/shared-helper")
+def account_shared_helper(body: SharedIn):
+    """Customer: may the Super Admin's shared helper download my videos also while my own helper PC is off?"""
+    if tenant.current() == tenant.OWNER:
+        raise HTTPException(400, "Your own helpers are the shared helper.")
+    set_setting(workers.SHARED_SETTING, "1" if body.on else "0")
+    return account_helper_code()
 
 
 # ---------- Super Admin: users, limits, payments ----------
@@ -1717,24 +1737,29 @@ def _uploads_today(s) -> dict:
 
 
 def _helper_state(s) -> dict:
-    """Is a helper PC online, and is work waiting for it?"""
+    """Is a helper online, and is work waiting that no online helper can do? ("stuck": e.g. a reel while only the
+    phone, which makes no reels, is online.)"""
     rows = s.query(Worker).filter(Worker.approved.is_(True)).all()
     ws = [workers.as_dict(w) for w in rows]
-    waiting = (s.query(Clip).filter(Clip.status == "fetching").count()
-               + s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").count()
-               + s.query(Project).filter(Project.analysis_pending.is_(True)).count())
-    online = sum(1 for w in ws if w["online"])
-    own = online
-    if not online:
+    reels = (s.query(Clip).join(Project, Project.id == Clip.project_id)
+             .filter(Clip.status == "fetching", Project.mode == "original").count())
+    kinds = {"source": s.query(Clip).filter(Clip.status == "fetching").count() - reels, "reel": reels,
+             "tts": s.query(Clip).filter(Clip.tts_pending.isnot(None), Clip.tts_pending != "").count(),
+             "analyze": s.query(Project).filter(Project.analysis_pending.is_(True)).count()}
+    now = utcnow()
+    on = [w for w, d in zip(rows, ws) if d["online"]]
+    if not on:
         # a helper in the middle of a long job (slow download, captions on the PC) does not call in until it is done:
         # it took a job a short while ago and was seen within the time a job may take -> it is working, not offline
-        now = utcnow()
         busy = s.query(Clip).filter(Clip.job_lease.isnot(None), Clip.job_lease > now - JOB_LEASE).count()
-        if busy and any(w.last_seen and w.last_seen > now - JOB_LEASE for w in rows):
-            online = own = 1
-    # a customer without a helper of their own is served by the Super Admin's central helper (it downloads for everyone)
-    central = not online and workers.central_online("source")
-    return {"approved": len(ws), "online": online + (1 if central else 0), "own": own, "central": central, "waiting": waiting,
+        if busy:
+            on = [w for w in rows if w.last_seen and w.last_seen > now - JOB_LEASE][:1]
+    # a customer who allows it is served by the Super Admin's shared helper (downloads and analysis only)
+    central = not on and workers.central_online("source")
+    able = lambda k: any(workers.can_do(w.can, k) for w in on) or (central and k in workers.CENTRAL_KINDS)  # noqa: E731
+    return {"approved": len(ws), "online": len(on) + (1 if central else 0), "own": len(on), "central": central,
+            "waiting": sum(kinds.values()), "stuck": sum(n for k, n in kinds.items() if n and not able(k)),
+            "able": [k for k in workers.KINDS if able(k)],
             "last_seen": max((w["last_seen"] for w in ws if w["last_seen"]), default=None)}
 
 
@@ -3033,9 +3058,9 @@ def setup_checklist():
         blocked=f"{thumbs_wait} thumbnail(s) were refused by YouTube — verify the channel's phone number; they are then sent again by themselves"
         if thumbs_wait else "")
     add("face", "Your face photo", faces.DEFAULT_FACE.exists(), "Put on every thumbnail.", {"go": "settings", "label": "Upload photo"})
-    add("helper", "Helper PC online", hp["online"], "Downloads videos, makes reels and captions from your home internet."
+    add("helper", "Helper PC online", hp["online"] and not hp["stuck"], "Downloads videos, makes reels and captions from your home internet."
         if not hp["central"] else "The shared helper downloads your videos; you need no helper of your own.",
-        {"help": "helper", "label": "How to start it"}, blocked="" if hp["online"] else f"{hp['waiting']} job(s) are waiting for it")
+        {"help": "helper", "label": "How to start it"}, blocked=f"{hp['stuck']} job(s) are waiting for it" if hp["stuck"] else "")
     add("gmail", "Gmail connected", gmail.connected_email(), "Alerts to your inbox and permission mails to creators.",
         {"href": "/auth/gmail", "label": "Connect Gmail"})
     add("source", "At least one source", n_sources > 0, "A source is where clips come from; it runs by itself.",
@@ -3146,8 +3171,8 @@ def health():
                                                   "the “YouTube API Services - Audit and Quota Extension Form” for your Google project; "
                                                   "until then, set each video to Public by hand in YouTube Studio.", "fix": None, "key": "private_stuck"})
         hp = _helper_state(s)
-        if hp["waiting"] and not hp["online"]:
-            items.append({"level": "bad", "text": f"Helper PC is offline and {hp['waiting']} job(s) are waiting for it.",
+        if hp["stuck"]:
+            items.append({"level": "bad", "text": f"Helper PC is offline and {hp['stuck']} job(s) are waiting for it.",
                           "fix": "helper", "key": "helper_offline"})
         elif not hp["approved"] and not hp["central"]:
             items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
@@ -3254,7 +3279,7 @@ def clip_rewrite(cid: int):
             raise HTTPException(400, "Only reels written by the local AI can be written again.")
         if c.status in ("uploading", "uploaded"):
             raise HTTPException(409, "Already on YouTube; delete it there instead.")
-        if not _helper_state(s)["own"]:  # the central (phone) helper writes no scripts
+        if "script" not in _helper_state(s)["able"]:  # the phone and the shared helper write no scripts
             raise HTTPException(409, "The helper PC is offline — it writes the scripts. Start it and try again.")
         topic = (ch.script_wanted or {}).get("topic") or trending_phrase(ch)
         if not topic:
@@ -3618,18 +3643,22 @@ def worker_jobs(request: Request):
     room = {"dl": HELPER_DOWNLOADS if slots is None else slots, "all": slots}
     llm = h.get("x-worker-llm") == "1"
     jobs = _collect_jobs(can, room, llm, "x-worker-ai" in h, now)
-    if central and can is not None and tenant.current() == tenant.OWNER:
-        # the central helper: also the jobs of every active customer that has no helper of its own online right now
-        for tid in accounts.active_tenants():
-            if tid == tenant.OWNER or (room["all"] is not None and room["all"] <= 0):
-                continue
+    foreign = (can or frozenset()) & workers.CENTRAL_KINDS  # never voice-overs, reels, scripts or keys of others
+    if central and can is not None and foreign and tenant.current() == tenant.OWNER:
+        # the central helper: also the jobs of every active customer that allows the shared helper and has no helper
+        # of its own online right now; customers in turn, so one busy account cannot keep the others waiting
+        tids = [t for t in accounts.active_tenants() if t != tenant.OWNER]
+        _central_turn[0] = (_central_turn[0] + 1) % max(1, len(tids))
+        for tid in tids[_central_turn[0]:] + tids[:_central_turn[0]]:
+            if room["all"] is not None and room["all"] <= 0:
+                break
             if not job_enter(tid):  # this copy is being restored from a backup right now
                 continue
             try:
                 with tenant.use(tid):
-                    if workers.own_online():  # their own helper is preferred
+                    if workers.own_online() or not workers.shared_allowed():  # their own helper is preferred
                         continue
-                    more = _collect_jobs(can, room, llm, False, now)
+                    more = _collect_jobs(foreign, room, False, False, now)
             except Exception:  # noqa: BLE001  (one broken copy must not stop the others)
                 import logging
 
@@ -3642,6 +3671,9 @@ def worker_jobs(request: Request):
                 j["ticket"] = workers.make_ticket(tid, j["type"], oid, wid)
             jobs += more
     return {"jobs": jobs, "version": SERVER_VERSION}
+
+
+_central_turn = [0]  # which customer the central helper looks at first (moves on each call)
 
 
 def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]:
@@ -3658,6 +3690,14 @@ def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]
         if room["all"] is not None:
             room["all"] -= 1
 
+    no_caps, cap_wait = not workers.can_do(can, "transcribe"), []
+
+    def leave_for_captioner() -> bool:
+        """This helper cannot write captions, and one of this copy's helpers that can was seen in the last 30 min."""
+        if not cap_wait:
+            cap_wait.append(no_caps and workers.captioner_recent())
+        return cap_wait[0]
+
     want_ai = False
     ai_on, pexels_on = acl.feature("ai.reels"), acl.feature("pexels.use")  # switched off for this account: no such jobs
     if ai_on and knows_ai and not llm and workers.can_do(can, "setup_ai"):  # only helpers that know the job
@@ -3672,6 +3712,9 @@ def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]
             own_file = p.mode == "original" and (p.license or "").endswith("(my own video)")
             if p.mode == "original" and not own_file and not workers.can_do(can, "reel"):
                 continue  # a reel is made by a helper with ReelGen (the PC), never by the phone
+            wants_caps = p.mode != "original" and not c.captions and _wants_captions(s, p, c)
+            if wants_caps and no_caps and leave_for_captioner():
+                continue  # the clip would go up without captions: the helper PC writes them
             if (c.fetch_tries or 0) >= MAX_JOB_TRIES:
                 c.status, c.job_lease = "failed", None
                 c.error = ("The helper PC could not get this video after 3 tries. Check the helper window/log, "
@@ -3691,7 +3734,7 @@ def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]
                 take(job, dl=True)
                 continue
             job = {"type": "source", "clip_id": c.id, "video_id": p.video_id, "start": c.start, "end": c.end}
-            if not c.captions and workers.can_do(can, "transcribe") and _wants_captions(s, p, c):
+            if wants_caps and not no_caps:
                 # no subtitles on YouTube: the helper writes them (a helper without Whisper sends the video without)
                 job["transcribe"], job["hint"] = True, f"{p.title} {' '.join(p.tags or [])} {(p.description or '')[:300]}"
             take(job, dl=True)
@@ -3706,6 +3749,8 @@ def _collect_jobs(can, room: dict, llm: bool, knows_ai: bool, now) -> list[dict]
             for p in s.query(Project).filter(Project.analysis_pending.is_(True)).order_by(Project.id).limit(5):
                 if not free(p.analysis_lease) or not fits():
                     continue
+                if (p.quick or {}).get("captions", True) and no_caps and leave_for_captioner():
+                    continue  # the caption track is read by the helper PC (the server is blocked from it)
                 if (p.analysis_tries or 0) >= MAX_JOB_TRIES:
                     p.analysis_pending = False  # carry on without the helper's data
                     if p.quick:  # only Quick uploads keep this flag; autopilot videos have no quick state
@@ -3910,6 +3955,9 @@ def admin_worker_central(wid: int, body: CentralIn):
         w = _get(s, Worker, wid)
         if body.on and not w.approved:
             raise HTTPException(400, "Approve this helper first.")
+        if body.on and w.can is None:
+            raise HTTPException(400, "This helper is too old to be the shared helper — update it first (start it once; "
+                                     "it updates itself), then try again.")
         w.central = bool(body.on)
         s.commit()
         return workers.as_dict(w)
