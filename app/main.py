@@ -20,13 +20,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import accounts, acl, archive, auth, enroll, payments, quota, scheduler, tenant, workers, youtube
+from . import accounts, acl, archive, auth, enroll, payments, pcfolder, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .monitor import check_uploads
-from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, get_setting, migrate,
+from .db import (Alert, Base, Channel, Clip, Destination, PcItem, Project, SessionLocal, Worker, engine, get_setting, migrate,
                  Setting, adopt_orphans, main_destination, set_setting, to_dict, utcnow)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
@@ -137,8 +137,9 @@ async def auth_gate(request: Request, call_next):
     except ValueError:
         size = 0
     if path.startswith("/api/worker/"):
-        cap = 900 * 1024 * 1024 if path.startswith(("/api/worker/source/", "/api/worker/restore/")) else 30 * 1024 * 1024 \
-            if path.startswith(("/api/worker/voice/", "/api/worker/analysis/", "/api/worker/archive-inventory")) else 64 * 1024
+        cap = 900 * 1024 * 1024 if path.startswith(("/api/worker/source/", "/api/worker/restore/", "/api/worker/pc-file/")) \
+            else 30 * 1024 * 1024 if path.startswith(("/api/worker/voice/", "/api/worker/analysis/", "/api/worker/archive-inventory")) \
+            else 4 * 1024 * 1024 if path.startswith(("/api/worker/pc-items", "/api/worker/pc-thumb/")) else 64 * 1024
         if size > cap:
             return JSONResponse({"detail": "Too large"}, status_code=413)
         tok = request.headers.get("x-worker-token", "")
@@ -1440,6 +1441,8 @@ def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         _not_held(c)
+        if c.pc_item_id:
+            raise HTTPException(409, pcfolder.NO_RENDER)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
@@ -1692,6 +1695,9 @@ def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     if c.status == "uploaded":  # "Video saved on your PC" / "Video still on the server"
         d["on_server"] = archive.on_server(c)
         d["on_pc"] = archive.complete(c)
+    if c.pc_item_id:  # from the folder on the PC: the file comes shortly before its upload
+        d["from_pc"] = True
+        d["pc_on_server"] = pcfolder.on_server(c)
     return d
 
 
@@ -3348,6 +3354,10 @@ def health():
                                                   "longer on the server either). Nothing was deleted — if you moved or renamed the "
                                                   "folder, put it back; the helper checks again every day.",
                           "fix": "helper", "key": "archive_missing"})
+        try:  # videos from the folder on the PC (moved to a new day, missing, waiting for the PC)
+            items += pcfolder.problems(s, now)
+        except Exception:  # noqa: BLE001
+            pass
         if dests and not s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count():
             items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source", "key": "no_source"})
         for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto.is_(True)).all():
@@ -3474,7 +3484,7 @@ def rerender_waiting(body: RerenderIn):
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status.in_(["rendered", "queued"])).order_by(Clip.publish_at, Clip.id).all():
             p = s.get(Project, c.project_id)
-            if p is None or check_edit(p, c):
+            if p is None or check_edit(p, c) or c.pc_item_id:  # a video from the PC folder goes up as it is
                 skipped += 1
                 continue
             keep_queue = c.status == "queued"
@@ -3602,7 +3612,7 @@ def _need_step(step: str):
 
 
 HELPER_APP_FILES = ("config.py", "tenant.py", "crypto.py", "ingest.py", "tts.py", "captions.py", "hot.py")
-HELPER_WORKER_FILES = ("clipstudio_worker.py", "transcribe.py", "run_worker.bat", "run_hidden.bat", "install_autostart.bat",
+HELPER_WORKER_FILES = ("clipstudio_worker.py", "pc_folder.py", "transcribe.py", "run_worker.bat", "run_hidden.bat", "install_autostart.bat",
                        "uninstall_autostart.bat")
 
 def _helper_zip(tid: int, with_code: bool = True) -> bytes:
@@ -3858,6 +3868,13 @@ def worker_jobs(request: Request, response: Response):
     room = {"dl": HELPER_DOWNLOADS if slots is None else slots, "all": slots}
     llm = h.get("x-worker-llm") == "1"
     jobs = _collect_jobs(can, room, llm, "x-worker-ai" in h, now)
+    pc_jobs, pc_folder = [], None
+    if h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None:
+        # the folder of videos on the PC ("From my PC", app/pcfolder.py): only this helper's own copy, never with a ticket
+        with SessionLocal() as s:
+            pc_folder = pcfolder.folder_for(s.get(Worker, wid))
+            pc_jobs = pcfolder.jobs(s, now, wid)
+            s.commit()
     if archives and getattr(request.state, "ticket", None) is None:
         # archive / restore / inventory: only this helper's OWN copy (the one its token belongs to), never another
         # account's through the central helper, never with a ticket — customers' videos never land on another PC
@@ -3891,7 +3908,10 @@ def worker_jobs(request: Request, response: Response):
                 oid = j.get("clip_id") or j.get("project_id") or j.get("source_id")
                 j["ticket"] = workers.make_ticket(tid, j["type"], oid, wid)
             jobs += more
+    jobs += pc_jobs  # (the helper runs them after the downloads, like the archive jobs)
     out = {"jobs": jobs, "version": SERVER_VERSION}
+    if pc_folder is not None:
+        out["pc_folder"] = pc_folder
     has = h.get("x-worker-enroll")
     if has is not None and getattr(request.state, "ticket", None) is None:
         # a helper that knows helper keys and has not got this account's current one: hand it over, so that it can
@@ -4250,11 +4270,238 @@ def worker_archive_inventory(body: InventoryIn, request: Request):
     return out
 
 
+# ---------- the folder of videos on the PC ("From my PC", app/pcfolder.py) ----------
+class PcFileIn(BaseModel):
+    sha: str = Field(max_length=64)
+    rel: str = Field("", max_length=500)
+    name: str = Field("", max_length=255)
+    folder: str = Field("", max_length=255)
+    size: int = Field(0, ge=0, le=10**13)
+    duration: float = Field(0, ge=0, le=10**6)
+    width: int = Field(0, ge=0, le=100000)
+    height: int = Field(0, ge=0, le=100000)
+    info: dict | None = None  # info.json of its sub-folder (checked and cut to size by pcfolder.clean_info)
+    description_txt: str = Field("", max_length=20000)
+    thumb: bool = False  # it has a picture to send (the folder's thumbnail or a frame)
+
+
+class PcSeenIn(BaseModel):
+    sha: str = Field(max_length=64)
+    rel: str = Field("", max_length=500)
+    name: str = Field("", max_length=255)
+    folder: str | None = Field(None, max_length=255)
+
+
+class PcReportIn(BaseModel):
+    folder: str = Field("", max_length=300)
+    exists: bool = True
+    items: list[PcFileIn] = Field(default_factory=list, max_length=100)
+    present: list[PcSeenIn] | None = Field(None, max_length=20000)  # every video in the folder now (moved / missing)
+
+
+@app.post("/api/worker/pc-items")
+def worker_pc_items(body: PcReportIn, request: Request):
+    """The helper's folder: details of new videos (never the video), and which are still there."""
+    wid = _own_helper(request)
+    with SessionLocal() as s:
+        out = pcfolder.report(s, wid, body.model_dump())
+        s.commit()
+    return out
+
+
+async def _read_capped(request: Request, cap: int) -> bytes:
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > cap:
+            raise HTTPException(413, "Too large")
+    return bytes(data)
+
+
+def _pc_thumb_save(iid: int, wid: int, data: bytes, kind: str):
+    with SessionLocal() as s:
+        row = s.get(PcItem, iid)
+        if row is None or row.worker_id != wid:
+            raise HTTPException(404, "Not found")
+        why = pcfolder.save_thumb(row, data, kind)
+        if why:
+            raise HTTPException(400, why)
+        c = s.get(Clip, row.clip_id) if row.clip_id else None
+        p = pcfolder._thumb_path(row)
+        if c is not None and p is not None and row.thumb == "file" and c.status == "queued" and not c.youtube_id:
+            c.thumb_path, c.thumb_custom = str(p), True
+        s.commit()
+
+
+@app.post("/api/worker/pc-thumb/{iid}")
+async def worker_pc_thumb(iid: int, request: Request, kind: str = Query("frame", max_length=10)):
+    """The small picture of a PC video (the folder's thumbnail, or a frame of the video): JPEG / PNG, at most 2 MB."""
+    from starlette.concurrency import run_in_threadpool
+
+    wid = await run_in_threadpool(_own_helper, request)
+    data = await _read_capped(request, pcfolder.THUMB_MAX)
+    await run_in_threadpool(_pc_thumb_save, iid, wid, data, kind)
+    return {"ok": True}
+
+
+def _pc_file_check(iid: int, wid: int):
+    with SessionLocal() as s:
+        try:
+            return pcfolder.receive_check(s, iid, wid)
+        except LookupError:
+            raise HTTPException(404, "Not found")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+
+def _pc_file_finish(iid: int, tmp: Path):
+    with SessionLocal() as s:
+        done, why = pcfolder.receive_finish(s, iid, tmp)
+        s.commit()
+        return done, why
+
+
+@app.post("/api/worker/pc-file/{iid}")
+async def worker_pc_file(iid: int, request: Request):
+    """The PC sends one video shortly before its upload, as the raw body: counted while it arrives (at most the size it
+    reported), then checked by sha256. Only when the server asked for it, only from the helper whose folder has it."""
+    from starlette.concurrency import run_in_threadpool
+
+    wid = await run_in_threadpool(_own_helper, request)
+    cap, tmp = await run_in_threadpool(_pc_file_check, iid, wid)
+    try:
+        if int(request.headers.get("content-length") or 0) > cap:
+            raise HTTPException(413, "This file is larger than the one in the list")
+    except ValueError:
+        pass
+    size = 0
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > cap:
+                    raise HTTPException(413, "This file is larger than the one in the list")
+                f.write(chunk)
+        if not size:
+            raise HTTPException(400, "No file was sent")
+        done, why = await run_in_threadpool(_pc_file_finish, iid, tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    if not done:
+        raise HTTPException(409, why)
+    return {"ok": True}
+
+
+@app.get("/api/pc-items")
+def pc_items():
+    with SessionLocal() as s:
+        return pcfolder.listing(s)
+
+
+@app.get("/api/pc-items/{iid}/thumb")
+def pc_item_thumb(iid: int):
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        p = pcfolder._thumb_path(row)
+    if p is None:
+        raise HTTPException(404, "No picture yet")
+    return FileResponse(p, headers={"Cache-Control": "private, max-age=300"})
+
+
+class PcApproveIn(BaseModel):
+    topic: str = Field("", max_length=120)
+
+
+@app.post("/api/pc-items/{iid}/approve")
+def pc_item_approve(iid: int, body: PcApproveIn):
+    acl.need_clip_room()
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        c, why = pcfolder.approve(s, row, body.topic)
+        if c is None:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row, c)
+
+
+@app.post("/api/pc-items/approve-all")
+def pc_items_approve_all():
+    """Every waiting video (also the ones marked "approve": "manual" — this is the owner's own press)."""
+    out = {"approved": 0, "not": []}
+    with SessionLocal() as s:
+        for row in s.query(PcItem).filter(PcItem.state == "new", PcItem.missing_at.is_(None)).order_by(PcItem.id).all():
+            stop = acl.clip_block(1)
+            if stop:
+                out["not"].append({"id": row.id, "why": stop})
+                break
+            words = "" if row.info else (row.topic or pcfolder.topic_from_name(row.folder or row.name))
+            c, why = pcfolder.approve(s, row, words)
+            if c is None:
+                out["not"].append({"id": row.id, "why": why})
+            else:
+                out["approved"] += 1
+    return out
+
+
+@app.post("/api/pc-items/{iid}/skip")
+def pc_item_skip(iid: int):
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        why = pcfolder.skip(s, row)
+        if why:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row)
+
+
+@app.post("/api/pc-items/{iid}/unskip")
+def pc_item_unskip(iid: int):
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        why = pcfolder.unskip(s, row)
+        if why:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row)
+
+
+class PcAutoIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/pc-items/auto")
+def pc_items_auto(body: PcAutoIn):
+    """"Videos I add to the PC folder go up by themselves" (new ones only; "approve": "manual" always waits)."""
+    pcfolder.set_auto(body.on)
+    return {"auto": pcfolder.auto_on()}
+
+
+class PcFolderIn(BaseModel):
+    folder: str = Field("", max_length=300)  # "" = do not watch a folder
+    default: bool = False  # back to the usual folder
+
+
+@app.post("/api/workers/{wid}/pc-folder")
+def worker_pc_folder(wid: int, body: PcFolderIn):
+    """The folder of videos this helper watches (it hears it on its next call)."""
+    f = body.folder.strip().strip('"').strip()
+    if f and not re.match(r"^([A-Za-z]:[\\/]|\\\\[^\\/]|/|~)", f):
+        raise HTTPException(400, r"Write the whole folder, for example D:\youtube")
+    with SessionLocal() as s:
+        w = _get(s, Worker, wid)
+        w.pc_folder = None if body.default else f
+        s.commit()
+        return {"folder": pcfolder.folder_for(w), "default": w.pc_folder is None}
+
+
 @app.post("/api/worker/fail/{cid}")
 def worker_fail(cid: int, body: WorkerFailIn, request: Request):
     t = getattr(request.state, "ticket", None)
     if t and body.kind != t["kind"]:  # a ticket opens only the job it was given for (never archive / restore)
         raise HTTPException(403, "This job ticket is not valid")
+    if body.kind == "pc_send":  # cid is a PC folder item here (app/pcfolder.py); only the helper whose folder has it
+        wid = _own_helper(request)
+        with SessionLocal() as s:
+            pcfolder.failed(s, cid, wid, body.error[:300])
+            s.commit()
+        return {"ok": True}
     if body.kind in ("archive", "restore"):
         wid = _own_helper(request)
         with SessionLocal() as s:

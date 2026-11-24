@@ -264,6 +264,9 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <label class="f">What is this video about?<input id="up-topic" maxlength="120" placeholder="A few words, any language — e.g. street food delhi, गाजर का हलवा"></label>
           <div class="mut sm" style="margin:6px 0 10px;line-height:1.6">Title, description, tags, thumbnail text and an upload time are chosen from what people are searching and watching now on YouTube. You can change all of it before you approve — nothing is uploaded until then.</div>
           <div class="row" style="gap:8px"><button class="btn" id="up-pick"><i data-ico="upload"></i>Choose the video file</button><button class="btn ghost" id="up-cancel">Cancel</button></div></div></div>
+        <div class="card hide" id="pc-card" style="margin-bottom:16px"><div class="ch"><div><h3>From my PC</h3><p>Videos in the folder on your PC. Only their details are here — each video stays on the PC until about a day before its upload, then goes to YouTube on its own day and is deleted from the server.</p></div>
+          <button class="btn ok sm hide" id="pc-all">Approve all</button></div>
+          <div class="cb" id="pc-body"></div></div>
         <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
         <div id="clip-grid" class="clips"></div>
       </section>
@@ -1455,7 +1458,39 @@ $('#ck-del').onclick=()=>once(async()=>{await api('/api/settings/cookies','DELET
 $('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
 
 const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering,fetching','Drafts']];
+// ---------- From my PC: videos in the folder on the PC (app/pcfolder.py) ----------
+async function loadPc(){
+  const card=$('#pc-card');if(!card)return;let r;
+  try{r=await api('/api/pc-items')}catch(e){card.classList.add('hide');return}
+  const W=r.waiting||[],R=r.recent||[],H=r.helpers||[];
+  if(!W.length&&!R.length&&!H.length){card.classList.add('hide');return}
+  card.classList.remove('hide');
+  const fold=H.map(h=>`${esc(h.name)}: <b>${h.folder?esc(h.folder):'no folder'}</b>`+(h.knows?(h.exists===false?' <span style="color:var(--warn)">(not found on that PC)</span>':` (${+h.videos||0} video${+h.videos===1?'':'s'})`):(h.folder?' (read once that helper has updated itself)':''))
+    +` <button class="btn ghost sm" data-pcf="${h.id}" data-cur="${esc(h.folder||'')}">Change</button>`).join(' · ');
+  const meta=x=>[esc(x.rel||x.name),x.duration?T(x.duration):'',x.suggested?'suggested '+when(x.suggested):'',x.manual?'waits for you':'',esc(x.licence||'')].filter(Boolean).join(' · ');
+  const tile=x=>`<div class="item" style="align-items:flex-start;gap:12px;flex-wrap:wrap"><div style="width:120px;height:68px;flex:none;border-radius:8px;background:var(--muted) center/cover no-repeat${x.thumb?` url('/api/pc-items/${x.id}/thumb')`:''}"></div>
+    <div class="tx" style="flex:1;min-width:180px"><b>${esc(x.title||x.topic||x.name)}</b><span class="mut sm">${meta(x)}</span>
+    ${x.note?`<span class="sm" style="color:${x.state==='blocked'||x.missing?'var(--bad)':'inherit'}">${esc(x.note)}</span>`:''}
+    ${!x.has_info&&x.state==='new'?`<input data-pct="${x.id}" maxlength="120" placeholder="What is this video about? Title, description and tags are found from it" value="${esc(x.topic||'')}" style="margin-top:6px;width:100%">`:''}</div>
+    <div class="row" style="gap:6px;flex:none">${x.state==='new'&&!x.missing?`<button class="btn ok sm" data-pca="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn ghost sm" data-pcs="${x.id}">Skip</button></div></div>`;
+  const line=x=>`<div class="sm" style="padding:4px 0">${esc(x.title||x.topic||x.name)} — ${x.state==='done'?'on YouTube':x.state==='skipped'?'skipped':x.missing?'<span style="color:var(--bad)">missing on the PC</span>':x.publish_at?'goes live '+when(x.publish_at)+(x.on_server?' (the video is on the server for its upload)':x.wanted?' (asked from your PC)':' (still on your PC)'):esc(x.state)}${x.moved?' <span style="color:var(--warn)">— moved to a new day</span>':''}${x.state==='skipped'?` <button class="btn ghost sm" data-pcu="${x.id}">Show again</button>`:''}</div>`;
+  $('#pc-all').classList.toggle('hide',W.filter(x=>x.state==='new'&&!x.missing).length<2);
+  $('#pc-body').innerHTML=`<div class="mut sm" style="line-height:1.6">${ico('alert')} ${esc(r.notice)}</div>
+    <label class="row" style="gap:10px;font-weight:500;margin:10px 0"><span class="switch"><input type="checkbox" id="pc-auto" ${r.auto?'checked':''}><i></i></span><span>Videos I add to the PC folder go up by themselves</span></label>
+    <div class="mut sm" style="margin-bottom:8px">${r.auto?'New videos get the next free day (one a day, 6 PM) by themselves. A video whose info.json says <b>"approve": "manual"</b> still waits for you.':'Every new video waits here for Approve.'} Folder${H.length===1?'':'s'}: ${fold||'no helper PC yet (My channels → Helper PC)'}</div>`
+    +(W.length?W.map(tile).join(''):'<div class="mut sm">Nothing is waiting.</div>')
+    +(R.length?`<details style="margin-top:10px"><summary class="sm">Approved and done (${R.length})</summary>${R.map(line).join('')}</details>`:'');
+  $('#pc-auto').onchange=e=>once(async()=>{await api('/api/pc-items/auto','POST',{on:e.target.checked});toast(e.target.checked?'New videos in the folder now go up by themselves':'New videos now wait for Approve');loadPc()});
+  $$('[data-pca]').forEach(b=>b.onclick=()=>once(async()=>{const i=$(`[data-pct="${b.dataset.pca}"]`);const x=await api(`/api/pc-items/${b.dataset.pca}/approve`,'POST',{topic:i?i.value.trim():''});toast('Approved — '+(x.publish_at?'goes live '+when(x.publish_at):'queued'));loadPc()},b));
+  $$('[data-pcs]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcs}/skip`,'POST');toast('Skipped — it stays on your PC');loadPc()},b));
+  $$('[data-pcu]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcu}/unskip`,'POST');loadPc()},b));
+  $('#pc-all').onclick=()=>once(async()=>{const n=W.filter(x=>x.state==='new'&&!x.missing).length;if(!confirm(`Approve all ${n} waiting videos? Each gets its own day, one a day after the last scheduled one.`))return;
+    const x=await api('/api/pc-items/approve-all','POST');toast(`${x.approved} approved`+(x.not.length?` — ${x.not.length} not: ${x.not[0].why}`:''));loadPc()},$('#pc-all'));
+  $$('[data-pcf]').forEach(b=>b.onclick=()=>once(async()=>{const f=prompt('Folder of videos on that PC (empty = do not watch a folder):',b.dataset.cur);if(f===null)return;
+    await api(`/api/workers/${b.dataset.pcf}/pc-folder`,'POST',{folder:f.trim()});toast('Saved — the helper reads it within a minute');loadPc()},b));
+}
 async function loadClips(){
+  loadPc();
   $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
   await loadOverview();const c=OV.counts;
   const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0),held:c.held||0};
@@ -1466,7 +1501,7 @@ async function loadClips(){
   const L=await api('/api/clips?status='+encodeURIComponent(st));
   $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${x.thumb_path?`/api/clips/${x.id}/thumbnail?v=${encodeURIComponent(x.thumb_note||'')}`:thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
     <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
-    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
+    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.from_pc&&x.status==='queued'?`<div class="sm mut">From your PC — ${x.pc_on_server?'the video is on the server for its upload':'the video comes from your PC about a day before its upload'}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
     <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
     ${x.yt_state&&x.yt_state!=='ok'?`<div class="sm" style="color:var(--bad);margin-top:6px">${ico('alert')} ${esc(ytLabel(x.yt_state))}</div>`:''}</div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
   wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));
@@ -1815,13 +1850,13 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
-  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
+  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
   'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
-  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){

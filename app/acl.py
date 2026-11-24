@@ -280,6 +280,14 @@ ROUTES = [
     ("POST", "/api/clips/{cid}/reupload", "clips.create", "Made a new copy of an uploaded clip"),
     ("POST", "/api/clips/{cid}/get-back", "clips.create", "Asked the helper PC to send a saved video back"),
     ("POST", "/api/upload-video", "clips.own_video", "Uploaded their own video file"),
+    # videos in the folder on the PC (Clips -> From my PC, app/pcfolder.py)
+    ("GET", "/api/pc-items", "page.clips", None),
+    ("GET", "/api/pc-items/{iid}/thumb", "page.clips", None),
+    ("POST", "/api/pc-items/{iid}/approve", "clips.approve", "Approved a video from the PC folder"),
+    ("POST", "/api/pc-items/approve-all", "clips.approve", "Approved every waiting video from the PC folder"),
+    ("POST", "/api/pc-items/{iid}/skip", "clips.discard", "Skipped a video from the PC folder"),
+    ("POST", "/api/pc-items/{iid}/unskip", "clips.discard", None),
+    ("POST", "/api/pc-items/auto", "uploads.auto", "Switched PC-folder videos going up by themselves on / off"),
     ("GET", "/api/clips/{cid}", SIGNED, None),
     ("GET", "/api/clips/{cid}/sync", SIGNED, None),
     ("GET", "/api/clips/{cid}/video", SIGNED, None),
@@ -371,6 +379,7 @@ ROUTES = [
     ("GET", "/api/workers", SIGNED, None),
     ("POST", "/api/workers/{wid}/approve", "helper.manage", "Approved a helper PC"),
     ("DELETE", "/api/workers/{wid}", "helper.manage", "Removed a helper PC"),
+    ("POST", "/api/workers/{wid}/pc-folder", "helper.manage", "Changed the folder of videos a helper PC watches"),
     # helper key (app/enroll.py): helpers that carry it join by themselves; only the account's admin sees it
     ("GET", "/api/helper/key", "helper.manage", None),
     ("POST", "/api/helper/key/show", "helper.manage", "Looked at the helper key (install commands)"),
@@ -389,6 +398,9 @@ ROUTES = [
     ("POST", "/api/worker/archived/{cid}", HELPER, None),
     ("POST", "/api/worker/restore/{cid}/{name}", HELPER, None),
     ("POST", "/api/worker/archive-inventory", HELPER, None),
+    ("POST", "/api/worker/pc-items", HELPER, None),  # the folder of videos on the PC: details only, never the video
+    ("POST", "/api/worker/pc-thumb/{iid}", HELPER, None),
+    ("POST", "/api/worker/pc-file/{iid}", HELPER, None),  # the video itself, only when the server asked for it
     ("POST", "/api/worker/fail/{cid}", HELPER, None),
     ("POST", "/api/worker/analysis/{pid}", HELPER, None),
 ]

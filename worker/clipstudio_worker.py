@@ -608,9 +608,13 @@ def _archive_dir() -> pathlib.Path:
 
 
 ARCHIVE_DIR = _archive_dir()
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import pc_folder  # noqa: E402  (the folder of videos on this PC -> the dashboard's "From my PC" list)
+
+PC = pc_folder.Folder(pathlib.Path(os.environ["DATA_DIR"]) / "pc_folder.json", log=lambda m: log(m))
 OLD_ARCHIVE_DIR = ROOT / "archive"  # where the first version kept them: still read (never written)
 KEY_RE = re.compile(r"t\d{1,9}-c\d{1,12}")
-SAVE_KINDS = ("inventory", "restore", "archive")  # run after every other job of a poll, one at a time
+SAVE_KINDS = ("pc_send", "inventory", "restore", "archive")  # run after every other job of a poll, one at a time
 
 
 def archive_header() -> str:
@@ -638,7 +642,7 @@ def _find_saved(key: str, name: str, sha: str) -> pathlib.Path | None:
         for p in (d / _saved_name(key, name), d / _saved_name(key, name, sha)):
             if p.exists() and _sha256(p) == sha:
                 return p
-    return None
+    return PC.path_for(sha) if name == "video" else None  # a video from the PC folder stays where it is
 
 
 def send_inventory(headers: dict):
@@ -726,6 +730,13 @@ def restore_clip(job: dict, headers: dict):
 def handle(job: dict, headers: dict):
     if job["type"] == "setup_ai":
         return start_ai_setup()
+    if job["type"] == "pc_send":  # a video of the PC folder, shortly before its upload
+        try:
+            return PC.send_file(job, SERVER, headers, httpx)
+        except Exception as e:  # noqa: BLE001
+            log(f"PC folder: could not send a video: {str(e)[:150]}")
+            _tell_failed(job.get("item_id"), "pc_send", str(e)[:300], headers)
+            return None
     if job["type"] in SAVE_KINDS:
         try:
             if job["type"] == "inventory":
@@ -872,6 +883,15 @@ def handle_all(jobs: list, headers: dict):
         one(j)
 
 
+def pc_tick(folder: str, headers: dict):
+    """Look at the folder of videos (the dashboard decides which; "" = none) and tell the dashboard what is new."""
+    try:
+        PC.set_root(folder or None)
+        PC.tick(SERVER, headers, httpx)
+    except Exception as e:  # noqa: BLE001  (the folder must never stop the helper's other work)
+        log(f"PC folder: {str(e)[:150]}")
+
+
 def first_token() -> str:
     """The token, registering first if needed; a PC that starts without internet waits for it instead of stopping."""
     delay = POLL_SECONDS
@@ -897,6 +917,7 @@ def main():
         try:
             r = httpx.get(f"{SERVER}/api/worker/jobs", headers={**headers, "x-worker-llm": "1" if llm_ready() else "0", "x-worker-ai": AI_STATUS or "-",
                                                                 "x-worker-archive": archive_header(), "x-worker-can": "all",
+                                                                "x-worker-pc": "1",
                                                                 "x-worker-enroll": key_id()},
                           timeout=30)
             if offline:
@@ -930,6 +951,8 @@ def main():
                 if data.get("enroll_key"):
                     save_enroll_key(data["enroll_key"])
                 handle_all(data.get("jobs", []), headers)
+                if "pc_folder" in data:
+                    pc_tick(data["pc_folder"], headers)
                 backup_daily(headers)
                 if time.time() - last_update_check > UPDATE_EVERY:
                     last_update_check = time.time()

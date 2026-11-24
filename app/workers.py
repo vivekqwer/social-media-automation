@@ -211,6 +211,12 @@ def read_ticket(ticket: str) -> dict | None:
         return None
 
 
+def _pc_folder(w: Worker) -> str:
+    from .pcfolder import folder_for
+
+    return folder_for(w) if (not w.can or w.can == "all") else ""
+
+
 def as_dict(w: Worker) -> dict:
     online = bool(w.last_seen and utcnow() - w.last_seen < ONLINE_WINDOW)
     return {
@@ -222,6 +228,8 @@ def as_dict(w: Worker) -> dict:
         "central": bool(w.central),
         "enrolled": bool(w.enrolled),  # joined by itself with the helper key
         "can": w.can,
+        "pc_folder": _pc_folder(w),  # the folder of videos it watches (Clips -> From my PC); "" = none
+        "pc_state": w.pc_state or None,
         "last_seen": (w.last_seen.isoformat() + "Z") if w.last_seen else None,
         "created_at": (w.created_at.isoformat() + "Z") if w.created_at else None,
     }

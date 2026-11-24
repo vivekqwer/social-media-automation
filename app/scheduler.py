@@ -239,6 +239,11 @@ def process_queue():
                 continue
             if c.publish_at and c.publish_at > now + timedelta(hours=quota.upload_lead_hours()):
                 continue
+            if c.pc_item_id:  # a video from the folder on the PC (app/pcfolder.py): only with its file here and a time it
+                from . import pcfolder  # can still keep — a missed time is moved to a new day by pcfolder.due, never late
+
+                if not pcfolder.ready(c, now):
+                    continue
             p = s.get(Project, c.project_id)
             errs = check_edit(p, c)
             if errs:
@@ -264,6 +269,10 @@ def process_queue():
                 c.status, c.error, c.attempted_at = "uploaded", None, utcnow()
                 from .comments import after_upload
                 after_upload(c)  # first comment: posted by post_due once the video is public
+                if c.pc_item_id:  # from the PC folder: the server's copy goes now (the video stays on the PC)
+                    from . import pcfolder
+
+                    pcfolder.after_upload(s, c)
                 s.commit()  # saved at once: a crash now must never upload the video twice
                 acl.record_here("uploads.youtube", f"Uploaded to YouTube: {(c.title or '')[:120]} (#{c.id})")
                 _tg(f"⬆️ Uploaded: <b>{_e(c.title)}</b>\nhttps://youtu.be/{c.youtube_id}"
@@ -392,6 +401,7 @@ def start():
     #   strike_mails         "Permission mails to creators" (YouTube's notices in Gmail — they only open a case and tell the
     #                        owner —, the request to the creator — sent by itself only when the account switched that on in
     #                        Alerts → Strikes and the address is YouTube's own — and their answer)
+    #   pc_due               PC-folder videos (app/pcfolder.py): uploads paused -> no file is asked for (inside pc_due)
     #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time,
     #           strike_watch (a strike YouTube itself shows: never-use list, held clips, scheduled videos kept private — no switch)
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
@@ -457,6 +467,9 @@ def start():
     from .comments import post_due as post_comments
     add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
+    from .pcfolder import due as pc_due
+    add(pc_due, "interval", minutes=2, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # PC-folder videos: ask for files, move missed times
     from .autopilot import unpark_due
     add(unpark_due, "interval", hours=1, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=12))  # parked clips back, a few a day (once a day)

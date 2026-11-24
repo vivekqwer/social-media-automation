@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from . import tenant
@@ -177,6 +177,8 @@ class Clip(Base):
     archive_missing = Column(DateTime)  # the helper's daily folder list did not have this clip's file (nothing deleted)
     held_was = Column(String(20))  # status before the strike responder held this clip (status "held": it will not upload)
     kept_private = Column(Boolean)  # already on YouTube with a future publish time: set to private after a strike (strikes.py)
+    pc_item_id = Column(Integer, index=True)  # made from a video in the folder on the owner's PC (app/pcfolder.py): the file
+    #                                           comes from the helper shortly before its upload and is deleted after it
     # draft | rendering | rendered | queued | uploading | uploaded | failed | held (after a strike from its creator)
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -250,9 +252,45 @@ class Worker(Base):
     central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
     install_id = Column(String(32))  # random id the helper keeps in a file (stays the same when its token changes)
     enrolled = Column(String(16))  # id of the helper key it joined with by itself (empty: approved by hand / pairing code)
+    pc_folder = Column(String(300))  # the folder of videos it watches ("From my PC"); None = the default, "" = off
+    pc_state = Column(JSON)  # what it last said about that folder: {folder, exists, videos, at}
     can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))
     last_seen = Column(DateTime)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class PcItem(Base):
+    """A video in the folder on the owner's PC (app/pcfolder.py). Only its details and a small picture are on the server;
+    the file itself comes shortly before its upload and is deleted right after it."""
+
+    __tablename__ = "pc_items"
+    id = Column(Integer, primary_key=True)
+    sha = Column(String(64), unique=True)  # sha256 of the file: the same video is one item, wherever it is moved
+    worker_id = Column(Integer, index=True)  # the helper whose folder has it (the only one asked for the file)
+    rel = Column(String(500))  # where it is inside the folder (sub-folder\video.mp4 or a loose file)
+    name = Column(String(255))
+    folder = Column(String(255))  # its sub-folder ("" for a loose file)
+    size = Column(BigInteger)
+    duration = Column(Float)
+    width = Column(Integer)
+    height = Column(Integer)
+    info = Column(JSON)  # info.json (+ description.txt) as checked by pcfolder.clean_info; None = no info.json
+    thumb = Column(String(10))  # "file" (the folder's thumbnail) | "frame" (a small picture from the video) | None
+    state = Column(String(20), default="new")  # new | approved | skipped | blocked | done
+    note = Column(String(400))  # what last happened, in plain words
+    topic = Column(String(120))
+    clip_id = Column(Integer)
+    auto_at = Column(DateTime)  # approved by itself (switch on) not before this (a sub-folder may still get its info.json)
+    missing_at = Column(DateTime)  # the helper's folder no longer has it
+    wanted_at = Column(DateTime)  # the server asked the helper for the file
+    lease_at = Column(DateTime)  # a helper took the "send it" job at
+    tries = Column(Integer, default=0)
+    fetched_at = Column(DateTime)
+    moved_at = Column(DateTime)  # its publish time passed before it could go up: moved to a new day
+    moves = Column(Integer, default=0)
+    uploaded_at = Column(DateTime)
+    seen_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
 
 

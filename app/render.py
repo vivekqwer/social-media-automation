@@ -355,6 +355,14 @@ def run_render(clip_id: int):
         clip = s.get(Clip, clip_id)
         if not clip or clip.status == "held":
             return  # discarded meanwhile, or held after a strike from its creator (see strikes.py)
+        if clip.pc_item_id:  # a video from the folder on the PC goes up as it is: nothing to make on the server
+            from .pcfolder import NO_RENDER
+
+            if clip.status in ("draft", "rendering", "rendered", "failed"):
+                clip.status = "queued" if clip.publish_at else "rendered"
+            clip.error = NO_RENDER
+            s.commit()
+            return
         project = s.get(Project, clip.project_id)
         errs = check_edit(project, clip)
         if errs:
