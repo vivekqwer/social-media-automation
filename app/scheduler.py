@@ -457,6 +457,9 @@ def start():
     from .comments import post_due as post_comments
     add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
+    from .autopilot import unpark_due
+    add(unpark_due, "interval", hours=1, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=12))  # parked clips back, a few a day (once a day)
     from .strikes import mail_round as strike_mails, watch as strike_watch
     add(strike_watch, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=7))  # protect the channel after a strike

@@ -557,3 +557,64 @@ def resume_after_analysis(pid: int):
         quick_run(pid)
     else:
         make_clips_for_project(pid)
+
+
+# ---------------------------------------------------------------- parked clips back into the line, a few a day
+PARKED = "Parked:%"  # waiting to go back into the line ("Parked, not used: ..." = a repeat, stays out)
+LIVE_STATES = ("fetching", "rendering", "rendered", "queued", "uploading", "uploaded")
+UNPARK_MIN_FREE_GB = 1.5
+
+
+def same_moment(s, c):
+    """Another clip of the same source video that covers (part of) the same moment and is made, waiting or on
+    YouTube -> it would look like the same video twice on the channel. None when the moment is new."""
+    return s.query(Clip).filter(Clip.project_id == c.project_id, Clip.id != c.id, Clip.status.in_(LIVE_STATES),
+                                Clip.removed_at.is_(None), Clip.start < c.end, Clip.end > c.start).first()
+
+
+def unpark_due(force: int | None = None) -> dict:
+    """Once a day: up to `unpark_per_day` parked drafts (the oldest first) are made again and queued on the next free
+    daily slot. A parked clip that repeats a moment already made or on YouTube is never used (its note says why).
+    Waits while the server's disk is low, so the line grows only as fast as uploads free space."""
+    from .db import get_setting, set_setting
+
+    try:
+        per_day = int(force if force is not None else (get_setting("unpark_per_day") or 0))
+    except (TypeError, ValueError):
+        per_day = 0
+    out = {"started": 0, "duplicates": 0, "left": 0, "waiting": ""}
+    if per_day <= 0:
+        return out
+    day = utcnow().strftime("%Y-%m-%d")
+    if force is None and get_setting("unpark_day") == day:
+        return out
+    free = disk_free_gb()
+    with SessionLocal() as s:
+        rows = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).order_by(Clip.id).all()
+        for c in rows:
+            if out["started"] >= per_day:
+                break
+            other = same_moment(s, c)
+            if other is not None:
+                c.error = (f"Parked, not used: it repeats the moment of clip #{other.id} (same video, same part), "
+                           "so it would look like a duplicate on the channel.")
+                out["duplicates"] += 1
+                continue
+            if free is not None and free < UNPARK_MIN_FREE_GB:
+                out["waiting"] = f"the server's disk is low ({free:.1f} GB free)"
+                break
+            p = s.get(Project, c.project_id)
+            ch = s.get(Channel, p.channel_ref) if p and p.channel_ref else None
+            if ch is not None:
+                slot = _next_slot(s, ch.gap_hours, c.destination_id or ch.destination_id, ch.post_times, ch.tz_offset or 0)
+            else:
+                slot = _next_slot(s, 24, c.destination_id, "18:00", -330)
+            c.status, c.error, c.autoqueue, c.publish_at = "fetching", None, True, slot
+            c.job_lease, c.fetch_tries, c.fetch_since = None, 0, utcnow()
+            s.commit()
+            out["started"] += 1
+        s.commit()
+        out["left"] = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).count()
+    if force is None and not out["waiting"]:
+        set_setting("unpark_day", day)
+    return out

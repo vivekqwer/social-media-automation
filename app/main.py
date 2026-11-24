@@ -2525,6 +2525,24 @@ def park_waiting(body: ParkIn):
     return {"parked": n, "kept": min(len(rows), body.keep)}
 
 
+class UnparkIn(BaseModel):
+    per_day: int = Field(ge=0, le=50)  # parked clips made again each day (0 = off)
+    now: bool = False  # also start today's share right away
+
+
+@app.post("/api/admin/unpark")
+def unpark(body: UnparkIn):
+    """Parked clips go back into the line a few a day (never one that repeats a moment already made or on YouTube)."""
+    from . import autopilot
+
+    set_setting("unpark_per_day", str(body.per_day) if body.per_day else "")
+    out = autopilot.unpark_due(body.per_day) if (body.now and body.per_day) else {}
+    if body.now and body.per_day:
+        set_setting("unpark_day", utcnow().strftime("%Y-%m-%d"))
+    acl.record_here("admin.park", f"Parked clips: {body.per_day} a day go back into the line")
+    return {"per_day": body.per_day, **out}
+
+
 @app.post("/api/admin/queue-cap")
 def queue_cap_set(body: QueueCapIn):
     """How many clips may wait for one YouTube channel before the sources pause (usually 30). Raising it makes a large
