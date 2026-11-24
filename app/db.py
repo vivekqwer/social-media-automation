@@ -164,6 +164,13 @@ class Clip(Base):
     thumb_face = Column(Boolean, default=True)  # put my face (channel's or default) on the thumbnail
     yt_state = Column(String(60))  # last state seen on YouTube: ok | removed | rejected:<reason> | blocked:<n> ...
     yt_checked_at = Column(DateTime)
+    # a copy of the finished video on the owner's PC (app/archive.py); the server's file goes once it is confirmed
+    archived_at = Column(DateTime)  # the helper PC confirmed its copy (sha256 matched)
+    archived_sha = Column(String(64))  # sha256 of out.mp4 as saved on the PC
+    archived_src_sha = Column(String(64))  # sha256 of my own uploaded file (src/upload.mp4) as saved on the PC
+    archive_lease = Column(DateTime)  # a helper took this clip's archive/restore job at
+    restore_wanted = Column(DateTime)  # "Get the video back from the PC" was pressed at
+    archive_note = Column(String(300))  # what last happened to the PC copy, in plain words
     # draft | rendering | rendered | queued | uploading | uploaded | failed
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -231,6 +238,7 @@ class Worker(Base):
     pair_hash = Column(String(64))  # hash of the pairing code the helper shows; needed to approve it
     llm = Column(Boolean, default=False)  # a local AI (Ollama) is running on this helper PC
     ai_status = Column(String(200))  # what the helper is doing to set the local AI up (shown on the dashboard)
+    archive_dir = Column(String(300))  # where this helper keeps the saved videos (the folder "archive" next to it)
     ip = Column(String(64))
     last_seen = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)

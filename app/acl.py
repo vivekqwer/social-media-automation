@@ -260,6 +260,7 @@ ROUTES = [
     ("POST", "/api/projects/{pid}/analyze", "clips.create", None),
     ("POST", "/api/projects/{pid}/clips", "clips.create", "Made a clip"),
     ("POST", "/api/clips/{cid}/reupload", "clips.create", "Made a new copy of an uploaded clip"),
+    ("POST", "/api/clips/{cid}/get-back", "clips.create", "Asked the helper PC to send a saved video back"),
     ("POST", "/api/upload-video", "clips.own_video", "Uploaded their own video file"),
     ("GET", "/api/clips/{cid}", SIGNED, None),
     ("GET", "/api/clips/{cid}/sync", SIGNED, None),
@@ -358,6 +359,9 @@ ROUTES = [
     ("POST", "/api/worker/captions/{cid}", HELPER, None),
     ("POST", "/api/worker/source/{cid}", HELPER, None),
     ("POST", "/api/worker/voice/{cid}", HELPER, None),
+    ("GET", "/api/worker/archive/{cid}/{name}", HELPER, None),  # an uploaded clip's video, for the copy on the PC
+    ("POST", "/api/worker/archived/{cid}", HELPER, None),
+    ("POST", "/api/worker/restore/{cid}", HELPER, None),
     ("POST", "/api/worker/fail/{cid}", HELPER, None),
     ("POST", "/api/worker/analysis/{pid}", HELPER, None),
 ]

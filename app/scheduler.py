@@ -127,8 +127,29 @@ def cleanup_disk():
     root, now = DATA_DIR / "clips", utcnow()
     if not root.exists():
         return
+    from . import archive
+
+    try:
+        from .meta import status as meta_status
+
+        st = meta_status()
+        meta_on = bool(st["connected"] and st["on"])
+    except Exception:  # noqa: BLE001  (unknown: treat a cross-post as possible, so the file is kept)
+        meta_on = True
     with SessionLocal() as s:
         clips = {c.id: c for c in s.query(Clip).all()}
+        for d in root.iterdir():
+            if not d.is_dir() or not d.name.isdigit():
+                continue
+            c = clips.get(int(d.name))
+            if c is None or c.status != "uploaded":
+                continue
+            try:  # on YouTube and saved on the PC (sha256 confirmed): the server's copy goes, the information stays
+                archive.free_uploaded(s, c, d, meta_on, now)
+                s.commit()
+            except Exception as e:  # noqa: BLE001  (one clip's problem never stops the clean-up of the others)
+                s.rollback()
+                log.warning("archive clean-up of clip %s: %s", c.id, str(e)[:200])
     for d in root.iterdir():
         if not d.is_dir() or not d.name.isdigit():
             continue
@@ -139,13 +160,14 @@ def cleanup_disk():
                 shutil.rmtree(d, ignore_errors=True)
             continue
         src = d / "src"
-        mine = src / "upload.mp4"  # my own uploaded file: the only copy, so it stays far longer than a download
-        if c.status == "uploaded" and c.attempted_at and c.attempted_at < now - timedelta(days=3):
-            if mine.exists() and c.attempted_at > now - timedelta(days=30):
-                continue
-            shutil.rmtree(src, ignore_errors=True)  # the video is on YouTube; keep out.mp4 + thumbnail only
-            (d / "body.mp4").unlink(missing_ok=True)
-            continue
+        mine = src / "upload.mp4"  # my own uploaded file: the only copy, so it stays until the PC has saved it
+        if c.status == "uploaded":
+            if c.attempted_at and c.attempted_at < now - timedelta(days=3) and src.exists():
+                for f in src.iterdir():  # a downloaded section can be fetched again; my own file cannot
+                    if f.name != "upload.mp4":
+                        f.unlink(missing_ok=True)
+                (d / "body.mp4").unlink(missing_ok=True)  # out.mp4 has the same video
+            continue  # out.mp4 stays until the PC has a confirmed copy (archive.free_uploaded above)
         if (c.status == "queued" and c.output_path and Path(c.output_path).exists() and c.thumb_path
                 and Path(c.thumb_path).exists() and age_h > 1 and not mine.exists() and not (src / "reel.mp4").exists()):
             # ready and waiting for its upload: only the finished video and thumbnail are needed. The downloaded part

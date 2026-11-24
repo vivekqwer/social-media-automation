@@ -115,17 +115,39 @@ def _paste_face(base: Image.Image, face: Image.Image, x: int, y: int, stroke: in
     base.paste(face, (x, y), face)
 
 
-def make_thumbnail(clip, project) -> Path:
+def _thumb_source(clip, project) -> tuple[Path, Path, int, int]:
     workdir = Path(clip.output_path).parent
     src = workdir / "body.mp4" if (workdir / "body.mp4").exists() else Path(clip.output_path)  # without the Shorts cover
-    portrait = clip.aspect == "9:16"
     if clip.aspect != "16:9" and (getattr(clip, "fit", None) or "full") != "fill" and project.mode != "original":
         raw = workdir / "src" / f"src_{int(clip.start or 0)}_{int(clip.end or 0) + 1}.mp4"  # this clip's own section
         if raw.exists():
             src = raw  # the picture fills the thumbnail instead of sitting between blurred bars
-    W, H = (1080, 1920) if portrait else (1280, 720)
+    W, H = (1080, 1920) if clip.aspect == "9:16" else (1280, 720)
+    return workdir, src, W, H
+
+
+def save_frame(clip, project, variant: int):
+    """Keep one frame for a later thumbnail: the video itself is about to leave the server (saved on the PC)."""
+    workdir, src, W, H = _thumb_source(clip, project)
+    try:
+        _frame(src, W, H, workdir / f"thumb_frame_v{variant}.png", variant)
+    except Exception:  # noqa: BLE001  (e.g. a damaged body.mp4): the finished video itself
+        if src == Path(clip.output_path):
+            raise
+        _frame(Path(clip.output_path), W, H, workdir / f"thumb_frame_v{variant}.png", variant)
+
+
+def make_thumbnail(clip, project) -> Path:
+    workdir, src, W, H = _thumb_source(clip, project)
+    portrait = clip.aspect == "9:16"
     variant = int(getattr(clip, "thumb_variant", 0) or 0)
-    _frame(src, W, H, workdir / "thumb_frame.png", variant)
+    kept = workdir / f"thumb_frame_v{variant}.png"
+    if not src.exists() and kept.exists():  # the video is on the PC only: use the frame kept for this
+        import shutil
+
+        shutil.copyfile(kept, workdir / "thumb_frame.png")
+    else:
+        _frame(src, W, H, workdir / "thumb_frame.png", variant)
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
 
     from .branding import face_scale
