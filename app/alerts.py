@@ -47,6 +47,7 @@ NOW = {
     "quota": ("broken", "Today's upload limit is used"),
     "source_failed": ("broken", "A source failed"),
     "source_stale": ("broken", "A source has not run"),
+    "self_repair": ("broken", "Being fixed by itself"),
 }
 SKIP_NOW = {"failed", "errors"}  # shown one by one instead (failed clips; the System errors tab)
 RANK = {"bad": 0, "warn": 1, "info": 2}
@@ -176,9 +177,17 @@ def _clip_items(s) -> list:
             names[c.project_id] = s.query(Project.title).filter(Project.id == c.project_id).scalar() or ""
         return names[c.project_id] or f"Clip #{c.id}"
 
+    try:  # failed clips the self-repair tries again by itself (app/watchdog.py)
+        from .watchdog import pending_retries
+
+        again = pending_retries()
+    except Exception:  # noqa: BLE001
+        again = {}
     for c in clips.filter(Clip.status == "failed").order_by(Clip.id.desc()).limit(100).all():
         upload = bool(c.output_path)  # the video was made; it is the upload that stopped
         why = reason(c.error)
+        if c.id in again:
+            why += f" The system tries it again by itself ({_iso(again[c.id])[:16].replace('T', ' ')} UTC)."
         out.append({
             "id": f"clip:{c.id}:{zlib.crc32((c.error or '').encode('utf-8', 'replace')):08x}", "tab": "broken",
             "level": "bad" if upload else "warn", "kind": "upload_failed" if upload else "clip_failed",
@@ -261,10 +270,25 @@ def _where(w: str) -> str:
 def _error_items() -> list:
     from .guide import recent_errors
 
+    try:  # errors the self-repair took care of (a passing cause): shown, but not as a new problem
+        from .watchdog import err_key, handled_keys
+
+        done = handled_keys()
+    except Exception:  # noqa: BLE001
+        done, err_key = set(), None
     out = []
     for e in recent_errors():
         try:
             n = int(e.get("count") or 1)
+            if done and err_key(e) in done:
+                out.append({
+                    "id": f"err:{e.get('type')}:{e.get('line')}:{e.get('at')}", "tab": "system", "level": "info",
+                    "kind": "error", "label": "Handled by itself", "at": e.get("at"), "title": _where(e.get("where")),
+                    "count": n, "text": "A passing problem (the database was busy, or the network / Google had a hiccup). "
+                                        "The system tries again by itself; you are told only if it lasts.",
+                    "tech": f"{e.get('type')}: {e.get('text')}" + (f" ({e.get('line')})" if e.get("line") else ""),
+                    "actions": []})
+                continue
             out.append({
                 "id": f"err:{e.get('type')}:{e.get('line')}:{e.get('at')}", "tab": "system", "level": "warn", "kind": "error",
                 "label": "Server problem", "at": e.get("at"), "title": _where(e.get("where")), "count": n,
@@ -323,7 +347,13 @@ def board(health_items: list | None) -> dict:
     totals = {t: len(tabs[t]) for t in TABS}
     totals["all"] = sum(totals.values())
     badge = sum(1 for t in ("deleted", "strikes", "broken") for i in tabs[t] if not i["seen"] and i["level"] == "bad")
-    return {"tabs": tabs, "counts": counts, "totals": totals, "badge": badge, "watching": watching,
+    try:
+        from .watchdog import public as self_repair
+
+        repair = self_repair()
+    except Exception:  # noqa: BLE001
+        repair = None
+    return {"tabs": tabs, "counts": counts, "totals": totals, "badge": badge, "watching": watching, "self_repair": repair,
             "strike_reply": strike_set, "last_check": _iso(last[0]) if last else None,
             "failed_clips": sum(1 for i in clips if i["kind"] in ("clip_failed", "upload_failed"))}
 

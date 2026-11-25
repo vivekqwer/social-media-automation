@@ -315,6 +315,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="row" style="justify-content:space-between;margin-bottom:12px;gap:10px"><div class="tabs" id="al-tabs"></div><div class="row"><button class="btn outline sm hide" id="al-retry"><i data-ico="refresh"></i>Retry all failed</button><button class="btn outline sm" id="al-seen">Mark all as seen</button></div></div>
         <div class="mut sm" id="al-hint" style="margin-bottom:12px"></div>
         <div class="card hide" id="al-strike-set" style="margin-bottom:12px"><div class="cb"><label class="row" style="gap:10px;font-weight:500;flex-wrap:nowrap"><span class="switch"><input type="checkbox" id="st-auto"><i></i></span><span>Send the humble request to the creator automatically</span></label><div class="mut sm" id="st-auto-hint" style="margin-top:6px"></div></div></div>
+        <div class="card hide" id="al-wd" style="margin-bottom:12px"></div>
         <div id="al-list"></div>
       </section>
 
@@ -369,6 +370,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="grid" style="align-content:start">
             <div class="card hide" id="plan-card"><div class="ch"><div><h3>Your plan</h3><p id="plan-sub">…</p></div><span class="badge" id="plan-badge">…</span></div><div class="cb" id="plan-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
+            <div class="card" id="wa-card"><div class="ch"><div><h3>WhatsApp alerts (optional)</h3><p>Only the problems the system could not fix by itself, and the &ldquo;needs you&rdquo; alerts &mdash; to your own WhatsApp, at most 10 a day. E-mail and the phone app above stay the main way.</p></div><span class="badge" id="wa-badge">&hellip;</span></div><div class="cb" id="wa-box"></div></div>
             <div class="card" id="ph-card"><div class="ch"><div><h3>Phone notifications (no password)</h3><p>Video live, every 10 clips scheduled, views, new subscribers and alerts — straight to your phone, with the free ntfy app.</p></div><span class="badge" id="ph-badge">…</span></div><div class="cb" id="ph-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
@@ -1009,6 +1011,7 @@ function renderAlerts(){
   $('#al-list').innerHTML=ALSHOW.length?ALSHOW.map(alCard).join(''):empty('bell',em[0],ALTAB==='all'&&!d.watching?'Alerts appear here once videos are uploaded.':em[1]);
   $$('[data-alact]',$('#al-list')).forEach(btn=>btn.onclick=()=>{const [n,i]=btn.dataset.alact.split(':').map(Number),a=ALSHOW[n],b=a&&(a.actions||[])[i];if(b)once(()=>alAct(a,b),btn)});
   $$('[data-st]',$('#al-list')).forEach(btn=>btn.onclick=()=>once(()=>stAct(btn),btn));
+  renderWatchdog();
   const sr=d.strike_reply,box=$('#al-strike-set');box.classList.toggle('hide',!(sr&&ALTAB==='strikes'));
   if(sr){const sw=$('#st-auto');sw.checked=!!sr.auto;sw.disabled=!sr.allowed&&!sr.auto;
     $('#st-auto-hint').textContent='After a copyright complaint the system writes a short, sincere mail asking the creator to take it back. On: it goes out by itself from your Gmail — only when YouTube itself shows the video removed and the address is the one YouTube’s own notice gives for that creator; once per video, never twice, at most '+Number(sr.per_day)+' a day. Every other address waits for your Send. Off: everything waits here until you press “Send the request now”. YouTube itself cannot be answered automatically: the words for YouTube are prepared in each case and you paste them in YouTube Studio.'
@@ -1249,7 +1252,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadFaceSize();loadPhone();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
+  loadFace();loadFaceSize();loadPhone();loadWhatsApp();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -1293,6 +1296,36 @@ function bkPreview(p){
     const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put this backup here anyway” first.');
     const r=await api('/api/backup/restore','POST',{ref:p.ref,sha:p.sha||'',confirm:c,other_account:!!(o&&o.checked)});const n=r.restored||{};
     $('#bk-prev').innerHTML='';toast(`Restored: ${n.clips||0} clips, ${n.channels||0} sources, ${n.destinations||0} channels. Reloading…`);setTimeout(()=>location.reload(),1800)},$('#bk-go'));
+}
+async function loadWhatsApp(){let w;try{w=await api('/api/whatsapp')}catch(e){return}const b=$('#wa-badge');b.className='badge '+(w.on?'uploaded':w.set?'queued':'outline');b.textContent=w.on?'On':w.set?'Off':'Not set up';
+  const steps=`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Open <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener">CallMeBot's WhatsApp page</a> (free) on your phone and save the CallMeBot number it shows in your contacts.</li><li>From your WhatsApp, send that contact this message: <code style="user-select:all">I allow callmebot to send me messages</code></li><li>It answers with your <b>API key</b>. Type your own WhatsApp number (with +91) and that key below, then press <b>Save</b> and <b>Send a test</b>.</li></ol><div class="mut sm" style="margin-bottom:10px">The free WhatsApp service is sometimes full and gives no key for a few days &mdash; then just try again later. Your e-mail and the phone app keep working meanwhile.</div>`;
+  const form=`<div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Your WhatsApp number<input id="wa-phone" maxlength="20" autocomplete="off" inputmode="tel" placeholder="+91 98xxxxxxxx"></label><label class="f grow">API key from CallMeBot<input id="wa-key" maxlength="40" autocomplete="off" placeholder="the key it sent you"></label></div><div class="row" style="margin-top:8px"><button class="btn sm" id="wa-save">Save</button></div>`;
+  $('#wa-box').innerHTML=!w.allowed?`<div class="mut sm">${esc('WhatsApp alerts are switched off for your account.')}</div>`
+    :!w.set?steps+form
+    :`<div class="sm" style="line-height:1.8">Messages go to the number ending in <b>${esc(w.phone)}</b> (${Number(w.sent_today)} of ${Number(w.per_day)} sent today).</div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" id="wa-test">Send a test</button><button class="btn outline sm" id="wa-tog">${w.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="wa-del">Remove</button></div>
+      <details style="margin-top:10px"><summary class="sm">Change the number or the key</summary><div style="margin-top:8px">${steps}${form}</div></details>`;
+  if($('#wa-save'))$('#wa-save').onclick=()=>once(async()=>{await api('/api/whatsapp','POST',{action:'save',phone:$('#wa-phone').value.trim(),apikey:$('#wa-key').value.trim()});toast('Saved — now press Send a test');loadWhatsApp()},$('#wa-save'));
+  if($('#wa-test'))$('#wa-test').onclick=()=>once(async()=>{await api('/api/whatsapp/test','POST');toast('Sent — check WhatsApp');loadWhatsApp()},$('#wa-test'));
+  if($('#wa-tog'))$('#wa-tog').onclick=()=>once(async()=>{await api('/api/whatsapp','POST',{action:w.on?'off':'on'});loadWhatsApp()},$('#wa-tog'));
+  if($('#wa-del'))$('#wa-del').onclick=()=>once(async()=>{if(!confirm('Remove the WhatsApp number and key? Nothing more is sent there.'))return;await api('/api/whatsapp','DELETE');loadWhatsApp()},$('#wa-del'));
+}
+const WDNAME={stuck:'Stuck clip',retry:'Tried again',late:'New day',disk:'Disk clean-up',login:'Login',helper:'Helper PC',errors:'System errors',scheduler:'Timed job'};
+function renderWatchdog(){const box=$('#al-wd'),r=ALB&&ALB.self_repair;const show=!!r&&ALTAB==='system';box.classList.toggle('hide',!show);if(!show)return;
+  const sup=ME.role==='super';const fixed=r.items.filter(i=>i.kind==='fixed'),told=r.items.filter(i=>i.kind==='alert');
+  const counts=Object.keys(r.counts||{}).map(k=>`<span class="badge outline">${esc(WDNAME[k]||k)} &times;${Number(r.counts[k])}</span>`).join(' ');
+  const row=i=>`<div class="sm" style="padding:6px 0;border-top:1px solid var(--border)"><span class="mut">${when(i.at)}</span> &middot; ${esc(i.text||'')}</div>`;
+  box.innerHTML=`<div class="ch"><div><h3>Fixed by itself (last 7 days)</h3><p>${r.on?'Self-repair is on: known problems are fixed by themselves, safely and a few times at most. What it cannot fix is sent to you once, by e-mail and to your phone.':'Self-repair is switched off for this account.'}</p></div>${r.on?'<button class="btn outline sm" id="wd-run">Check now</button>':''}</div>
+    <div class="cb"><div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${counts||'<span class="mut sm">Nothing needed fixing.</span>'}</div>
+      ${fixed.slice(0,30).map(row).join('')}
+      ${told.length?`<div style="margin-top:10px"><b class="sm">Sent to you (it could not fix these by itself)</b>${told.slice(0,10).map(row).join('')}</div>`:''}
+      ${sup?`<details style="margin-top:12px"><summary class="sm">Super Admin: self-repair switches for this account</summary><div style="margin-top:8px">
+        <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="wd-on" ${r.config.on?'checked':''}><i></i></span><span>Self-repair</span></label>
+        ${r.remedies.map(m=>`<label class="row sm" style="gap:8px;margin-top:6px"><input type="checkbox" data-wdr="${esc(m.key)}" ${m.on?'checked':''}>${esc(m.name)}</label>`).join('')}
+        ${r.existing.map(m=>`<div class="mut sm" style="margin-top:6px">&check; ${esc(m.name)}</div>`).join('')}
+        <div class="row" style="margin-top:8px"><button class="btn sm" id="wd-save">Save</button></div></div></details>`:''}</div>`;
+  if($('#wd-run'))$('#wd-run').onclick=()=>once(async()=>{await api('/api/watchdog/check','POST');toast('Checked');await loadAlerts()},$('#wd-run'));
+  if($('#wd-save'))$('#wd-save').onclick=()=>once(async()=>{const off=$$('[data-wdr]',box).filter(x=>!x.checked).map(x=>x.dataset.wdr);await api('/api/admin/watchdog','POST',{on:$('#wd-on').checked,off});toast('Saved');await loadAlerts()},$('#wd-save'));
 }
 async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}const b=$('#ph-badge');b.className='badge '+(p.on?'uploaded':p.set?'queued':'outline');b.textContent=p.on?'On':p.set?'Off':'Not set up';
   $('#ph-box').innerHTML=!p.set?`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Press <b>Set up</b>. A QR code appears.</li><li>On your phone install <b>ntfy</b> (free, Play Store / App Store).</li><li>Scan the QR code with the phone camera and open the link, then press <b>Subscribe</b> (or in the ntfy app press + and type the topic name).</li></ol><button class="btn" id="ph-setup">Set up</button>`
@@ -1860,7 +1893,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
-  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
+  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};

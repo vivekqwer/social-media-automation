@@ -58,7 +58,7 @@ def handle_callback(code: str, state: str) -> str:
 
 
 def disconnect():
-    for k in ("gmail_token", "gmail_email"):
+    for k in ("gmail_token", "gmail_email", "gmail_broken"):
         set_setting(k, "")
 
 
@@ -68,8 +68,15 @@ def _service():
         raise RuntimeError("Gmail is not connected")
     creds = Credentials.from_authorized_user_info(json.loads(decrypt(raw)))
     if not creds.valid and creds.refresh_token:
-        creds.refresh(Request())
+        try:
+            creds.refresh(Request())
+        except Exception as e:  # noqa: BLE001
+            if type(e).__name__ == "RefreshError" or "invalid_grant" in str(e):
+                set_setting("gmail_broken", utcnow().isoformat())  # the login expired: the watchdog tells the owner
+            raise
         set_setting("gmail_token", encrypt(creds.to_json()))
+        if get_setting("gmail_broken"):
+            set_setting("gmail_broken", "")
     return build("gmail", "v1", credentials=creds, cache_discovery=False)
 
 
@@ -111,26 +118,34 @@ def _deliver(to: str, body: str, subject: str | None) -> dict:
 OWNER_PER_DAY = 40  # alerts to the owner's own inbox (separate from creator mails)
 
 
-def notify_owner(text: str):
-    """An alert to the owner's own Gmail (used when Telegram is not set up)."""
+WATCHDOG_PER_DAY = 15  # the watchdog's "could not fix it by itself" mails: their own count, never crowded out
+
+
+def notify_owner(text: str, kind: str = "alert") -> bool:
+    """An alert to the owner's own Gmail (used when Telegram is not set up; the watchdog's alerts always, with kind
+    "watchdog"). True when it was sent."""
     import html
 
     from .config import BASE_URL
 
     me = connected_email()
     if not me:
-        return
-    key = "gmail_owner:" + utcnow().strftime("%Y-%m-%d")
+        return False
+    wd = kind == "watchdog"
+    key = ("gmail_owner_wd:" if wd else "gmail_owner:") + utcnow().strftime("%Y-%m-%d")
     n = int(get_setting(key) or 0)
-    if n >= OWNER_PER_DAY:
-        return
+    if n >= (WATCHDOG_PER_DAY if wd else OWNER_PER_DAY):
+        return False
     plain = html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
     first = plain.splitlines()[0][:90] if plain else "Update"
-    msg = MIMEText(plain + f"\n\nOpen Raji Studio: {BASE_URL}/\n(These alerts come from your own Gmail. Connect Telegram in "
-                           "My channels to get them as phone messages with buttons instead.)", "plain", "utf-8")
+    tail = ("(The system tried to fix this by itself and could not. This mail comes from your own Gmail.)" if wd else
+            "(These alerts come from your own Gmail. Connect Telegram in My channels to get them as phone messages with "
+            "buttons instead.)")
+    msg = MIMEText(plain + f"\n\nOpen Raji Studio: {BASE_URL}/\n" + tail, "plain", "utf-8")
     msg["to"], msg["subject"] = me, "Raji Studio: " + first
     _service().users().messages().send(userId="me", body={"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}).execute()
     set_setting(key, str(n + 1))
+    return True
 
 
 def _header(msg: dict, name: str) -> str:

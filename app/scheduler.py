@@ -1,4 +1,5 @@
 import logging
+import threading
 import time
 import os
 from datetime import datetime, timedelta, timezone
@@ -78,6 +79,10 @@ def _e(t) -> str:
 def check_helper():
     """Tell the owner on Telegram when jobs wait and no helper PC is online (at most every 2 hours)."""
     try:
+        from . import watchdog
+
+        if watchdog.enabled("helper"):
+            return  # the watchdog sends one clear message per offline time instead of one every 2 hours
         from .main import _helper_state
         from .telegram import notify_once
 
@@ -93,9 +98,19 @@ def sweep_stale():
     """Jobs waiting for a helper PC that never comes: stop waiting, with a clear message."""
     now = utcnow()
     resume = []
+    try:  # the watchdog's rule: a job keeps waiting while a helper that can do it was seen in the last 2 days
+        from . import watchdog, workers
+
+        keep = watchdog.enabled("helper")
+    except Exception:  # noqa: BLE001
+        keep = False
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status == "fetching", Clip.fetch_since.isnot(None),
                                       Clip.fetch_since < now - timedelta(hours=24)).all():
+            if keep:
+                p = s.get(Project, c.project_id)
+                if workers.any_recent("reel" if p is not None and p.mode == "original" else "source"):
+                    continue  # the PC was on lately (an internet outage, a night off): the clip waits for it
             c.status, c.job_lease = "failed", None
             c.error = ("No helper PC fetched this video for 24 hours. Start the helper on your PC "
                        "(or run worker\\install_autostart.bat once), then press Re-download video.")
@@ -202,8 +217,30 @@ def cleanup_disk():
                     f.unlink(missing_ok=True)  # an old trim, a partial download or a whole-video leftover
 
 
+_queue_runs: dict[int, int] = {}  # customer -> upload rounds running right now (the watchdog: an "uploading" clip with
+_queue_lock = threading.Lock()   # no round running for its customer was left behind, e.g. by a database error)
+
+
+def queue_running(tid: int) -> bool:
+    with _queue_lock:
+        return _queue_runs.get(int(tid), 0) > 0
+
+
 def process_queue():
     """Upload queued clips whose publish time is within the lead window (YouTube holds them private until publishAt)."""
+    from . import tenant as _t
+
+    tid = _t.current()
+    with _queue_lock:
+        _queue_runs[tid] = _queue_runs.get(tid, 0) + 1
+    try:
+        return _process_queue()
+    finally:
+        with _queue_lock:
+            _queue_runs[tid] = max(0, _queue_runs.get(tid, 0) - 1)
+
+
+def _process_queue():
     from . import acl, tenant as _t
 
     now, tid = utcnow(), _t.current()
@@ -385,16 +422,54 @@ def when_on(key: str, fn):
         if acl.feature(key):
             return fn()
         return None
-    run.__name__ = getattr(fn, "__name__", "job")
+    run.__name__ = _job_name(fn)
+    return run
+
+
+# every timed job added by start(): key -> when its last round started / ended and how many rounds run right now. The
+# watchdog's guard (app/watchdog.py) restarts a job that stalled (one round hangs, so no new round may start).
+JOB_STATE: dict[str, dict] = {}
+BOOT = time.time()
+SCH = None
+
+
+def _job_name(fn) -> str:
+    """A readable name for a timed job: `lambda: executor.submit(viral_refresh)` -> "viral_refresh"."""
+    base = getattr(fn, "__name__", "job")
+    if base == "<lambda>":
+        code = getattr(fn, "__code__", None)
+        names = [x for x in ((code.co_names + code.co_freevars) if code else ()) if x not in ("executor", "submit")]
+        base = names[-1] if names else "job"
+    return base
+
+
+def _tracked(key: str, fn):
+    def run():
+        st = JOB_STATE.setdefault(key, {"started": 0.0, "done": 0.0, "running": 0})
+        st["started"] = time.time()
+        st["running"] = st.get("running", 0) + 1
+        try:
+            return fn()
+        finally:
+            st["running"] = max(0, st.get("running", 0) - 1)
+            st["done"] = time.time()
+    run.__name__ = key
     return run
 
 
 def start():
+    global SCH
     for_each_customer(recover)()
     sch = BackgroundScheduler(timezone="UTC")
 
     def add(fn, *args, **kw):
-        sch.add_job(for_each_customer(fn), *args, **kw)
+        base = _job_name(fn)
+        key, n = base, 1
+        while sch.get_job(key) is not None:
+            n += 1
+            key = f"{base}#{n}"
+        JOB_STATE.setdefault(key, {"started": 0.0, "done": 0.0, "running": 0})
+        sch.add_job(_tracked(key, for_each_customer(fn)), *args, id=key, name=key, **kw)
 
     # Every timed job, and what decides whether it runs for a customer (the owner's own copy always runs everything):
     #   process_queue        uploads paused / "Upload to YouTube at all" / uploads-a-day limit  -> inside process_queue
@@ -490,5 +565,10 @@ def start():
     # in the scheduler's own thread, NOT the single render worker (Gmail can be slow; the round never waits for a lock)
     add(when_on("gmail.send", strike_mails), "interval", minutes=15, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=9))  # YouTube's notices, the request, the answer
+    from . import watchdog
+    add(watchdog.run, "interval", minutes=10, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=11))  # self-repair of known problems (app/watchdog.py)
     sch.start()
+    SCH = sch
+    watchdog.start_guard(sch)  # its own thread: finds a stalled timed job even when the scheduler's threads are all stuck
     return sch
