@@ -185,6 +185,12 @@ def events():
             # only a problem that is still there 10 minutes later: a short blip never wakes the owner
             if k not in told_bad and k in seen_before and not first_run:
                 _say(f"Needs you: {text}\nOpen the dashboard: Setup guide → Problems right now.", title="Raji Studio needs you", tags="warning", mail=True)
+                try:  # also to the owner's own WhatsApp when that is set up (app/whatsapp.py: capped, never raises)
+                    from . import whatsapp
+
+                    whatsapp.send(f"Raji Studio needs you: {text}\nOpen the dashboard: Setup guide → Problems right now.")
+                except Exception:  # noqa: BLE001
+                    pass
                 told_bad.add(k)
         set_setting("phone_bad", json.dumps(sorted(told_bad & set(bad))))
         set_setting("phone_bad_prev", json.dumps(sorted(bad)))

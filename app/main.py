@@ -121,6 +121,26 @@ class ChangePwIn(BaseModel):
     new_password: str = Field(max_length=200)
 
 
+# Dashboard reads of clips (GET /api/clips...) at most this many at once: a burst of them (many tabs, a fast scroll)
+# must never take every database connection from the uploads and the other background work (24 Nov: QueuePool
+# timeout). A threading semaphore polled without blocking works with any event loop and never ties up a thread.
+READ_SLOTS = int(os.getenv("CLIP_READ_SLOTS") or "6")
+READ_WAIT = 15.0  # seconds a read waits for a slot before "busy, try again"
+_READ_GATE = __import__("threading").BoundedSemaphore(READ_SLOTS)
+
+
+async def _read_slot() -> bool:
+    import asyncio
+    import time as _time
+
+    until = _time.monotonic() + READ_WAIT
+    while not _READ_GATE.acquire(blocking=False):
+        if _time.monotonic() > until:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     path = request.url.path
@@ -224,12 +244,20 @@ async def auth_gate(request: Request, call_next):
         denied = acl.check_request(request.method, real, who)  # what the Super Admin switched off for this account
         if denied:
             return JSONResponse({"detail": denied}, status_code=403)
-        with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
-            if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
-                with acl.as_super():
+        gated = request.method == "GET" and path.startswith("/api/clips")
+        if gated and not await _read_slot():
+            return JSONResponse({"detail": "The server is busy right now. Try again in a moment."}, status_code=503)
+        try:
+            with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
+                if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
+                    with acl.as_super():
+                        resp = await call_next(request)
+                else:
                     resp = await call_next(request)
-            else:
-                resp = await call_next(request)
+        finally:
+            if gated:
+                _READ_GATE.release()
+        with tenant.use(who["tenant"]):
             acl.log_request(who, request.method, real, resp.status_code)
             if request.method != "GET":  # something changed: the Alerts number is counted afresh on the next poll
                 _badge_cache.pop(who["tenant"], None)
@@ -2799,6 +2827,87 @@ def phone_test():
     return {"ok": True}
 
 
+class WhatsAppIn(BaseModel):
+    action: Literal["save", "on", "off"] = "save"
+    phone: str = Field("", max_length=32)
+    apikey: str = Field("", max_length=64)
+
+
+@app.get("/api/whatsapp")
+def whatsapp_get():
+    from . import whatsapp
+
+    return whatsapp.status()  # only the last 3 digits of the number, never the key
+
+
+@app.post("/api/whatsapp")
+def whatsapp_set(body: WhatsAppIn):
+    from . import whatsapp
+
+    if body.action in ("on", "off"):
+        if not whatsapp.configured():
+            raise HTTPException(400, "Save your WhatsApp number and API key first.")
+        return whatsapp.toggle(body.action == "on")
+    try:
+        return whatsapp.save(body.phone, body.apikey)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/whatsapp/test")
+def whatsapp_test():
+    from . import whatsapp
+
+    if not whatsapp.configured():
+        raise HTTPException(400, "Save your WhatsApp number and API key first.")
+    if whatsapp.sent_today() >= whatsapp.PER_DAY:
+        raise HTTPException(429, f"Today's {whatsapp.PER_DAY} WhatsApp messages are used. Try again tomorrow.")
+    if not whatsapp.send("Raji Studio test: WhatsApp alerts work. Only problems that need you come here.", test=True):
+        raise HTTPException(502, "WhatsApp did not take the message. Check the number and the API key (or the free "
+                                 "service is busy — try again later).")
+    return {"ok": True}
+
+
+@app.delete("/api/whatsapp")
+def whatsapp_remove():
+    from . import whatsapp
+
+    return whatsapp.remove()
+
+
+# ---------- self-repair (app/watchdog.py) ----------
+@app.get("/api/watchdog")
+def watchdog_get():
+    from . import watchdog
+
+    return watchdog.public()
+
+
+@app.post("/api/watchdog/check")
+def watchdog_check():
+    """Run the self-repair round for this copy now (it also runs by itself every 10 minutes)."""
+    from . import watchdog
+
+    if not watchdog.enabled():
+        raise HTTPException(409, "Self-repair is switched off for this account.")
+    out = watchdog.run()
+    return {"ok": True, "busy": bool(out.get("busy")), **watchdog.public()}
+
+
+class WatchdogIn(BaseModel):
+    on: bool = True
+    off: list[Literal["stuck", "retry", "late", "disk", "login", "helper", "errors", "scheduler"]] = Field(default_factory=list, max_length=8)
+
+
+@app.post("/api/admin/watchdog")
+def watchdog_set(body: WatchdogIn):
+    """Super Admin: Self-repair on/off for the copy being viewed, and remedies switched off one by one."""
+    from . import watchdog
+
+    watchdog.save_config(body.on, list(body.off))
+    return watchdog.public()
+
+
 @app.get("/api/settings/pexels")
 def get_pexels():
     return {"set": bool(_secret_setting("pexels_key"))}
@@ -3353,9 +3462,19 @@ def health():
         elif not hp["approved"] and not hp["central"]:
             items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
                           "fix": "helper", "key": "no_helper"})
-        failed = s.query(Clip).filter(Clip.status == "failed").count()
+        failed_ids = {cid for (cid,) in s.query(Clip.id).filter(Clip.status == "failed")}
+        try:  # failed clips the self-repair tries again by itself (app/watchdog.py) are not a problem for the owner yet
+            from . import watchdog
+
+            again = set(watchdog.pending_retries()) & failed_ids
+        except Exception:  # noqa: BLE001
+            again = set()
+        failed = len(failed_ids - again)
         if failed:
             items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed", "key": "failed"})
+        if again:
+            items.append({"level": "info", "text": f"{len(again)} failed clip(s) are tried again by themselves (a passing "
+                                                  "problem). Nothing to do.", "fix": None, "key": "self_repair"})
         thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
         if thumbs_wait:
             items.append({"level": "warn", "text": f"{thumbs_wait} thumbnail(s) were refused by YouTube. Verify the channel's phone "
@@ -3396,7 +3515,15 @@ def health():
             pass
         from .guide import recent_errors
 
-        fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()]
+        try:  # errors the self-repair already took care of (a passing cause) are left out
+            from . import watchdog
+
+            done, ek = watchdog.handled_keys(), watchdog.err_key
+            settled = set().union(*watchdog.settled())
+        except Exception:  # noqa: BLE001
+            done, ek, settled = set(), None, set()
+        fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()
+                 and not (done and ek(e) in done) and not (settled and (ek(e), str(e.get("at"))) in settled)]
         n_err = sum(int(e.get("count") or 1) for e in fresh)
         if n_err >= 3:
             items.append({"level": "warn", "text": f"{n_err} unexpected server problems in the last 6 hours "

@@ -97,6 +97,8 @@ PERMS = [
     ("keywords.use", "extras", "Keyword helper (research, better keywords, keywords refreshed before upload)", True),
     ("backup.use", "extras", "Backup & restore (download, check and restore a backup; daily backups always run)", True),
     ("strikes.reply", "extras", "Strike responder: the request to the creator to take a complaint back", True),
+    ("whatsapp.use", "extras", "WhatsApp alerts", True),
+    ("watchdog.repair", "extras", "Self-repair (the system fixes known problems by itself)", True),
     ("pexels.use", "extras", "Pexels stock photos", True),
     ("ai.reels", "extras", "AI reels (local AI on the helper PC)", True),
     ("helper.manage", "extras", "Helper PC (download, helper key, approve, remove)", True),
@@ -336,6 +338,13 @@ ROUTES = [
     ("GET", "/api/phone", SIGNED, None),
     ("POST", "/api/phone", "phone.use", "Changed phone notifications"),
     ("POST", "/api/phone/test", "phone.use", None),
+    ("GET", "/api/whatsapp", SIGNED, None),
+    ("POST", "/api/whatsapp", "whatsapp.use", "Changed WhatsApp alerts"),  # never the number or the key in the log
+    ("POST", "/api/whatsapp/test", "whatsapp.use", None),
+    ("DELETE", "/api/whatsapp", "whatsapp.use", "Removed WhatsApp alerts"),
+    ("GET", "/api/watchdog", "page.alerts", None),
+    ("POST", "/api/watchdog/check", "watchdog.repair", None),
+    ("POST", "/api/admin/watchdog", SUPER, "Changed self-repair"),
     ("POST", "/api/settings/reminder", "clips.reminder", "Changed the like & subscribe reminder"),  # clips.edit inside
     ("GET", "/api/settings/comment", SIGNED, None),
     ("POST", "/api/settings/comment", "uploads.comment", "Changed the first comment"),
