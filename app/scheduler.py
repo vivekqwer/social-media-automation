@@ -236,6 +236,8 @@ def process_queue():
     for cid in ids:
         if used >= day_cap or not quota.can_upload():
             break
+        if not quota.shared_room(quota.UPLOAD_COST):  # a customer on the owner's Google project: the owner's uploads first
+            break
         if acl.upload_block():  # paused while this round was running: stop before the next video
             break
         now = utcnow()  # uploads take minutes: judge every clip's time against the real clock
@@ -336,6 +338,8 @@ def retry_thumbnails():
                 continue
             if quota.DAILY_UNITS - quota.used() < quota.UPLOAD_COST + quota.COST["thumbnail"]:
                 break  # keep the budget for uploads
+            if not quota.shared_room(quota.COST["thumbnail"]):
+                break  # a customer on the owner's Google project: the owner's uploads first
             ok = youtube.push_thumbnail(c)
             if not ok:
                 tried.add(c.destination_id)  # one refusal per channel per round is enough
@@ -407,14 +411,20 @@ def start():
     #   viral_refresh        "Viral today page" or "Viral picks" (viral.refresh; picks only with "Viral picks")
     #   scan_if_due          "Competitor tracker"
     #   daily_summary        Telegram (telegram.enabled)
-    #   learn_daily          auto-tune switch of the account; sources only when "Change sources" is on -> learn.daily
     #   post_comments        "First comment under new videos" (and the account's own on/off in My channels)
     #   strike_mails         "Permission mails to creators" (YouTube's notices in Gmail — they only open a case and tell the
     #                        owner —, the request to the creator — sent by itself only when the account switched that on in
     #                        Alerts → Strikes and the address is YouTube's own — and their answer)
-    #   pc_due               PC-folder videos (app/pcfolder.py): uploads paused -> no file is asked for (inside pc_due)
+    #   pc_due               "Videos from a folder on their PC"; uploads paused -> no file is asked for (inside pc_due)
+    #   phone_events         "Phone notifications" (phone.enabled() also checks it, so no push goes out when it is off)
+    #   freshen_due          "Keyword helper" (keywords refreshed before upload)
+    #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
+    #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
+    #                        and the creators' answers stays with "Permission mails to creators"
     #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time,
-    #           strike_watch (a strike YouTube itself shows: never-use list, held clips, scheduled videos kept private — no switch)
+    #           strike_watch (a strike YouTube itself shows: never-use list, held clips, scheduled videos kept private — no switch),
+    #           recover, unpark_due (only drafts the Super Admin parked), plans_ending (owner's copy, all accounts)
+    # Budget: a customer on the owner's Google project spends only what the owner's due uploads leave (quota.shared_room)
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
     add(lambda: executor.submit(autopilot_tick), "interval", minutes=15, max_instances=1, coalesce=True,
@@ -454,9 +464,9 @@ def start():
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     add(sync_all, "interval", minutes=int(os.getenv("STATS_INTERVAL_MINUTES") or "10"), max_instances=1,
                 coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=1))
-    from .metadata import freshen_due; add(freshen_due, "interval", minutes=20, max_instances=1, coalesce=True)  # noqa: E702  fresh keywords before upload
+    from .metadata import freshen_due; freshen_due = when_on("keywords.use", freshen_due); add(freshen_due, "interval", minutes=20, max_instances=1, coalesce=True)  # noqa: E702  fresh keywords before upload
     from .learn import daily as learn_daily  # Ideas -> What works: auto-tune once a day (checked hourly, acts once)
-    add(learn_daily, "interval", hours=1, max_instances=1, coalesce=True,
+    add(when_on("ideas.autotune", learn_daily), "interval", hours=1, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=12))
     from .payments import expire_due
 
@@ -473,13 +483,13 @@ def start():
     add(daily_backup, "interval", hours=6, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15))  # one backup a day per account (skips when today's exists)
     from .phone import events as phone_events
-    add(phone_events, "interval", minutes=10, max_instances=1, coalesce=True,
+    add(when_on("phone.use", phone_events), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=3))  # live / 10 clips / views / subscribers / needs you
     from .comments import post_due as post_comments
     add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
     from .pcfolder import due as pc_due
-    add(pc_due, "interval", minutes=2, max_instances=1, coalesce=True,
+    add(when_on("clips.pc_folder", pc_due), "interval", minutes=2, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # PC-folder videos: ask for files, move missed times
     from .autopilot import unpark_due
     add(unpark_due, "interval", hours=1, max_instances=1, coalesce=True,

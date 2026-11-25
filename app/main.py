@@ -1538,6 +1538,7 @@ def _keyword_clip(cid: int):
 @app.post("/api/clips/{cid}/metadata")
 def clip_metadata(cid: int, body: ClipKeywordsIn):
     """'Use these': research the keywords, write title, description and tags from them and save."""
+    acl.need("keywords.use")  # the keyword helper may be switched off for this account (the address needs clips.edit)
     _keyword_clip(cid)
     return auto_metadata(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic)
 
@@ -1545,6 +1546,7 @@ def clip_metadata(cid: int, body: ClipKeywordsIn):
 @app.post("/api/keywords/clip/{cid}")
 def clip_keywords_preview(cid: int, body: ClipKeywordsIn):
     """'Find better keywords': research now and show what would be written. Nothing is saved."""
+    acl.need("clips.edit")  # the address needs the keyword helper; the clip is one of theirs to edit
     _keyword_clip(cid)
     return propose_meta(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic, fresh=True)
 
@@ -1570,6 +1572,7 @@ def keywords(q: str = Query("", max_length=200)):
     Free (YouTube's own search suggestions, saved for a day); no search-volume numbers exist, so none are shown."""
     from .keywords import research
 
+    acl.need("keywords.use")  # Ideas -> Keyword research (the address needs the Ideas page)
     q = " ".join(q.split())
     if len(q) < 2:
         raise HTTPException(400, "Type a topic first, for example: street food india")
@@ -2263,6 +2266,7 @@ def insights():
 def insights_autotune(body: AutotuneIn):
     from . import learn
 
+    acl.need("sources.edit")  # auto-tune changes sources (the address needs the auto-tune switch)
     return {**learn.switch(body.on), "card": learn.insights()}
 
 
@@ -2349,6 +2353,7 @@ def backup_download():
     from . import backup
     from .alerts import note
 
+    acl.need("page.settings")  # the address carries "Backup & restore"; the card lives on My channels
     try:
         data = backup.make()
         blob = backup.pack(data)
@@ -2363,6 +2368,7 @@ def backup_download():
 def backup_file(name: str):
     from . import backup
 
+    acl.need("page.settings")
     try:
         p = backup.path_of(name)
     except backup.BackupError as e:
@@ -2377,6 +2383,7 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 
     from . import backup
 
+    acl.need("page.settings")
     sup = _is_super(request)
     _backup_rate("check", sup)
     blob = file.file.read((backup.MAX_UPLOAD if sup else backup.MAX_UPLOAD_USER) + 1)
@@ -2396,6 +2403,7 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 def backup_check_kept(name: str, request: Request):
     from . import backup
 
+    acl.need("page.settings")
     sup = _is_super(request)
     _backup_rate("check", sup)
     try:
@@ -2414,6 +2422,7 @@ def backup_restore(body: RestoreIn, request: Request):
     from . import backup
     from .alerts import note
 
+    acl.need("page.settings")
     if body.confirm.strip() != "RESTORE":
         raise HTTPException(400, "Type RESTORE (in capital letters) to confirm.")
     sup = _is_super(request)
@@ -2598,6 +2607,7 @@ def reminder_get():
 def reminder_set(body: ReminderIn):
     from . import reminder
 
+    acl.need("clips.edit")  # the address needs the reminder switch
     if body.preset != "custom" and body.preset not in dict(reminder.PRESETS):
         raise HTTPException(400, "Choose one of the wordings in the list.")
     custom = reminder.clean(body.custom)
@@ -2689,7 +2699,8 @@ def strike_reply_set(body: StrikeReplyIn):
     from . import strikes
 
     if body.auto:
-        acl.need("gmail.send")  # switching it OFF is always possible
+        acl.need("strikes.reply")  # switching it OFF is always possible
+        acl.need("gmail.send")
     strikes.save_settings(body.auto)
     return strikes.settings_public()
 
@@ -2699,6 +2710,7 @@ def strike_send(sid: int, body: StrikeSendIn | None = None):
     """Send the ready request to the creator now, from the owner's Gmail (once per struck video)."""
     from . import strikes
 
+    acl.need("gmail.send")  # the address needs "Strike responder"; the mail itself needs "Permission mails to creators"
     return _strike_call(strikes.send_request, sid, (body.to if body else None), "hand")
 
 
@@ -3299,6 +3311,15 @@ def guide_errors_clear():
 def health():
     items, now = [], utcnow()
     items += acl.health_items()  # what the administrator paused, switched off or limited for this account
+    try:  # on the owner's Google project the owner's uploads come first (quota.shared_room): say why uploads wait
+        if quota.on_shared_budget() and not quota.shared_room(quota.UPLOAD_COST):
+            items.append({"level": "info", "key": "shared_budget", "fix": None,
+                          "text": "Your uploads wait for now: this account uses the server's Google project, and today's YouTube "
+                                  "budget of that project is kept for the owner's uploads. Nothing is lost; they go up when there "
+                                  "is room. Save your own Google project keys (My channels → Google project keys) to upload on "
+                                  "your own daily budget."})
+    except Exception:  # noqa: BLE001
+        pass
     if tenant.current() == tenant.OWNER and payments.enabled() and payments.mode() == "test":
         items.append({"level": "warn", "key": "pay_test_mode", "fix": None,
                       "text": "Online payment is in TEST mode — customers can get plans with test cards. Save your live keys "
@@ -3869,7 +3890,8 @@ def worker_jobs(request: Request, response: Response):
     llm = h.get("x-worker-llm") == "1"
     jobs = _collect_jobs(can, room, llm, "x-worker-ai" in h, now)
     pc_jobs, pc_folder = [], None
-    if h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None:
+    if (h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None
+            and acl.feature("clips.pc_folder")):  # switched off for this account: the helper watches no folder
         # the folder of videos on the PC ("From my PC", app/pcfolder.py): only this helper's own copy, never with a ticket
         with SessionLocal() as s:
             pc_folder = pcfolder.folder_for(s.get(Worker, wid))
@@ -3912,6 +3934,9 @@ def worker_jobs(request: Request, response: Response):
     out = {"jobs": jobs, "version": SERVER_VERSION}
     if pc_folder is not None:
         out["pc_folder"] = pc_folder
+    elif (h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None
+          and not acl.feature("clips.pc_folder")):
+        out["pc_folder"] = ""  # "From my PC" switched off by the Super Admin: the helper stops looking at the folder
     has = h.get("x-worker-enroll")
     if has is not None and getattr(request.state, "ticket", None) is None:
         # a helper that knows helper keys and has not got this account's current one: hand it over, so that it can
@@ -4067,6 +4092,8 @@ def worker_script(chid: int, body: ScriptIn, request: Request):
 
 def _wants_captions(s, p: Project, c: Clip) -> bool:
     if (c.caption_style or {}).get("off"):
+        return False
+    if not acl.feature("clips.captions"):  # switched off for this account: no clip waits for captions
         return False
     if p.quick:
         return bool(p.quick.get("captions", True))
@@ -4414,14 +4441,21 @@ async def worker_pc_file(iid: int, request: Request):
     return {"ok": True}
 
 
+def _pc_on():
+    """Clips -> From my PC has its own switch; every address of it checks it (the reading ones need the Clips page too)."""
+    acl.need("clips.pc_folder")
+
+
 @app.get("/api/pc-items")
 def pc_items():
+    acl.need("page.clips")
     with SessionLocal() as s:
         return pcfolder.listing(s)
 
 
 @app.get("/api/pc-items/{iid}/thumb")
 def pc_item_thumb(iid: int):
+    acl.need("page.clips")
     with SessionLocal() as s:
         row = _get(s, PcItem, iid)
         p = pcfolder._thumb_path(row)
@@ -4436,6 +4470,7 @@ class PcApproveIn(BaseModel):
 
 @app.post("/api/pc-items/{iid}/approve")
 def pc_item_approve(iid: int, body: PcApproveIn):
+    _pc_on()
     acl.need_clip_room()
     with SessionLocal() as s:
         row = _get(s, PcItem, iid)
@@ -4449,12 +4484,14 @@ def pc_item_approve(iid: int, body: PcApproveIn):
 def pc_items_approve_all():
     """Every waiting video (also the ones marked "approve": "manual" — this is the owner's own press), in the
     background: GET /api/pc-items shows the progress ("bulk")."""
+    _pc_on()
     acl.need_clip_room()
     return pcfolder.approve_all_start()
 
 
 @app.post("/api/pc-items/{iid}/skip")
 def pc_item_skip(iid: int):
+    _pc_on()
     with SessionLocal() as s:
         row = _get(s, PcItem, iid)
         why = pcfolder.skip(s, row)
@@ -4465,6 +4502,7 @@ def pc_item_skip(iid: int):
 
 @app.post("/api/pc-items/{iid}/unskip")
 def pc_item_unskip(iid: int):
+    _pc_on()
     with SessionLocal() as s:
         row = _get(s, PcItem, iid)
         why = pcfolder.unskip(s, row)
@@ -4480,6 +4518,7 @@ class PcAutoIn(BaseModel):
 @app.post("/api/pc-items/auto")
 def pc_items_auto(body: PcAutoIn):
     """"Videos I add to the PC folder go up by themselves" (new ones only; "approve": "manual" always waits)."""
+    _pc_on()
     pcfolder.set_auto(body.on)
     return {"auto": pcfolder.auto_on()}
 
@@ -4492,6 +4531,7 @@ class PcFolderIn(BaseModel):
 @app.post("/api/workers/{wid}/pc-folder")
 def worker_pc_folder(wid: int, body: PcFolderIn):
     """The folder of videos this helper watches (it hears it on its next call)."""
+    _pc_on()
     f = body.folder.strip().strip('"').strip()
     if f and not re.match(r"^([A-Za-z]:[\\/]|\\\\[^\\/]|/|~)", f):
         raise HTTPException(400, r"Write the whole folder, for example D:\youtube")

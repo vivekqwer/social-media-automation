@@ -156,6 +156,10 @@ def plan(clip, W: int, H: int, dur: float, cfg: dict | None = None) -> dict | No
 
     if getattr(clip, "cta_on", None) is False or dur < MIN_CLIP:
         return None
+    from . import acl
+
+    if not acl.feature("clips.reminder"):  # switched off for this account by the Super Admin: no reminder is drawn
+        return None
     cfg = cfg or settings()
     text = clean(cfg.get("text"))
     if not cfg.get("on") or not text:

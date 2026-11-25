@@ -243,7 +243,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
                  destination_id=ch.destination_id, credit_on=ch.mode != "own")
         s.add(c)
         s.commit()
-        if ch.captions:
+        if ch.captions and acl.feature("clips.captions"):  # "Captions from YouTube" switched off: none are added
             try:
                 c.captions = parse_json3(p.caption_track, c.start, c.end) if p.caption_track else \
                     fetch_cues(p.video_id, c.start, c.end)

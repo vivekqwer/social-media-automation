@@ -30,7 +30,9 @@ def topic() -> str:
 
 
 def enabled() -> bool:
-    return bool(topic()) and get_setting("ntfy_on") != "0"
+    from . import acl
+
+    return bool(topic()) and get_setting("ntfy_on") != "0" and acl.feature("phone.use")  # the Super Admin's switch
 
 
 def setup(new: bool = False) -> dict:

@@ -238,6 +238,8 @@ HELP_FEATURE = {
     "I want to upload my own video file": "clips.own_video",
     "A creator answered my mail": "permissions.manage",
     "Mails are not sent": "gmail.send",
+    "How are keywords chosen?": "keywords.use",
+    "What does auto-tune change?": "ideas.autotune",
 }
 
 

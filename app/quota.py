@@ -205,6 +205,9 @@ def search_block() -> str:
     if not can_search():
         return "today's YouTube search budget is used or kept for uploads (it resets at 1:30 PM IST)"
     me, shared = str(tenant.current()), on_shared_budget()
+    if shared and not shared_room(COST["search"] + COST["read"]):
+        return ("today's YouTube budget of the shared Google project is kept for the owner's uploads "
+                "(more tomorrow, or save your own Google keys)")
     with SessionLocal() as s:
         d = _turns_load(s)
     n = int((d.get(me) or {}).get("n") or 0)
@@ -242,6 +245,33 @@ def note_turn(searched: bool):
         o["shared"] = shared
         d[me] = o
         _turns_save(s, d)
+
+
+# ---------------------------------------------------------------- the owner's uploads come first on the owner's project
+# A customer without Google keys of their own (or one the Super Admin lent the server's project to) spends from the
+# OWNER'S daily budget. Their uploads, searches, thumbnails and other paid calls may only use what is left after every
+# upload the owner still has due before the reset (the same count the first comment uses: comments._uploads_due_here,
+# run in the owner's copy). The owner, and customers with their own keys, are not limited by this.
+def owner_uploads_due() -> int:
+    """The owner's uploads that still want today's budget (0 when it cannot be read: never a reason to stop the owner)."""
+    try:
+        from .comments import _uploads_due_here
+
+        with tenant.use(tenant.OWNER):
+            return int(_uploads_due_here())
+    except Exception:  # noqa: BLE001  (unreadable: count a full day for the owner, so the customer waits)
+        return capacity()
+
+
+def shared_room(units: int) -> bool:
+    """May the running account spend `units` from today's budget now? Always yes for the owner and for an account with
+    its own Google keys. A customer on the owner's project: only when, after it, every upload the owner has due before
+    the reset (and half the reserve) still fits."""
+    if not on_shared_budget():
+        return True
+    left = DAILY_UNITS - used() - RESERVE // 2
+    need = min(owner_uploads_due(), max(0, left // UPLOAD_COST)) * UPLOAD_COST
+    return left - need >= units
 
 
 def summary() -> dict:

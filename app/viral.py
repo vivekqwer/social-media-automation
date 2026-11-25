@@ -73,6 +73,18 @@ def _shorts() -> list[dict]:
     return _rows(v.get("items", []), short_flag=True)
 
 
+def _may_search() -> bool:
+    """One search for today's viral Shorts. The owner and accounts with their own Google keys: whenever the day's
+    search budget allows (as before). A customer on the owner's Google project: only in its fair turn, within its
+    searches a day, and only with what the owner's due uploads leave (quota.search_block)."""
+    if not quota.on_shared_budget():
+        return quota.can_search()
+    if quota.search_block():
+        quota.note_turn(False)
+        return False
+    return True
+
+
 def refresh(force: bool = False) -> dict:
     """Save today's chart (with view growth) and fill today's picks."""
     day, now = today(), utcnow().isoformat() + "Z"
@@ -88,10 +100,12 @@ def refresh(force: bool = False) -> dict:
         _note("Viral today: reading YouTube's trending list", e)
         rows = []
     shorts_due = not board.get("shorts_at") or (force and datetime.fromisoformat(board["shorts_at"][:-1]) < utcnow() - timedelta(hours=6))
-    if shorts_due and quota.can_search():
+    if shorts_due and _may_search():
         try:
             rows += _shorts()
             board["shorts_at"] = now
+            if quota.on_shared_budget():
+                quota.note_turn(True)
         except Exception as e:  # noqa: BLE001
             log.warning("viral shorts: %s", str(e)[:150])
             _note("Viral today: searching for viral Shorts", e)

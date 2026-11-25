@@ -37,7 +37,8 @@ def swap_weak_thumbnails(max_per_run: int = 2) -> list[int]:
                                          Clip.thumb_custom.isnot(True), (Clip.thumb_variant.is_(None)) | (Clip.thumb_variant == 0),
                                          Clip.attempted_at <= now - timedelta(days=2), Clip.attempted_at >= now - timedelta(days=10)).all()
             for c in clips:
-                if len(done) >= max_per_run or quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST:
+                if (len(done) >= max_per_run or quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST
+                        or not quota.shared_room(quota.COST["thumbnail"])):  # on the owner's project: owner's uploads first
                     break
                 if c.youtube_id in vpd and vpd[c.youtube_id] < 0.4 * median:
                     try:

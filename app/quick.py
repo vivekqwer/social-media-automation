@@ -75,7 +75,7 @@ def quick_run(pid: int):
                          publish_at=first_at if i == 0 else _later_slot(s, dest.id, first_at))
                 s.add(c)
                 s.commit()
-                if q.get("captions", True):
+                if q.get("captions", True) and acl.feature("clips.captions"):
                     try:
                         cues = parse_json3(p.caption_track, start, end) if p.caption_track else fetch_cues(p.video_id, start, end)
                         if cues:

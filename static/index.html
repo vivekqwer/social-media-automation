@@ -1461,6 +1461,7 @@ const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uplo
 // ---------- From my PC: videos in the folder on the PC (app/pcfolder.py) ----------
 async function loadPc(){
   const card=$('#pc-card');if(!card)return;let r;
+  if(!can('clips.pc_folder')){card.classList.add('hide');return}
   try{r=await api('/api/pc-items')}catch(e){card.classList.add('hide');return}
   const W=r.waiting||[],R=r.recent||[],H=r.helpers||[];
   if(!W.length&&!R.length&&!H.length){card.classList.add('hide');return}
@@ -1862,7 +1863,9 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
-  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
+  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
+  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
+  'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){
   let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}
