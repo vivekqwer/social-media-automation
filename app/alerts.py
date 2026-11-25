@@ -271,15 +271,18 @@ def _error_items() -> list:
     from .guide import recent_errors
 
     try:  # errors the self-repair took care of (a passing cause): shown, but not as a new problem
-        from .watchdog import err_key, handled_keys
+        from .watchdog import err_key, handled_keys, settled
 
         done = handled_keys()
+        resolved, quiet = settled()  # resolved: in Fixed by itself; quiet for 3 days: "Seen before, quiet now"
     except Exception:  # noqa: BLE001
-        done, err_key = set(), None
+        done, err_key, resolved, quiet = set(), None, set(), set()
     out = []
     for e in recent_errors():
         try:
             n = int(e.get("count") or 1)
+            if err_key is not None and (err_key(e), str(e.get("at"))) in (resolved | quiet):
+                continue  # not deleted; it shows again by itself if it comes back (its time changes)
             if done and err_key(e) in done:
                 out.append({
                     "id": f"err:{e.get('type')}:{e.get('line')}:{e.get('at')}", "tab": "system", "level": "info",

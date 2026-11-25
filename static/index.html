@@ -1319,6 +1319,7 @@ function renderWatchdog(){const box=$('#al-wd'),r=ALB&&ALB.self_repair;const sho
     <div class="cb"><div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${counts||'<span class="mut sm">Nothing needed fixing.</span>'}</div>
       ${fixed.slice(0,30).map(row).join('')}
       ${told.length?`<div style="margin-top:10px"><b class="sm">Sent to you (it could not fix these by itself)</b>${told.slice(0,10).map(row).join('')}</div>`:''}
+      ${(r.quiet||[]).length?`<details style="margin-top:10px"><summary class="sm">Seen before, quiet now (${r.quiet.length}) &mdash; not counted any more; they show again by themselves if they come back</summary>${r.quiet.map(q=>`<div class="sm" style="padding:6px 0;border-top:1px solid var(--border)"><span class="mut">${when(q.at)}</span> &middot; ${esc(q.title||'')}${q.count>1?' &times;'+Number(q.count):''}<div class="mut" style="word-break:break-word">${esc(q.tech||'')}</div></div>`).join('')}</details>`:''}
       ${sup?`<details style="margin-top:12px"><summary class="sm">Super Admin: self-repair switches for this account</summary><div style="margin-top:8px">
         <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="wd-on" ${r.config.on?'checked':''}><i></i></span><span>Self-repair</span></label>
         ${r.remedies.map(m=>`<label class="row sm" style="gap:8px;margin-top:6px"><input type="checkbox" data-wdr="${esc(m.key)}" ${m.on?'checked':''}>${esc(m.name)}</label>`).join('')}

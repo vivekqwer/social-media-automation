@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
@@ -13,7 +14,22 @@ def utcnow() -> datetime:
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 connect_args = {"check_same_thread": False} if IS_SQLITE else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)  # tenant 1 + the shared tables
+
+
+def pool_options(url: str) -> dict:
+    """Connection pool of the database. PostgreSQL (Railway): ONE engine — and so one pool — serves every customer (each
+    customer is a schema of the same database), so the pool is sized for the whole server: 10 kept + 20 extra = at most
+    30 connections, well inside Railway Postgres' 100. A request that cannot get one within 10 s fails fast instead of
+    holding a thread for 30 s (SQLAlchemy's default 5 + 10 was used up by a burst of dashboard reads on 24 Nov).
+    SQLite keeps SQLAlchemy's own defaults (one file per customer, local use and tests)."""
+    if url.startswith("sqlite"):
+        return {"pool_pre_ping": True}
+    num = lambda k, d: int(os.getenv(k) or d)  # noqa: E731
+    return {"pool_pre_ping": True, "pool_size": num("DB_POOL_SIZE", 10), "max_overflow": num("DB_MAX_OVERFLOW", 20),
+            "pool_timeout": num("DB_POOL_TIMEOUT", 10), "pool_recycle": 1800}
+
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args, **pool_options(DATABASE_URL))  # tenant 1 + the shared tables
 Base = declarative_base()  # the tables every customer has a private copy of
 _engines: dict[int, object] = {tenant.OWNER: engine}
 _makers: dict[int, object] = {}

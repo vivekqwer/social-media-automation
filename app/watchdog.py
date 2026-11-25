@@ -24,7 +24,9 @@ Remedies (each can be switched off on its own; "Self-repair" switches all of the
              waiting while a helper was seen in the last 2 days (scheduler.sweep_stale)
   errors     the same place in "System errors" more than ERR_PER_HOUR times in an hour: a passing cause (database
              busy, network, Google) is marked "handled" (and only reported when it lasts 3 hours); "No space left" runs
-             the disk remedy; anything else is one message a day with the details to copy
+             the disk remedy; anything else is one message a day with the details to copy. The list also clears
+             itself: a passing fault not seen again for 6 hours is resolved (a plain line in Fixed by itself), any
+             other error quiet for 3 days moves to "Seen before, quiet now"; neither counts, nothing is deleted
   scheduler  a timed job that has not finished a round for 3x its interval (at least 90 minutes) is started again
              (3 times a day at most); after that, one message
 Already in the app, so not repeated here: thumbnails YouTube refused are retried every 30 minutes
@@ -152,7 +154,7 @@ def _load() -> dict:
     except (ValueError, TypeError):
         st = {}
     for k, empty in (("used", {}), ("items", {}), ("seen", {}), ("fixed", []), ("told", {}), ("errs", {}),
-                     ("handled", {})):
+                     ("handled", {}), ("resolved", {}), ("quiet", {})):
         if not isinstance(st.get(k), type(empty)):
             st[k] = empty
     st.setdefault("day", "")
@@ -278,7 +280,7 @@ def classify(error) -> str | None:
         return "helper"
     if any(w in low for w in NEVER):
         return None
-    return "transient" if TRANSIENT.search(e) else None
+    return "transient" if PASSING.search(e) else None
 
 
 def _helper_online(kind: str) -> bool:
@@ -777,7 +779,7 @@ def _errors(st: dict, now) -> dict:
                 _mark_handled(st, k, "disk", now)
             out["handled"] += 1
             continue
-        if TRANSIENT.search(text):
+        if PASSING.search(text):
             lasted = max(_mark_handled(st, k, "passing", now) for k, _e, _d in items)
             if not any(f.get("r") == "errors" and f.get("w") == where and (_dt(f.get("at")) or now) > hour
                        for f in st["fixed"]) and _cap_ok(st, "errors"):
@@ -801,7 +803,75 @@ def _errors(st: dict, now) -> dict:
                                          f"{e0.get('type')}: {str(e0.get('text') or '')[:200]}"
                                          + (f" ({e0.get('line')})" if e0.get("line") else ""), now):
             out["alerted"] += 1
+    out.update(_settle(st, now))
     return out
+
+
+RESOLVE_AFTER = timedelta(hours=6)  # a passing fault not seen again this long: resolved ("Fixed by itself")
+QUIET_AFTER = timedelta(days=3)  # any other error not seen again this long: "Seen before, quiet now"
+PASSING = re.compile(TRANSIENT.pattern + r"|QueuePool limit|connection timed out|Internal error encountered|HttpError 5\d\d",
+                     re.I)
+
+
+def _err_at(e: dict):
+    return _dt(str(e.get("at") or "").rstrip("Z"))
+
+
+def passing_kind(text: str) -> str:
+    """What a passing fault was, in plain words."""
+    if re.search(r"QueuePool|connection timed out", text, re.I):
+        return "a short database rush"
+    if re.search(r"database is locked", text, re.I):
+        return "a short database lock"
+    if re.search(r"backendError|Internal error encountered|HttpError 5\d\d|googleapis", text, re.I):
+        return "a passing hiccup at Google / YouTube"
+    if re.search(r"\b50[234]\b|Bad Gateway|Service Unavailable|Gateway Time-?out", text, re.I):
+        return "a short outage while the server restarted"
+    return "a short network drop"
+
+
+def _settle(st: dict, now) -> dict:
+    """System errors clear themselves: a passing fault not seen again for 6 hours is resolved (a plain line in Fixed by
+    itself); any other error quiet for 3 days moves to "Seen before, quiet now". Nothing is deleted; when an error comes
+    back (its time changes) it shows again as usual."""
+    from .alerts import _where
+    from .guide import recent_errors
+
+    out = {"resolved": 0, "quiet": 0}
+    live = set()
+    for e in recent_errors():
+        k, at = err_key(e), _err_at(e)
+        if not at:
+            continue
+        live.add(k)
+        stamp = str(e.get("at"))
+        text = f"{e.get('type')} {e.get('text')}"
+        if PASSING.search(text):
+            if now - at >= RESOLVE_AFTER and (st["resolved"].get(k) or {}).get("at") != stamp:
+                w = at + IST
+                line = f"{_where(e.get('where'))}: {passing_kind(text)} on {w.day} {w:%b} — it did not come back."
+                st["resolved"][k] = {"at": stamp, "line": line}
+                st["fixed"].append({"at": _iso(now), "r": "errors", "t": line[:400], "kind": "fixed", "clip": None})
+                _log_activity(line)
+                out["resolved"] += 1
+        elif now - at >= QUIET_AFTER and st["quiet"].get(k) != stamp:
+            st["quiet"][k] = stamp
+            out["quiet"] += 1
+    st["resolved"] = {k: v for k, v in st["resolved"].items() if k in live}
+    st["quiet"] = {k: v for k, v in st["quiet"].items() if k in live}
+    return out
+
+
+def settled() -> tuple[set, set]:
+    """(resolved, quiet) System errors as (key, time) pairs: left out of the System errors tab and its count."""
+    if not enabled("errors"):
+        return set(), set()
+    try:
+        st = _load()
+    except Exception:  # noqa: BLE001
+        return set(), set()
+    return ({(k, v.get("at")) for k, v in st["resolved"].items() if isinstance(v, dict)},
+            {(k, v) for k, v in st["quiet"].items()})
 
 
 def handled_keys() -> set:
@@ -883,7 +953,19 @@ def public() -> dict:
         if f.get("kind") == "fixed":
             counts[f.get("r")] = counts.get(f.get("r"), 0) + 1
     cfg = config()
-    return {"on": enabled(), "allowed": allowed(), "config": cfg,
+    quiet = []
+    try:  # System errors quiet for 3 days: kept, shown apart, not counted
+        from .alerts import _where
+        from .guide import recent_errors
+
+        _r, q = settled()
+        for e in recent_errors():
+            if (err_key(e), str(e.get("at"))) in q:
+                quiet.append({"at": e.get("at"), "title": _where(e.get("where")), "count": int(e.get("count") or 1),
+                              "tech": f"{e.get('type')}: {e.get('text')}"})
+    except Exception:  # noqa: BLE001
+        quiet = []
+    return {"on": enabled(), "allowed": allowed(), "config": cfg, "quiet": quiet,
             "remedies": [{"key": k, "name": v, "on": k not in cfg["off"]} for k, v in REMEDIES.items()],
             "existing": [{"key": k, "name": v} for k, v in EXISTING.items()],
             "counts": counts, "fixed_total": sum(counts.values()),

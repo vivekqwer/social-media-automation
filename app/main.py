@@ -121,6 +121,26 @@ class ChangePwIn(BaseModel):
     new_password: str = Field(max_length=200)
 
 
+# Dashboard reads of clips (GET /api/clips...) at most this many at once: a burst of them (many tabs, a fast scroll)
+# must never take every database connection from the uploads and the other background work (24 Nov: QueuePool
+# timeout). A threading semaphore polled without blocking works with any event loop and never ties up a thread.
+READ_SLOTS = int(os.getenv("CLIP_READ_SLOTS") or "6")
+READ_WAIT = 15.0  # seconds a read waits for a slot before "busy, try again"
+_READ_GATE = __import__("threading").BoundedSemaphore(READ_SLOTS)
+
+
+async def _read_slot() -> bool:
+    import asyncio
+    import time as _time
+
+    until = _time.monotonic() + READ_WAIT
+    while not _READ_GATE.acquire(blocking=False):
+        if _time.monotonic() > until:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     path = request.url.path
@@ -224,12 +244,20 @@ async def auth_gate(request: Request, call_next):
         denied = acl.check_request(request.method, real, who)  # what the Super Admin switched off for this account
         if denied:
             return JSONResponse({"detail": denied}, status_code=403)
-        with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
-            if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
-                with acl.as_super():
+        gated = request.method == "GET" and path.startswith("/api/clips")
+        if gated and not await _read_slot():
+            return JSONResponse({"detail": "The server is busy right now. Try again in a moment."}, status_code=503)
+        try:
+            with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
+                if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
+                    with acl.as_super():
+                        resp = await call_next(request)
+                else:
                     resp = await call_next(request)
-            else:
-                resp = await call_next(request)
+        finally:
+            if gated:
+                _READ_GATE.release()
+        with tenant.use(who["tenant"]):
             acl.log_request(who, request.method, real, resp.status_code)
             if request.method != "GET":  # something changed: the Alerts number is counted afresh on the next poll
                 _badge_cache.pop(who["tenant"], None)
@@ -3470,10 +3498,11 @@ def health():
             from . import watchdog
 
             done, ek = watchdog.handled_keys(), watchdog.err_key
+            settled = set().union(*watchdog.settled())
         except Exception:  # noqa: BLE001
-            done, ek = set(), None
+            done, ek, settled = set(), None, set()
         fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()
-                 and not (done and ek(e) in done)]
+                 and not (done and ek(e) in done) and not (settled and (ek(e), str(e.get("at"))) in settled)]
         n_err = sum(int(e.get("count") or 1) for e in fresh)
         if n_err >= 3:
             items.append({"level": "warn", "text": f"{n_err} unexpected server problems in the last 6 hours "
