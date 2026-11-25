@@ -411,13 +411,13 @@ def start():
                 coalesce=True)
     add(when_on("page.analytics", lambda: executor.submit(weekly_report)), "cron", day_of_week="sun", hour=15, minute=35,
                 max_instances=1, coalesce=True)  # Sunday 9:05 PM IST
-    from .permissions import check_replies, daily_summary as perm_summary, email_round, lookup_pool, refresh_inbox
+    from .permissions import check_replies, daily_summary as perm_summary, email_round, refresh_inbox, submit_once
     # every account with Gmail connected reads ITS OWN replies (its own Gmail token); not on the single render worker
-    add(when_on("gmail.send", lambda: lookup_pool.submit(check_replies)), "interval", minutes=15, max_instances=1,
+    add(when_on("gmail.send", lambda: submit_once(check_replies)), "interval", minutes=15, max_instances=1,
         coalesce=True)
     # creators' public e-mails (description -> recent videos -> their linked pages) and, when the account switched it
     # on, at most one permission mail by itself (5 a day, 1 every 2 hours)
-    add(lambda: lookup_pool.submit(email_round), "interval", minutes=30, max_instances=1, coalesce=True,
+    add(lambda: submit_once(email_round), "interval", minutes=30, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=11))
     add(perm_summary, "cron", hour=15, minute=40, max_instances=1, coalesce=True)  # 9:10 PM IST: one summary per account
     add(when_on("permissions.manage", lambda: executor.submit(refresh_inbox)), "cron", hour=4, minute=30, max_instances=1,

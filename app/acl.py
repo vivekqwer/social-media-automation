@@ -334,6 +334,7 @@ ROUTES = [
     ("POST", "/api/permissions/{cid}/mark/{status}", "permissions.manage", None),
     ("POST", "/api/permissions/{cid}/message", "permissions.manage", None),
     ("POST", "/api/permissions/{cid}/email", "permissions.manage", None),
+    ("POST", "/api/permissions/{cid}/confirm-email", "permissions.manage", "Confirmed a creator's e-mail address"),
     ("POST", "/api/permissions/{cid}/grant", "permissions.manage", "Recorded a creator's yes"),
     ("POST", "/api/permissions/{cid}/grant-reply", "permissions.manage", "Recorded a creator's yes"),
     ("POST", "/api/permissions/{cid}/revoke", "permissions.manage", "Took back a creator's permission"),

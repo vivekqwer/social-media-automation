@@ -95,40 +95,104 @@ def _save(d: dict):
     set_setting(KEY, json.dumps(d))
 
 
+# ---------------------------------------------------------------- one writer at a time (per account)
+_locks: dict[int, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
+
+def _lock():
+    """One lock per account: every read-change-write of the creators list goes through it, so no change (a sent mail,
+    a reply, the owner's decision) is ever lost. YouTube / Gmail / web calls are made outside it."""
+    tid = tenant.current()
+    with _locks_guard:
+        return _locks.setdefault(tid, threading.RLock())
+
+
+def _update(cid: str, fn) -> dict | None:
+    with _lock():
+        d = _load()
+        c = d.get(cid)
+        if c is None:
+            return None
+        fn(c)
+        _save(d)
+        return c
+
+
+def _ts(v) -> datetime | None:
+    try:
+        return datetime.fromisoformat(str(v).rstrip("Z")) if v else None
+    except ValueError:
+        return None
+
+
+def _now_iso() -> str:
+    return utcnow().isoformat() + "Z"
+
+
+# ---------------------------------------------------------------- the background pool (searches, replies)
+lookup_pool = _LoggingExecutor(max_workers=2)  # e-mail searches and reply checks: never on the single render worker
+MAX_QUEUED = 60  # at most this many rounds waiting or running, over all accounts
+_busy: set = set()
+_busy_lock = threading.Lock()
+
+
+def submit_once(fn):
+    """Queue fn for the running account in lookup_pool, unless the same round is already queued or running for it
+    (or the pool is full). Returns the future, or None when nothing was queued."""
+    key = (tenant.current(), getattr(fn, "__name__", repr(fn)))
+    with _busy_lock:
+        if key in _busy or len(_busy) >= MAX_QUEUED:
+            return None
+        _busy.add(key)
+
+    def run():
+        try:
+            return fn()
+        finally:
+            with _busy_lock:
+                _busy.discard(key)
+    run.__name__ = key[1]
+    try:
+        return lookup_pool.submit(run)
+    except Exception:
+        with _busy_lock:
+            _busy.discard(key)
+        raise
+
+
 def refresh_inbox() -> list[dict]:
     """Add today's creators of popular non-CC videos (max 5 new a day) and tell the owner on Telegram."""
-    from . import youtube
+    from . import strikes, youtube
     from .competitors import overview, trending
 
-    d = _load()
-    today = utcnow().strftime("%Y-%m-%d")
-    added = [c for c in d.values() if c.get("added") == today]
-    candidates = []
+    candidates = []  # YouTube is read before the list is locked
     try:
         candidates += [v for v in trending("") if not v.get("cc")]
     except Exception as e:  # noqa: BLE001
         log.warning("permission inbox: trending: %s", str(e)[:150])
         _note("Permission inbox: reading trending videos", e)
     candidates += [{**v, "channel_id": v["channel_url"].rsplit("/", 1)[-1]} for v in overview().get("outliers", [])]
-    new = []
-    from . import strikes
-
     struck = strikes.blocked()  # creators on the never-use list after a strike are never asked again
-    for v in candidates:
-        cid = v.get("channel_id") or ""
-        if len(added) + len(new) >= PER_DAY:
-            break
-        if not cid or cid in d or cid in struck or youtube.RISKY.search(v.get("title", "")) or LABELS.search(v.get("channel", "")):
-            continue
-        d[cid] = {"channel_id": cid, "name": v.get("channel", ""), "url": f"https://www.youtube.com/channel/{cid}",
-                  "video_id": v["video_id"], "video_title": v.get("title", ""), "views": v.get("views", 0),
-                  "status": "new", "added": today}
-        d[cid]["subject"], d[cid]["message"] = compose(v.get("channel", ""), v.get("title", ""), cid)
-        new.append(d[cid])
-    _save(d)
+    new = []
+    with _lock():
+        d = _load()
+        today = utcnow().strftime("%Y-%m-%d")
+        added = [c for c in d.values() if c.get("added") == today]
+        for v in candidates:
+            cid = v.get("channel_id") or ""
+            if len(added) + len(new) >= PER_DAY:
+                break
+            if not cid or cid in d or cid in struck or youtube.RISKY.search(v.get("title", "")) or LABELS.search(v.get("channel", "")):
+                continue
+            d[cid] = {"channel_id": cid, "name": v.get("channel", ""), "url": f"https://www.youtube.com/channel/{cid}",
+                      "video_id": v["video_id"], "video_title": v.get("title", ""), "views": v.get("views", 0),
+                      "status": "new", "added": today, "added_at": _now_iso()}
+            d[cid]["subject"], d[cid]["message"] = compose(v.get("channel", ""), v.get("title", ""), cid)
+            new.append(dict(d[cid]))
+        _save(d)
     if new:  # their e-mail is looked up right away, away from the render worker (website reads can be slow)
-        lookup_pool.submit(email_round)
-    if new:
+        submit_once(email_round)
         try:
             from .telegram import esc, notify
 
@@ -174,6 +238,14 @@ def _yt_error(e: Exception, where: str):
     _note("Permission inbox: " + where, e)
 
 
+def _channel_text(it: dict) -> str:
+    return (it.get("snippet") or {}).get("description", "") + "\n" + \
+        ((it.get("brandingSettings") or {}).get("channel") or {}).get("description", "")
+
+
+_desc_trust: dict = {}  # (account, channel id) -> (address, trusted) from the last lookup_emails
+
+
 def lookup_emails(channel_ids: list[str]) -> dict:
     """{channel_id: public email} from channel descriptions (1 quota unit per 50 channels)."""
     from . import creator_email as ce, quota, youtube
@@ -190,25 +262,35 @@ def lookup_emails(channel_ids: list[str]) -> dict:
             _yt_error(e, "looking up creators' emails")
             return out
         for it in r.get("items", []):
-            text = it.get("snippet", {}).get("description", "") + "\n" + it.get("brandingSettings", {}).get("channel", {}).get("description", "")
-            m = ce.best(text, ce.own_domains(ce.links(text)))
-            if m:
-                out[it["id"]] = m
+            sn = it.get("snippet") or {}
+            e, trusted = ce.description_pick(_channel_text(it), [sn.get("title", ""), sn.get("customUrl", "")])
+            if e:
+                out[it["id"]] = e
+                if len(_desc_trust) > 2000:  # only the picks of the moment are needed
+                    _desc_trust.clear()
+                _desc_trust[(tenant.current(), it["id"])] = (e, trusted, _channel_text(it), sn.get("customUrl", ""))
     return out
 
 
 def add_creator(cid: str, name: str, video_id: str, video_title: str, views: int, email: str = "") -> dict:
     """Put a creator in the inbox (from the viral picks) with a ready mail about this exact video."""
+    from . import creator_email as ce
+
+    known = _desc_trust.pop((tenant.current(), cid), None)
+    trust = "check"
+    if known and email and known[0] == email.lower():
+        e2, t2 = ce.description_pick(known[2], [name, known[3]])  # now with the channel's name from the board too
+        trust = "channel" if known[1] or (e2 == known[0] and t2) else "check"
     with _lock():
         d = _load()
         c = d.get(cid)
         if not c:
             c = d[cid] = {"channel_id": cid, "name": name, "url": f"https://www.youtube.com/channel/{cid}", "video_id": video_id,
                           "video_title": video_title, "views": views, "status": "new", "added": utcnow().strftime("%Y-%m-%d"),
-                          "email_checked": True}
+                          "added_at": _now_iso(), "email_checked": True}
             c["subject"], c["message"] = compose(name, video_title, cid)
         if email and not c.get("email"):
-            c["email"], c["email_from"] = email, "their channel description"
+            c["email"], c["email_from"], c["email_trust"] = email, "their channel description", trust
         _save(d)
         return c
 
@@ -218,34 +300,7 @@ SEARCH_TRIES = 3  # a creator still without an address is looked up again weekly
 SEARCH_EVERY = timedelta(days=7)
 SEARCH_PER_ROUND = 10
 LOOKING_STALE = timedelta(minutes=30)
-lookup_pool = _LoggingExecutor(max_workers=2)  # e-mail searches and reply checks: never on the single render worker
-_locks: dict[int, threading.Lock] = {}
-_locks_guard = threading.Lock()
-
-
-def _lock() -> threading.Lock:
-    """One lock per account: read-change-write of the creators list never loses another thread's change."""
-    tid = tenant.current()
-    with _locks_guard:
-        return _locks.setdefault(tid, threading.RLock())
-
-
-def _update(cid: str, fn) -> dict | None:
-    with _lock():
-        d = _load()
-        c = d.get(cid)
-        if c is None:
-            return None
-        fn(c)
-        _save(d)
-        return c
-
-
-def _ts(v) -> datetime | None:
-    try:
-        return datetime.fromisoformat(str(v).rstrip("Z")) if v else None
-    except ValueError:
-        return None
+TRUST_AUTO = ("channel", "hand")  # may be mailed by itself; "check" = found in videos / pages: the owner confirms first
 
 
 def _search_due(c: dict, now: datetime) -> bool:
@@ -265,7 +320,8 @@ def search_view(c: dict) -> dict:
     s = c.get("email_search") or {}
     tried = s.get("tried") or []
     if c.get("email"):
-        return {"state": "found", "from": c.get("email_from") or "added by hand"}
+        return {"state": "found", "from": c.get("email_from") or "added by hand",
+                "confirm": c.get("email_trust") == "check" and not c.get("mailed")}
     if s.get("state") == "looking" and (_ts(s.get("started")) or utcnow()) > utcnow() - LOOKING_STALE:
         return {"state": "looking"}
     tries = int(s.get("tries") or 0)
@@ -278,18 +334,19 @@ def search_view(c: dict) -> dict:
     return {"state": "queued" if c.get("status") == "new" else "idle"}
 
 
-def _search_one(item: dict, waiting: int):
-    """All stages for one creator: (email | None, where | None, stages tried, notes), or None = put off (the YouTube
-    budget is kept for uploads; no try is counted)."""
+def _search_one(item: dict, waiting: int, name: str):
+    """All stages for one creator: (email | None, where | None, trust, stages tried, notes), or None = put off (the
+    YouTube budget is kept for uploads; no try is counted)."""
     from . import creator_email as ce, quota, youtube
 
     sn = item.get("snippet") or {}
-    text = (sn.get("description") or "") + "\n" + ((item.get("brandingSettings") or {}).get("channel") or {}).get("description", "")
+    names = [name, sn.get("title", ""), sn.get("customUrl", "")]
+    text = _channel_text(item)
     urls = ce.links(text)
-    own = ce.own_domains(urls)
-    e = ce.best(text, own)
+    own = ce.own_domains(urls, names)
+    e, trusted = ce.description_pick(text, names)
     if e:
-        return e, ce.LABEL_CHANNEL, ["description"], []
+        return e, ce.LABEL_CHANNEL, ("channel" if trusted else "check"), ["description"], []
     tried, notes = ["description"], []
     uploads = ((item.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads")
     if uploads:
@@ -306,9 +363,9 @@ def _search_one(item: dict, waiting: int):
                 quota.spend("read")
                 vids = [{"title": (v.get("snippet") or {}).get("title", ""),
                          "description": (v.get("snippet") or {}).get("description", "")} for v in vr.get("items", [])]
-            hit = ce.from_videos(vids, own)
+            hit = ce.from_videos(vids, own, names)
             if hit:
-                return hit[0], f"description of video “{ce.short_title(hit[1])}”", tried + ["videos"], notes
+                return hit[0], f"description of video “{ce.short_title(hit[1])}”", "check", tried + ["videos"], notes
         except Exception as ex:  # noqa: BLE001
             _yt_error(ex, "reading a creator's recent videos")
             notes.append("their recent videos could not be read")
@@ -317,17 +374,17 @@ def _search_one(item: dict, waiting: int):
     tried += ["videos", "website"]
     if not urls:
         notes.append("no website link on the channel")
-        return None, None, tried, notes
+        return None, None, "check", tried, notes
     f = ce.Fetcher()
     try:
-        hit = ce.search_links(urls, f)
+        hit = ce.search_links(urls, f, names)
     except Exception as ex:  # noqa: BLE001
         hit = None
         notes.append(f"their pages could not be read ({type(ex).__name__})")
     notes += f.notes[:4]
     if hit:
-        return hit[0], hit[1], tried, notes
-    return None, None, tried, notes
+        return hit[0], hit[1], "check", tried, notes
+    return None, None, "check", tried, notes
 
 
 def find_emails(only: str | None = None, deadline_s: float | None = None) -> int:
@@ -355,6 +412,7 @@ def find_emails(only: str | None = None, deadline_s: float | None = None) -> int
     if not _budget_ok(3, waiting):  # put off: no try is counted
         return 0
     ids = [c["channel_id"] for c in todo]
+    names = {c["channel_id"]: c.get("name") or "" for c in todo}
     stamp = now.isoformat() + "Z"
     for cid in ids:
         _update(cid, lambda c: c.setdefault("email_search", {}).update(state="looking", started=stamp))
@@ -379,23 +437,41 @@ def find_emails(only: str | None = None, deadline_s: float | None = None) -> int
             for rest in ids[n:]:  # the timed round does the rest
                 stop_looking(rest)
             break
-        res = _search_one(items.get(cid) or {}, waiting)
+        res = _search_one(items.get(cid) or {}, waiting, names[cid])
         if res is None:
             stop_looking(cid)
             continue
-        email, where, tried, notes = res
-        at = utcnow().isoformat() + "Z"
+        email, where, trust, tried, notes = res
+        at = _now_iso()
+        handle = ((items.get(cid) or {}).get("snippet") or {}).get("customUrl") or ""
 
-        def save(c, email=email, where=where, tried=tried, notes=notes, at=at):
+        def save(c, email=email, where=where, trust=trust, tried=tried, notes=notes, at=at, handle=handle):
             s = c.setdefault("email_search", {})
             s.update(state="found" if email else "none", tries=int(s.get("tries") or 0) + 1, last=at, tried=tried,
                      notes=notes[:5])
             c["email_checked"] = True
+            if handle:
+                c["handle"] = handle
             if email and not c.get("email") and not c.get("mailed"):
-                c["email"], c["email_from"], c["email_found_at"] = email, where, at
+                c.update(email=email, email_from=where, email_found_at=at, email_trust=trust)
         _update(cid, save)
         found += bool(email)
     return found
+
+
+def confirm_email(cid: str) -> dict:
+    """The owner checked an address found in videos / on a website: it may now be mailed by itself, and a plain yes
+    from it may start the source by itself."""
+    def ok(c):
+        if not c.get("email"):
+            raise ValueError("There is no address to confirm.")
+        c["email_trust"] = "hand"
+        c["email_confirmed_at"] = _now_iso()
+    with _lock():
+        c = _update(cid, ok)
+    if c is None:
+        raise KeyError(cid)
+    return c
 
 
 def email_round():
@@ -414,19 +490,52 @@ def email_round():
 
 # ---------------------------------------------------------------- sending by itself (the account's switch)
 AUTO_KEY = "perm_auto_send"  # "1" on, "0" / missing off (customers start OFF)
+SINCE_KEY = "perm_auto_since"  # only creators added after the switch went on are mailed by themselves
+PAUSE_KEY = "perm_auto_paused"  # {"at", "why"}: Gmail sign-in failed or a send may have gone out -> paused
 LAST_KEY = "perm_mail_last"  # when the last permission mail went out (by hand or by itself)
 MAIL_LOG = "perm_mail_log"  # [{at, cid, name, email, by}] (newest 200)
 SUMMARY_KEY = "perm_summary_at"
 SPREAD = timedelta(hours=2)
 SENDING_STALE = timedelta(minutes=15)
+_auto_locks: dict[int, threading.Lock] = {}
 
 
 def auto_on() -> bool:
     return get_setting(AUTO_KEY) == "1"
 
 
+def paused() -> dict | None:
+    try:
+        p = json.loads(get_setting(PAUSE_KEY) or "null")
+    except ValueError:
+        return None
+    return p if isinstance(p, dict) and p.get("why") else None
+
+
+def _pause(why: str):
+    """Stop sending by itself for this account until Gmail is reconnected (or the switch is turned on again), and
+    tell the owner once."""
+    if paused():
+        return
+    set_setting(PAUSE_KEY, json.dumps({"at": _now_iso(), "why": why[:200]}))
+    _activity("gmail.send", "Permission mails by themselves paused: " + why[:200])
+    try:
+        from .telegram import esc, notify
+
+        notify("⚠️ <b>Permission mails paused — reconnect Gmail</b>\n" + esc(why[:200]) +
+               "\n\nNothing more is sent by itself until you reconnect Gmail (My channels → Gmail) or switch "
+               "“Send permission mails by themselves” on again.")
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def save_auto(on: bool) -> dict:
+    was = auto_on()
     set_setting(AUTO_KEY, "1" if on else "0")
+    if on:
+        set_setting(PAUSE_KEY, "")
+        if not was:  # creators already in the list are not mailed by themselves: only the ones that come after
+            set_setting(SINCE_KEY, _now_iso())
     return auto_public()
 
 
@@ -436,15 +545,18 @@ def auto_public() -> dict:
 
     allowed = acl.allowed("gmail.send")
     last = _ts(get_setting(LAST_KEY))
+    p = paused()
     return {"auto": auto_on(), "gmail": gmail.connected_email() or "", "allowed": allowed, "per_day": gmail.MAX_PER_DAY,
             "sent_today": gmail._sent_today(), "spread_hours": int(SPREAD.total_seconds() // 3600),
             "next_at": ((last + SPREAD).isoformat() + "Z") if last and last + SPREAD > utcnow() else None,
+            "since": get_setting(SINCE_KEY) or None, "paused": p["why"] if p else "",
             "note": "" if allowed else acl.message("gmail.send")}
 
 
 def migrate_auto_send() -> str:
-    """Once, at start-up, in the owner's copy: the switch starts ON only when the owner's Gmail is already connected.
-    Customers start OFF (nothing stored = off). A choice that was already made is never changed."""
+    """Once, at start-up, in the owner's copy: the switch starts ON only when the owner's Gmail is already connected
+    (and then only for creators added from now on). Customers start OFF (nothing stored = off). A choice that was
+    already made is never changed."""
     from . import gmail
 
     with tenant.use(tenant.OWNER):
@@ -452,9 +564,19 @@ def migrate_auto_send() -> str:
         if cur is None:
             cur = "1" if gmail.connected_email() else "0"
             set_setting(AUTO_KEY, cur)
+            if cur == "1":
+                set_setting(SINCE_KEY, _now_iso())
             log.info("permission mails by themselves: %s for the owner (Gmail %s)", "ON" if cur == "1" else "OFF",
                      "connected" if cur == "1" else "not connected")
         return cur
+
+
+def is_label(name: str, email: str = "") -> bool:
+    """A music label / film studio / TV network, by the channel name or by the address's domain."""
+    from . import creator_email as ce
+
+    dom = (email or "").rpartition("@")[2].lower()
+    return bool(LABELS.search(name or "") or (dom and (LABELS.search(ce.site_label(dom)) or LABELS.search(dom.replace(".", " ")))))
 
 
 def auto_block(c: dict, d: dict | None = None) -> str | None:
@@ -471,12 +593,18 @@ def auto_block(c: dict, d: dict | None = None) -> str | None:
         return "no address yet"
     if not EMAIL_RE.match(em) or ce.reject_reason(em):
         return "this address cannot be used"
+    if c.get("email_trust") not in TRUST_AUTO:
+        return "found in their videos or on a website (or not clearly theirs) — confirm it, or press Send yourself"
+    since = _ts(get_setting(SINCE_KEY))
+    added = _ts(c.get("added_at"))
+    if not since or not added or added < since:
+        return "was in the list before sending by itself was switched on — press Send yourself"
     others = [o for o in (d if d is not None else _load()).values() if o.get("channel_id") != c.get("channel_id")
               and (o.get("email") or "").strip().lower() == em]
     if others:
         return (f"this address also belongs to {others[0].get('name') or 'another creator'} in the list — "
                 "press Send yourself if it is right")
-    if LABELS.search(c.get("name") or ""):
+    if is_label(c.get("name") or "", em):
         return "music labels and big studios are never mailed by themselves"
     if strikes.is_blocked(c.get("channel_id")) or strikes.is_blocked(c.get("url")):
         return "on the never-use list after a strike"
@@ -484,32 +612,48 @@ def auto_block(c: dict, d: dict | None = None) -> str | None:
 
 
 def auto_send_due() -> str | None:
-    """Send at most ONE ready mail by itself (switch on, Gmail connected and allowed, daily cap and 2-hour spread kept).
-    Returns the channel id that was mailed, or None."""
+    """Send at most ONE ready mail by itself (switch on, Gmail connected and allowed, inbox allowed, not paused, daily
+    cap and 2-hour spread kept). One round at a time per account; the 2-hour mark is taken BEFORE the send and given
+    back only when nothing went out. Returns the channel id that was mailed, or None."""
     from . import acl, gmail
 
-    if not auto_on() or not acl.allowed("gmail.send") or not gmail.connected_email():
+    tid = tenant.current()
+    with _locks_guard:
+        lk = _auto_locks.setdefault(tid, threading.Lock())
+    if not lk.acquire(blocking=False):  # another round of this account is sending right now
         return None
-    if gmail._sent_today() >= gmail.MAX_PER_DAY:
-        return None
-    last = _ts(get_setting(LAST_KEY))
-    if last and utcnow() - last < SPREAD:
-        return None
-    d = _load()
-    ready = sorted((c for c in d.values() if auto_block(c, d) is None),
-                   key=lambda c: (c.get("added") or "", c.get("name") or ""))
-    for c in ready:
-        try:
-            send_mail(c["channel_id"], by="auto")
-            return c["channel_id"]
-        except (ValueError, KeyError) as e:
-            log.info("permission mail to %s not sent by itself: %s", c.get("name"), str(e)[:150])
-            if gmail._sent_today() >= gmail.MAX_PER_DAY:
-                return None
-        except Exception as e:  # noqa: BLE001  (it may or may not have gone out: stop for this round)
-            _note("Sending a permission mail by itself", e)
+    try:
+        if not auto_on() or paused() or not acl.allowed("gmail.send") or not acl.allowed("permissions.manage") \
+                or not gmail.connected_email():
             return None
-    return None
+        if gmail._sent_today() >= gmail.MAX_PER_DAY:
+            return None
+        last = _ts(get_setting(LAST_KEY))
+        if last and utcnow() - last < SPREAD:
+            return None
+        d = _load()
+        ready = sorted((c for c in d.values() if auto_block(c, d) is None),
+                       key=lambda c: (c.get("added_at") or "", c.get("name") or ""))
+        for c in ready:
+            before = get_setting(LAST_KEY) or ""
+            set_setting(LAST_KEY, _now_iso())  # the spread is taken first: a second round can never slip in
+            try:
+                send_mail(c["channel_id"], by="auto")
+                return c["channel_id"]
+            except gmail.SignInError:
+                set_setting(LAST_KEY, before)  # nothing went out (send_mail paused sending by itself)
+                return None
+            except (ValueError, KeyError) as e:
+                set_setting(LAST_KEY, before)  # refused before anything left
+                log.info("permission mail to %s not sent by itself: %s", c.get("name"), str(e)[:150])
+                if gmail._sent_today() >= gmail.MAX_PER_DAY:
+                    return None
+            except Exception as e:  # noqa: BLE001  (it may or may not have gone out: the mark stays, sending pauses)
+                _note("Sending a permission mail by itself", e)
+                return None
+        return None
+    finally:
+        lk.release()
 
 
 def _activity(action: str, detail: str, actor: str = "system"):
@@ -526,14 +670,15 @@ def _activity(action: str, detail: str, actor: str = "system"):
 
 
 def _log_mail(c: dict, by: str):
-    try:
-        entries = json.loads(get_setting(MAIL_LOG) or "[]")
-    except ValueError:
-        entries = []
-    entries.append({"at": utcnow().isoformat() + "Z", "cid": c["channel_id"], "name": c.get("name"), "email": c.get("email"),
-                    "by": by})
-    set_setting(MAIL_LOG, json.dumps(entries[-200:]))
-    set_setting(LAST_KEY, utcnow().isoformat() + "Z")
+    with _lock():
+        try:
+            entries = json.loads(get_setting(MAIL_LOG) or "[]")
+        except ValueError:
+            entries = []
+        entries.append({"at": _now_iso(), "cid": c["channel_id"], "name": c.get("name"), "email": c.get("email"), "by": by})
+        set_setting(MAIL_LOG, json.dumps(entries[-200:]))
+    if by != "auto":  # by itself, the mark was already taken before the send
+        set_setting(LAST_KEY, _now_iso())
 
 
 def listing() -> list[dict]:
@@ -556,7 +701,7 @@ def set_status(cid: str, status: str) -> dict:
         if cid not in d:
             raise KeyError(cid)
         d[cid]["status"] = status
-        d[cid][status + "_at"] = utcnow().isoformat() + "Z"
+        d[cid][status + "_at"] = _now_iso()
         _save(d)
         return d[cid]
 
@@ -573,41 +718,44 @@ def set_email(cid: str, email: str) -> dict:
             raise KeyError(cid)
         c = d[cid]
         if (c.get("email") or "").strip().lower() != email.lower():
-            c["email"], c["email_from"] = email, "added by hand"
+            c.update(email=email, email_from="added by hand", email_trust="hand")
         _save(d)
         return c
 
 
 def rewrite_unsent() -> int:
     """Give creators who have not been mailed yet the new, natural message (keeps messages the owner edited)."""
-    d = _load()
-    n = 0
-    for c in d.values():
-        if not c.get("mailed") and not c.get("edited") and c["status"] in ("new", "asked"):
-            c["subject"], c["message"] = compose(c.get("name", ""), c.get("video_title", ""), c["channel_id"])
-            n += 1
-    _save(d)
-    return n
+    with _lock():
+        d = _load()
+        n = 0
+        for c in d.values():
+            if not c.get("mailed") and not c.get("edited") and not c.get("sending") and c["status"] in ("new", "asked"):
+                c["subject"], c["message"] = compose(c.get("name", ""), c.get("video_title", ""), c["channel_id"])
+                n += 1
+        _save(d)
+        return n
 
 
 def set_message(cid: str, subject: str, message: str) -> dict:
-    d = _load()
-    if cid not in d:
-        raise KeyError(cid)
-    if d[cid].get("mailed"):
-        raise ValueError("Already sent.")
-    if len((message or "").strip()) < 30:
-        raise ValueError("The message is too short.")
-    d[cid].update(subject=(subject or "").strip()[:150] or d[cid].get("subject"), message=message.strip()[:4000], edited=True)
-    _save(d)
-    return d[cid]
+    with _lock():
+        d = _load()
+        if cid not in d:
+            raise KeyError(cid)
+        if d[cid].get("mailed") or d[cid].get("sending"):
+            raise ValueError("Already sent.")
+        if len((message or "").strip()) < 30:
+            raise ValueError("The message is too short.")
+        d[cid].update(subject=(subject or "").strip()[:150] or d[cid].get("subject"), message=message.strip()[:4000], edited=True)
+        _save(d)
+        return d[cid]
 
 
 def send_mail(cid: str, by: str = "hand") -> dict:
     """Send the ready message from the account's Gmail. by: "hand" / "dashboard" / "telegram" (the owner pressed Send)
     or "auto" (the account's switch, see auto_send_due). Every way of sending comes through here.
     Never twice: the creator is claimed under a lock before Gmail is called, and a send that may or may not have gone
-    out is never repeated by itself."""
+    out is never repeated by itself. A Gmail sign-in problem, or a send that may have gone out, pauses sending by
+    itself for the account (the owner is told once)."""
     from . import acl, gmail
 
     if not acl.allowed("gmail.send"):  # every way of sending (dashboard, Viral page, Telegram, by itself) comes here
@@ -633,18 +781,23 @@ def send_mail(cid: str, by: str = "hand") -> dict:
         to, body, subject = c["email"], c.get("message") or "", c.get("subject")
     try:
         res = gmail.send(to, body, subject)
+    except gmail.SignInError as e:  # nothing went out; the sign-in must be renewed
+        _update(cid, lambda c: c.pop("sending", None))
+        _pause(str(e))
+        raise
     except ValueError:  # refused before anything left (daily limit, bad address): it can be sent later
         _update(cid, lambda c: c.pop("sending", None))
         raise
     except Exception as e:  # it may or may not have gone out: never again by itself
         err = str(e)[:150]
         _update(cid, lambda c: (c.pop("sending", None), c.update(send_unsure=True, send_error=err)))
+        _pause(f"A mail to {c.get('name')} may or may not have gone out ({err}). Look in Gmail's Sent folder.")
         raise
 
     def done(c):
         c.pop("sending", None)
         c.pop("send_unsure", None)
-        c.update(status="asked", asked_at=utcnow().isoformat() + "Z", thread_id=res["thread_id"], mailed=True, sent_by=by)
+        c.update(status="asked", asked_at=_now_iso(), thread_id=res["thread_id"], mailed=True, sent_by=by)
     c = _update(cid, done)
     _log_mail(c, by)
     if by != "dashboard" or tenant.current() == tenant.OWNER:  # a customer's dashboard press is logged by the server
@@ -653,25 +806,53 @@ def send_mail(cid: str, by: str = "hand") -> dict:
     return c
 
 
+# ---------------------------------------------------------------- replies
 YES_RE = re.compile(r"\b(yes|yeah|yep|yup|sure|of course|go ahead|permission granted|granted|you can|you may|allowed|ok|okay|"
                     r"haan|han ji|haa|ji haan|bilkul|theek hai|thik hai|kar sakte|kar sakta|kar lo|kr lo|use kar)\b", re.I)
-# anything that is not a plain yes goes to the owner: refusals, conditions, money, legal words, questions
-NOT_PLAIN_YES = re.compile(r"\b(no|not|don'?t|dont|do not|never|nahi|nahin|nhi|mat|nope|sorry|can'?t|cannot|won'?t|wont|only|but|"
-                           r"however|condition|if|pay|paid|price|charge|fee|money|paise|rupees|rs|inr|license|licence|contract|"
-                           r"agreement|remove|delete|strike|copyright|claim|ask|later|wait|think|maybe|shayad|sochke)\b|\?", re.I)
+# anything that is not a plain yes goes to the owner: refusals, conditions, money, legal words, questions, auto-replies
+NOT_PLAIN_YES = re.compile(
+    r"\b(no|not|don'?t|dont|do not|never|nahi|nahin|nhi|mat|nope|sorry|can'?t|cannot|won'?t|wont|only|but|however|"
+    r"if|unless|first|after|condition\w*|terms?|pay\w*|paid|price\w*|pricing|charg\w*|fee\w*|rate\w*|cost\w*|money|"
+    r"paise|rupee\w*|rs|inr|usd|dollars?|budget|commercial|license\w*|licence\w*|contract\w*|agreement\w*|invoice\w*|"
+    r"remove|delete|strike|copyright|claim\w*|ask|later|wait|think|maybe|shayad|sochke|"
+    r"out of (the )?office|away|vacation|holiday|leave|travell?ing|auto(matic)?|automated|reach|contact\w*|revert|"
+    r"get back|team will|manager|management|agency|per (clip|video|short|post|reel)s?|"
+    r"for \d+ (videos?|clips?|shorts?|reels?|posts?))\b|\?|₹|\$|\d{3,}", re.I)
+# an out-of-office / auto-responder text (when the headers did not say so): passed over, the next message is read
+AUTO_TEXT = re.compile(
+    r"out of (the )?office|\bOOO\b|auto(matic)?[- ]?(reply|response|responder|generated)|this is an automated|"
+    r"on (annual |sick )?leave|on vacation|currently (away|travell?ing|unavailable|out)|away from (my )?(desk|e-?mail|office)|"
+    r"limited access to (my )?e-?mail|no longer (monitored|in use|active)|not (being )?monitored|"
+    r"will (get back|respond|reply) to you|get back to you (shortly|soon|within|as soon)|within \d+ ?(hours|hrs|business|working)|"
+    r"thank(s| you) for (your )?(e-?mail|message|mail|reaching out)[.!,]* (i|we)('m| am| are|'re| will| have)", re.I)
+QUOTE_CUT = re.compile(
+    r"\bOn .{0,160}?wrote:|\bFrom:\s.{0,200}?\b(Sent|Date):\s|-{2,}\s*Original Message\s*-{2,}|^\s*From:\s|^_{5,}|"
+    r"\bSent from (my )?\w+|\bGet Outlook for\b|\bNamaste\b|\bHi .{0,40}I'm a big fan|^>", re.I | re.M)
 
 
 def _own_words(snippet: str) -> str:
-    """The creator's new text only (drop the quoted original mail)."""
-    t = re.split(r"\bOn .{0,80}wrote:|\bNamaste\b|\bHi .{0,40}I'm a big fan|^>", snippet or "", maxsplit=1, flags=re.I | re.M)[0]
+    """The creator's new text only (drop the quoted original mail: Gmail, Outlook, phone signatures)."""
+    t = QUOTE_CUT.split(snippet or "", maxsplit=1)[0]
     return re.sub(r"\s+", " ", t).strip()
+
+
+def _sender_ok(c: dict, r: dict) -> bool:
+    """The reply comes from exactly the address we wrote to."""
+    from email.utils import parseaddr
+
+    want = (c.get("email") or "").strip().lower()
+    return bool(want) and parseaddr(r.get("from") or "")[1].strip().lower() == want
+
+
+def is_auto_text(r: dict) -> bool:
+    return bool(AUTO_TEXT.search(_own_words(r.get("snippet", "")) or r.get("snippet", "")))
 
 
 def plain_yes(c: dict, r: dict) -> bool:
     """A short, unconditional yes from the address we wrote to. Everything else waits for the owner."""
     text = _own_words(r.get("snippet", ""))
-    sender_ok = bool(c.get("email")) and c["email"].lower() in (r.get("from") or "").lower()
-    return sender_ok and 0 < len(text) <= 300 and bool(YES_RE.search(text)) and not NOT_PLAIN_YES.search(text)
+    return _sender_ok(c, r) and 0 < len(text) <= 300 and bool(YES_RE.search(text)) and not NOT_PLAIN_YES.search(text) \
+        and not AUTO_TEXT.search(text)
 
 
 # a short, clear refusal from the address we wrote to: marked "declined", nothing more is ever sent to them
@@ -681,38 +862,46 @@ NO_RE = re.compile(r"^\W*(no|nope|nah|nahi|nahin|nhi|na)\b|\b(not interested|don
                    r"allow nahi|permission nahi|nahi de sakta|nahi de sakte|nahi dunga|mana hai)\b", re.I)
 # ... but not when it is really a yes, a question, a condition or money: those go to the owner
 NOT_PLAIN_NO = re.compile(r"\b(no problem|no worries|no issues?|no objection|why not|not a problem|of course|sure|"
-                          r"go ahead|happy to|yes|haan|bilkul|pay|paid|price|charge|fee|money|paise|rupees|rs|inr|"
-                          r"license|licence|contract|agreement|unless|if|but|only|later|maybe|think|call|whatsapp)\b|\?", re.I)
+                          r"go ahead|happy to|yes|haan|bilkul|pay\w*|paid|price\w*|charg\w*|fee\w*|rate\w*|money|paise|"
+                          r"rupee\w*|rs|inr|license\w*|licence\w*|contract\w*|agreement\w*|unless|if|but|only|later|maybe|"
+                          r"think|call|whatsapp|contact\w*|reach|manager|team)\b|\?|₹", re.I)
 
 
 def plain_no(c: dict, r: dict) -> bool:
     """A short, clear no from the address we wrote to (anything less clear waits for the owner)."""
     text = _own_words(r.get("snippet", ""))
-    sender_ok = bool(c.get("email")) and c["email"].lower() in (r.get("from") or "").lower()
-    return sender_ok and 0 < len(text) <= 300 and bool(NO_RE.search(text)) and not NOT_PLAIN_NO.search(text)
+    return _sender_ok(c, r) and 0 < len(text) <= 300 and bool(NO_RE.search(text)) and not NOT_PLAIN_NO.search(text) \
+        and not AUTO_TEXT.search(text)
+
+
+def _grant_trusted(c: dict) -> bool:
+    """A plain yes may start the source by itself only from an address the owner can stand behind: from the channel's
+    own description (clearly theirs), typed or confirmed by the owner, or saved before this check existed."""
+    return "email_trust" not in c or c.get("email_trust") in TRUST_AUTO
 
 
 def revoke(cid: str) -> dict:
     """Undo an automatic yes: stop the source; the reply goes back to the owner to decide."""
-    d = _load()
-    c = d.get(cid)
-    if not c:
+    c0 = _load().get(cid)
+    if not c0:
         raise KeyError(cid)
-    if c.get("source_id"):
+    if c0.get("source_id"):
         with SessionLocal() as s:
-            ch = s.get(Channel, c["source_id"])
+            ch = s.get(Channel, c0["source_id"])
             if ch:
                 ch.auto, ch.mode = False, "cc"  # paused; nothing from this creator is uploaded any more
                 s.commit()
-    c.update(status="replied" if c.get("reply") else "asked", auto_granted=False, proof=None)
-    _save(d)
+    c = _update(cid, lambda c: c.update(status="replied" if c.get("reply") else "asked", auto_granted=False, proof=None))
+    if c is None:
+        raise KeyError(cid)
     return c
 
 
 def check_replies() -> int:
     """Look for creators' replies in this account's own Gmail (a timed job for every account with Gmail connected).
-    A plain yes starts their source by itself (with Undo); a plain no marks them declined; anything else is
-    "replied — needs you" and the account owner gets ONE notice for the round."""
+    Automatic replies (by their headers, or an out-of-office text) are passed over and the thread keeps being read.
+    A plain yes from a trusted address starts their source by itself (with Undo); a plain no marks them declined;
+    anything else is "replied — needs you" and the account owner gets ONE notice for the round."""
     from . import gmail
 
     if not gmail.connected_email():
@@ -723,16 +912,21 @@ def check_replies() -> int:
                    if c.get("status") == "asked" and c.get("thread_id") and not c.get("reply_id")]
     for cid in waiting:
         c0 = _load().get(cid) or {}
+        seen = c0.get("auto_seen") or []
         try:
-            r = gmail.reply_in_thread(c0["thread_id"])
+            r = gmail.reply_in_thread(c0["thread_id"], skip=seen) if seen else gmail.reply_in_thread(c0["thread_id"])
         except Exception as e:  # noqa: BLE001
             log.warning("gmail reply check: %s", str(e)[:150])
             _note("Reading creators' replies in Gmail", e)
             continue
-        if not r:
+        if not r or (r.get("id") and r.get("id") in seen):
             continue
-        kind = "yes" if plain_yes(c0, r) else "no" if plain_no(c0, r) else "ask"
-        at = utcnow().isoformat() + "Z"
+        if is_auto_text(r):  # out of office / auto-responder: remember it, keep reading the thread
+            _update(cid, lambda c, r=r: c.update(auto_seen=(c.get("auto_seen") or [])[-20:] + [r.get("id")],
+                                                 auto_reply={"at": _now_iso(), "text": (r.get("snippet") or "")[:300]}))
+            continue
+        kind = "no" if plain_no(c0, r) else "yes" if plain_yes(c0, r) and _grant_trusted(c0) else "ask"
+        at = _now_iso()
 
         def keep(c, r=r, at=at):
             if c.get("status") != "asked" or c.get("reply_id"):  # changed meanwhile (the owner decided): leave it
@@ -749,7 +943,7 @@ def check_replies() -> int:
     from .telegram import esc, notify
 
     for cid in no:  # a clear no: never asked again, never used
-        c = _update(cid, lambda c: c.update(status="declined", declined_at=utcnow().isoformat() + "Z", declined_by="reply"))
+        c = _update(cid, lambda c: c.update(status="declined", declined_at=_now_iso(), declined_by="reply"))
         _activity("permissions.manage", f"{c.get('name')} said no by mail — marked “said no”, nothing more is sent")
     for cid in auto:  # clear, unconditional yes from the address we wrote to
         try:
@@ -813,8 +1007,7 @@ def daily_summary() -> str | None:
 
 
 def grant_from_reply(cid: str) -> dict:
-    d = _load()
-    c = d.get(cid)
+    c = _load().get(cid)
     if not c or not c.get("reply"):
         raise KeyError(cid)
     proof = f"Email reply from {c.get('reply_from', '')} on {c.get('reply_date', '')}: “{c['reply'][:300]}”"
@@ -826,10 +1019,9 @@ def grant(cid: str, proof: str) -> dict:
     proof = (proof or "").strip()
     if len(proof) < 20:
         raise ValueError("Write how they said yes — who, how and when (e.g. 'Reply on Instagram from @name on 22 Nov').")
-    d = _load()
-    if cid not in d:
+    c = _load().get(cid)
+    if c is None:
         raise KeyError(cid)
-    c = d[cid]
     from . import acl, strikes
 
     if strikes.is_blocked(cid) or strikes.is_blocked(c.get("url")):  # on the never-use list after a strike: no source for their videos
@@ -857,8 +1049,7 @@ def grant(cid: str, proof: str) -> dict:
             s.flush()
             src_id = ch.id
         s.commit()
-    c.update(status="granted", proof=proof, granted_at=utcnow().isoformat() + "Z", source_id=src_id)
-    _save(d)
+    c = _update(cid, lambda c: c.update(status="granted", proof=proof, granted_at=_now_iso(), source_id=src_id))
     try:  # the viral video we asked about is clipped right away
         from .viral import on_granted
 

@@ -2985,6 +2985,19 @@ def perm_email(cid: str, body: EmailIn):
         raise HTTPException(404, "Not in the list")
 
 
+@app.post("/api/permissions/{cid}/confirm-email")
+def perm_confirm_email(cid: str):
+    """The owner checked an address found in videos / on a website: it may now be mailed by itself."""
+    from . import permissions
+
+    try:
+        return permissions.confirm_email(cid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
 @app.post("/api/permissions/{cid}/send")
 def perm_send(cid: str):
     from . import permissions
