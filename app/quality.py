@@ -10,12 +10,13 @@ Score 0-100 = 100 minus the penalties below (each with its plain-language reason
 "quality_min", default 40, Super Admin 0-100) = rejected. The thresholds are on purpose conservative: one weak signal
 alone never rejects a clip; it takes a clearly broken picture/sound, or several problems together.
 
-  picture  black frames (>=90% of the picture dark)   share 15% -> 0 ... 60% -> 70 points
+  picture  black frames (>=90% of the picture dark AND that dark part flat, so night footage is not "black")
+                                                       share 15% -> 0 ... 60% -> 70 points
            dark screen with a little text (75-90% dark: credits, a title card)  30% -> 0 ... 80% -> 30 points
            frozen picture (no part of frames 0.5 s apart changes)  50% -> 0 ... 90% -> 40 points (+ up to 10 for
                                                        "barely moves" overall)
            very blurry (sharpness, a picture with contrast) on 80% of frames   10 points
-  sound    no sound track                              65 points
+  sound    no sound track                              65 points (own videos: only a note, silence may be intended)
            silence (below -50 dB for 0.6 s or more)    share 30% -> 0 ... 90% -> 65 points
            very quiet (mean below -42 dB)              10 points
   words    (full check, when captions exist) almost no talking in a talky video  15 points
@@ -23,7 +24,8 @@ alone never rejects a clip; it takes a clearly broken picture/sound, or several 
            cut mid-sentence (only when the captions have punctuation)              5 points per end
   interest (full check) fewer replays than the video's average (most-replayed graph)  up to 15 points
            the last 20 s of a video (end screen / outro)    25 points;  only the first seconds (intro)  10 points
-  repeat   the same moment of the same video as an older clip for the same channel (made, waiting or on YouTube): 0
+  repeat   the same moment of the same video as an older clip for the same channel (made, waiting or on YouTube),
+           overlapping more than half of the shorter clip: 0
 
 Own videos (Clips -> Upload my video, original reels, videos from the folder on the PC) get only the technical checks
 (black / frozen / silence) with a softer frozen-picture rule (a photo slide show with a voice is fine).
@@ -187,9 +189,17 @@ def measure(path: str) -> dict:
     if n == 0:
         raise ValueError("no pictures could be read from the video")
     fr = np.frombuffer(raw[: n * SIDE * SIDE], dtype=np.uint8).reshape(n, SIDE, SIDE).astype(np.float32)
-    dark = (fr < 30).mean(axis=(1, 2))
-    black = float((dark >= 0.90).mean())
-    dim = float(((dark >= 0.75) & (dark < 0.90)).mean())  # black screen with a little text: credits, a title card
+    low = fr < 30
+    dark = low.mean(axis=(1, 2))
+    # a black screen / card is FLAT in its dark part (std of the dark pixels ~0-3); night footage has texture there
+    # (std 5-9 on real samples). A plain "max < 40" rule would miss every black screen of a finished Short, which
+    # always carries a title / credit line.
+    cnt = np.maximum(low.sum(axis=(1, 2)), 1)
+    mu = np.where(low, fr, 0).sum(axis=(1, 2)) / cnt
+    dstd = np.sqrt(np.maximum(np.where(low, fr * fr, 0).sum(axis=(1, 2)) / cnt - mu * mu, 0))
+    flat = dstd < 4.0
+    black = float(((dark >= 0.90) & flat).mean())
+    dim = float(((dark >= 0.75) & (dark < 0.90) & flat).mean())  # black screen with a little text: credits, a title card
     if n > 1:
         delta = np.abs(fr[1:] - fr[:-1])
         diffs = delta.mean(axis=(1, 2))
@@ -287,6 +297,7 @@ def judge(m: dict | None, *, kind: str = "full", text: str = "", words: int = 0,
           repeat_of: int | None = None) -> tuple[int, list[str], list[list]]:
     """Score 0-100 and the reasons, from the measures. Pure: easy to test and to tune."""
     pen: list[list] = []  # [points, reason]
+    warn: list[str] = []  # shown with the score, no points
 
     def add(points: float, why: str):
         if points >= 1:
@@ -307,7 +318,10 @@ def judge(m: dict | None, *, kind: str = "full", text: str = "", words: int = 0,
         if m.get("blurry", 0) >= 0.8:
             add(10, "the picture is very blurry")
         if not m.get("audio"):
-            add(65, "no sound at all")
+            if full:
+                add(65, "no sound at all")
+            else:  # my own video may be silent on purpose: shown, never the reason it is stopped
+                warn.append("no sound track")
         else:
             s = m.get("silence", 0)
             add(65 * _ramp(s, 0.30, 0.90), f"{round(s * 100)}% silence")
@@ -337,7 +351,7 @@ def judge(m: dict | None, *, kind: str = "full", text: str = "", words: int = 0,
         pen.append([100, f"repeats the moment of clip #{repeat_of} (same video, same part)"])
     score = max(0, 100 - sum(p for p, _w in pen))
     pen.sort(key=lambda x: -x[0])
-    return int(score), [w for _p, w in pen], pen
+    return int(score), [w for _p, w in pen] + [f"note: {w}" for w in warn], pen
 
 
 # ---------------------------------------------------------------- one clip
@@ -355,9 +369,13 @@ def repeat_of(s, c: Clip) -> int | None:
         return None
     q = s.query(Clip).filter(Clip.project_id == c.project_id, Clip.id != c.id, Clip.status.in_(LIVE_STATES),
                              Clip.removed_at.is_(None), Clip.start < c.end, Clip.end > c.start)
+    mine = float(c.end) - float(c.start)
     for o in q.order_by(Clip.id).all():
         if o.reuploaded_as == c.id or c.reuploaded_as == o.id:
             continue
+        over = min(float(c.end), float(o.end or 0)) - max(float(c.start), float(o.start or 0))
+        if over <= 0.5 * max(min(mine, float(o.end or 0) - float(o.start or 0)), 0.1):
+            continue  # touching edges (a natural end moved by a few seconds) is not the same moment
         if (o.destination_id or 0) != (c.destination_id or 0):
             continue
         if o.status in ("uploaded", "uploading") or o.id < c.id:
@@ -365,16 +383,32 @@ def repeat_of(s, c: Clip) -> int | None:
     return None
 
 
+def content_key(c: Clip) -> str:
+    """What the clip shows and says, without the parts re-made on their own (Short cover, like & subscribe sticker,
+    thumbnail, title): a re-make that changes only those keeps its score (no new measuring in the upload loop)."""
+    r = lambda x: round(float(x or 0), 1)  # noqa: E731
+    ovs = sorted(str(o.get("text", "")).strip() for o in (c.overlays or []) if isinstance(o, dict))
+    caps = len(c.captions or []) if (c.caption_style or {}).get("on") else 0
+    return json.dumps([c.project_id, c.pc_item_id, r(c.start), r(c.end), c.aspect, c.fit or "", c.reframe is not False,
+                       sorted(c.effects or []), ovs, caps, c.voice_path or "", r(c.voice_offset), r(c.orig_volume if
+                       c.orig_volume is not None else 1)], ensure_ascii=True)
+
+
 def fresh(c: Clip) -> bool:
     q = c.quality or {}
-    return q.get("v") == VERSION and q.get("sig") is not None and q.get("sig") == file_sig(c.output_path)
+    if q.get("v") != VERSION:
+        return False
+    sig = file_sig(c.output_path)
+    if sig is not None and q.get("sig") == sig:
+        return True
+    return sig is not None and q.get("score") is not None and q.get("ck") == content_key(c)
 
 
 def score(s, c: Clip, p: Project | None = None) -> dict:
     """Measure and score one clip (its finished video). Never raises: a check that cannot run gives score None."""
     p = p if p is not None else (s.get(Project, c.project_id) if c.project_id else None)
     kind = kind_of(c, p)
-    q = {"v": VERSION, "kind": kind, "at": utcnow().isoformat() + "Z", "sig": file_sig(c.output_path)}
+    q = {"v": VERSION, "kind": kind, "at": utcnow().isoformat() + "Z", "sig": file_sig(c.output_path), "ck": content_key(c)}
     if not c.output_path or q["sig"] is None:
         return {**q, "score": None, "reasons": [], "error": "the video is not on the server (it may be saved on the PC)"}
     try:
@@ -418,6 +452,26 @@ def note_for(q: dict) -> str:
             "Open it to see why; press Use anyway if it is fine.")[:900]
 
 
+def pass_slot(s, dest_id, freed) -> int:
+    """A clip that held a publish time was rejected: every later waiting clip of the same channel moves up one time, so
+    no day stays empty (the last time becomes free). Never a clip on YouTube or being uploaded, never a video from the
+    PC folder (its own day rule). Returns how many moved."""
+    from .autopilot import SLOT_LOCK
+
+    if freed is None or freed <= utcnow():
+        return 0
+    with SLOT_LOCK:
+        rows = (s.query(Clip).filter(Clip.destination_id == dest_id, Clip.status.in_(["queued", "fetching", "rendering"]),
+                                     Clip.youtube_id.is_(None), Clip.pc_item_id.is_(None), Clip.publish_at.isnot(None),
+                                     Clip.publish_at > freed)
+                .order_by(Clip.publish_at, Clip.id).all())
+        times = [freed] + [x.publish_at for x in rows]
+        for x, when in zip(rows, times):
+            x.publish_at = when
+        s.commit()
+    return len(rows)
+
+
 def reject(s, c: Clip, by: str) -> bool:
     """Not queued, never uploaded: a draft with a plain note (nothing deleted). Only while it waits — never a clip that
     is being uploaded or is on YouTube. True when it was rejected now."""
@@ -431,6 +485,14 @@ def reject(s, c: Clip, by: str) -> bool:
     if res.rowcount != 1:
         return False
     s.refresh(c)
+    if was["publish_at"] and not c.pc_item_id:
+        try:
+            from datetime import datetime
+
+            pass_slot(s, c.destination_id, datetime.fromisoformat(was["publish_at"]))
+        except Exception as e:  # noqa: BLE001  (the rejection stands; the day may stay empty)
+            s.rollback()
+            log.warning("quality check: passing the slot of clip %s: %s", c.id, str(e)[:200])
     if c.pc_item_id:
         try:
             row = s.get(PcItem, c.pc_item_id)
@@ -454,6 +516,10 @@ def reject(s, c: Clip, by: str) -> bool:
 def check(s, c: Clip, p: Project | None = None, force: bool = False) -> dict:
     """Score the clip when its stored score is missing or old (or `force`), save it, count it. Returns the score."""
     if not force and fresh(c):
+        sig = file_sig(c.output_path)
+        if (c.quality or {}).get("sig") != sig:  # same content, re-made cover / sticker: the score stays, the file is noted
+            c.quality = {**c.quality, "sig": sig}
+            s.commit()
         return c.quality
     q = _keep(c.quality, score(s, c, p))
     c.quality = q
@@ -471,18 +537,46 @@ def after_render(clip_id: int) -> bool | None:
     False = rejected now; None = not checked (switched off, or not waiting)."""
     if not enabled():
         return None
+    if _sub_anim_remake(clip_id):  # the like & subscribe sticker put on a waiting clip: same content, checked at upload
+        return None
     try:
         with SessionLocal() as s:
             c = s.get(Clip, clip_id)
             if c is None or c.status not in ("queued", "rendered") or c.youtube_id:
                 return None
-            check(s, c)
-            if failing(c) and reject(s, c, "render"):
+            before = c.quality or {}
+            was_waiting = bool(before.get("score") is not None or before.get("missing") is not None
+                               or (c.created_at and c.created_at < utcnow() - timedelta(hours=2) and c.status == "queued"))
+            check(s, c, force=True)  # a new render is always measured (the upload loop keeps a same-content score)
+            if not failing(c):
+                return True
+            if was_waiting and c.status == "queued" and not room_to_reject(s, c.destination_id):
+                c.quality = {**c.quality, "held_back": utcnow().isoformat() + "Z"}
+                s.commit()
+                _alert("Quality check: re-made waiting clips score low, but rejecting more would take over 30% of a "
+                       "channel's line, so they stay queued for now (each is checked again right before its upload).",
+                       f"rerender:{c.destination_id}")
+                return True
+            if reject(s, c, "rerender" if was_waiting else "render"):
                 return False
             return True
     except Exception as e:  # noqa: BLE001  (the check must never break making clips)
         log.warning("quality check after render of clip %s: %s", clip_id, str(e)[:200])
         return None
+
+
+def _sub_anim_remake(clip_id: int) -> bool:
+    """subscribe_anim._remake is making this waiting clip again only to add its sticker (it records the clip under
+    "pending" while the full render runs)."""
+    try:
+        from . import subscribe_anim
+
+        return str(clip_id) in (subscribe_anim._rstate().get("pending") or {})
+    except Exception:  # noqa: BLE001
+        return False
+
+
+UPLOAD_REJECT_CAP = 3  # more rejections than this at upload in one day (per account): warn and let the clip go
 
 
 def upload_ok(s, c: Clip, p: Project | None = None) -> bool:
@@ -498,7 +592,17 @@ def upload_ok(s, c: Clip, p: Project | None = None) -> bool:
         log.warning("quality check before upload of clip %s: %s", c.id, str(e)[:200])
         return True
     if failing(c):
-        reject(s, c, "upload")
+        today = (_stats().get(utcnow().strftime("%Y-%m-%d")) or {}).get("rejected_upload", 0)
+        if int(today) >= UPLOAD_REJECT_CAP:  # something may be wrong with the check itself: never empty the channel
+            c.quality = {**c.quality, "let_through": utcnow().isoformat() + "Z"}
+            s.commit()
+            _count("let_through")
+            _alert(f"Quality check: {today} clips were already stopped right before their upload today. To keep the "
+                   "channel posting, the next ones go up anyway today — please look at Clips → Rejected by quality "
+                   "check and the threshold.", "upload_cap")
+            return True
+        if reject(s, c, "upload"):
+            _count("rejected_upload")
         _rate_alert()
         return False
     return True
@@ -570,6 +674,18 @@ def _rate_alert():
                "the threshold.", "rate")
 
 
+def room_to_reject(s, did, extra: int = 1, now=None) -> bool:
+    """May `extra` more waiting clips of this channel be rejected without taking more than 30% of its line (counting
+    the ones the daily check / re-renders rejected in the last 7 days)?"""
+    now = now or utcnow()
+    recent = (now - timedelta(days=7)).isoformat()
+    waiting = s.query(Clip).filter(Clip.status.in_(["queued", "fetching", "rendering"]), Clip.youtube_id.is_(None),
+                                   Clip.destination_id == did).count()
+    gone = [c for c in s.query(Clip).filter(Clip.status == "draft", Clip.error.like(REJECTED), Clip.destination_id == did).all()
+            if (c.quality or {}).get("by") in ("sweep", "rerender") and (c.quality or {}).get("rejected_at", "") >= recent]
+    return (extra + len(gone)) / max(waiting + len(gone), 1) <= SAFE_SHARE
+
+
 def sweep(now=None) -> dict:
     """Timed job (per account): a few queued clips a round (at most 30 a day) are checked; clips that fail are rejected.
     Safety: when a channel would lose more than 30% of its waiting clips, nothing of it is rejected and the owner is
@@ -618,7 +734,7 @@ def sweep(now=None) -> dict:
                 continue
             gone = [c for c in s.query(Clip).filter(Clip.status == "draft", Clip.error.like(REJECTED),
                                                     Clip.destination_id == did).all()
-                    if (c.quality or {}).get("by") == "sweep" and (c.quality or {}).get("rejected_at", "") >= recent]
+                    if (c.quality or {}).get("by") in ("sweep", "rerender") and (c.quality or {}).get("rejected_at", "") >= recent]
             share = (len(bad) + len(gone)) / max(len(clips) + len(gone), 1)
             if share > SAFE_SHARE:
                 out["held_back"] += len(bad)

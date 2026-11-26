@@ -2898,7 +2898,7 @@ def reminder_set(body: ReminderIn):
 
 from . import subscribe_anim as _subscribe_anim  # noqa: E402  (the animated like + subscribe + bell: its own addresses)
 
-app.include_router(_subscribe_anim.router())
+app.router.routes.extend(_subscribe_anim.router().routes)  # plain routes of the app (FastAPI 0.165 include_router is lazy)
 
 
 class CommentIn(BaseModel):
