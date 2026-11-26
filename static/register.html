@@ -83,6 +83,7 @@ $('f').onsubmit=async ev=>{
     const r=await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('n').value.trim(),brand:$('br').value.trim(),email:$('u').value.trim(),password:$('p').value,accept_terms:$('tc').checked})});
     const j=await r.json().catch(()=>({}));
     if(r.ok){$('f').querySelectorAll('input,label,.field,#b').forEach(x=>x.style.display='none');const o=$('okb');o.style.display='block';
+      if(j.status==='active'){o.textContent='Your account is ready'+(j.trial_days?' and your '+j.trial_days+'-day free trial has started (no card needed)':'')+'. Sign in with your e-mail and password.';const a=document.createElement('a');a.href='/login';a.textContent='Sign in';a.style.cssText='display:block;margin-top:10px;font-weight:600';o.appendChild(a);return}
       o.textContent='Your account is created and is waiting for approval. You can sign in as soon as it has been approved — you do not need to register again.';return}
     let m=j.detail||'Could not create the account';if(Array.isArray(m))m=m.map(x=>x.msg).join('; ');show(m);
   }catch(e){show('Network error. Try again.')}

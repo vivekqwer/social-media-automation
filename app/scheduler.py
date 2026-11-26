@@ -494,6 +494,8 @@ def start():
     #   phone_events         "Phone notifications" (phone.enabled() also checks it, so no push goes out when it is off)
     #   weekly_due           "Weekly report" (and the account's own switch in My channels); acts on Mondays from 9 AM IST
     #   freshen_due          "Keyword helper" (keywords refreshed before upload)
+    #   meta_due             "Instagram + Facebook" (Shorts that became public; Instagram posts finished; PC get-back)
+    #   thumb_tests          "Thumbnails" (with swap_weak_thumbnails: the A/B test of the second thumbnail)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
     #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
     #                        and the creators' answers stays with "Permission mails to creators"
@@ -576,6 +578,9 @@ def start():
     from .comments import post_due as post_comments
     add(when_on("uploads.comment", post_comments), "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # first comment under videos that went public
+    from .meta import post_due as meta_due
+    add(when_on("meta.use", meta_due), "interval", minutes=10, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=5))  # Instagram Reels + Facebook when a Short is public
     from .pcfolder import due as pc_due
     add(when_on("clips.pc_folder", pc_due), "interval", minutes=2, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # PC-folder videos: ask for files, move missed times

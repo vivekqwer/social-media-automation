@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Raji Studio — YouTube Shorts on autopilot</title>
+<meta name="description" content="Raji Studio turns videos you are allowed to reuse, and your own videos, into YouTube Shorts with credit, and uploads them on schedule.">
+<style>
+:root{--bg:#fff;--fg:#1b1f2a;--mut:#5f6678;--line:#e6e8ef;--card:#f7f8fb;--brand:#5b5bf0;--brand2:#7c5cff;--ok:#16a34a}
+@media(prefers-color-scheme:dark){:root{--bg:#0f1118;--fg:#e8eaf2;--mut:#9aa1b5;--line:#262a36;--card:#161925;--brand:#8f8fff;--brand2:#a58bff}}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.6 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--fg);background:var(--bg)}
+a{color:var(--brand)}
+.wrap{max-width:1040px;margin:0 auto;padding:0 16px}
+header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;font-size:18px;color:var(--fg);text-decoration:none}
+.logo{width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#5b5bf0,#7c5cff);display:grid;place-items:center;color:#fff;font-size:17px}
+.btn{display:inline-block;padding:11px 18px;border-radius:10px;font-weight:600;text-decoration:none;border:1px solid var(--brand);white-space:nowrap}
+.btn.main{background:linear-gradient(135deg,#5b5bf0,#7c5cff);color:#fff;border-color:transparent}
+.btn.line{color:var(--brand);background:transparent}
+.nav{display:flex;gap:8px}
+.hero{padding:40px 0 28px}
+h1{font-size:clamp(30px,6vw,48px);line-height:1.15;margin:0 0 14px;letter-spacing:-.5px}
+.lead{font-size:clamp(17px,2.4vw,20px);color:var(--mut);max-width:720px;margin:0 0 22px}
+.cta{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.small{font-size:14px;color:var(--mut)}
+h2{font-size:clamp(22px,3.4vw,28px);margin:44px 0 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+.card h3{margin:0 0 6px;font-size:17px}
+.card p{margin:0;color:var(--mut);font-size:15px}
+.steps{counter-reset:s;list-style:none;padding:0;margin:0;display:grid;gap:10px}
+.steps li{counter-increment:s;display:flex;gap:12px;align-items:flex-start}
+.steps li::before{content:counter(s);flex:0 0 30px;height:30px;border-radius:50%;background:var(--brand);color:#fff;display:grid;place-items:center;font-weight:700;font-size:14px}
+.price{font-size:26px;font-weight:700;margin:6px 0 2px}
+.price span{font-size:14px;font-weight:400;color:var(--mut)}
+.plan{display:flex;flex-direction:column}
+.plan .btn{margin-top:auto;text-align:center}
+.plan p{margin-bottom:12px}
+.trial{border-color:var(--brand)}
+.tick{color:var(--ok);font-weight:700}
+footer{border-top:1px solid var(--line);margin-top:48px;padding:20px 0 32px;display:flex;flex-wrap:wrap;gap:14px;justify-content:space-between;color:var(--mut);font-size:14px}
+footer nav{display:flex;flex-wrap:wrap;gap:14px}
+@media(max-width:420px){.nav .btn.line{display:none}.btn{padding:10px 14px}}
+</style></head><body>
+<div class="wrap">
+<header><a class="brand" href="/welcome"><span class="logo">▶</span>Raji Studio</a>
+  <nav class="nav"><a class="btn line" href="/login">Sign in</a><a class="btn main" href="/register" id="top-trial">Start free trial</a></nav></header>
+
+<section class="hero">
+  <h1>Your YouTube Shorts channel, on autopilot.</h1>
+  <p class="lead">Raji Studio finds the best moments in videos you are allowed to reuse, turns them into Shorts with the creator's credit, and uploads one on time, every day — without you sitting at the computer.</p>
+  <div class="cta"><a class="btn main" href="/register" id="hero-trial">Start free trial</a><a class="btn line" href="/login">Sign in</a></div>
+  <p class="small" id="trial-note">No card needed to try it.</p>
+</section>
+
+<h2>What it does for you</h2>
+<div class="grid">
+  <div class="card"><h3>Shorts from videos you may reuse</h3><p>It looks only at Creative Commons videos and videos whose creator said yes. Every Short credits the creator and links the original.</p></div>
+  <div class="card"><h3>Your own videos too</h3><p>Upload your own long video, or drop files in a folder on your PC. It cuts the best parts and writes the title, description and tags.</p></div>
+  <div class="card"><h3>Automatic scheduling</h3><p>Clips wait in a queue and go up at the best time, one a day or more — inside YouTube's daily limits.</p></div>
+  <div class="card"><h3>Strike protection</h3><p>If YouTube ever flags a video, that creator is never used again, waiting clips from them are held, and you get the steps to answer.</p></div>
+  <div class="card"><h3>Helper PC</h3><p>A small free program on your own PC does the downloads and keeps a safe copy of every video, so nothing is lost.</p></div>
+  <div class="card"><h3>Alerts on your phone</h3><p>A short message when a video goes live, when something needs you, or when a problem was fixed by itself.</p></div>
+  <div class="card"><h3>Instagram and Facebook</h3><p>Optional: each Short can also go out as an Instagram Reel and on your Facebook Page once it is public on YouTube.</p></div>
+  <div class="card"><h3>English, Hinglish or Hindi</h3><p>Titles, the first line of the description and hashtags in the language your viewers search in.</p></div>
+</div>
+
+<h2>How it works</h2>
+<ol class="steps">
+  <li><div><b>Create your account.</b> <span class="small">Your own private space — nobody else sees your channels or clips.</span></div></li>
+  <li><div><b>Connect your YouTube channel</b> with Google sign-in, and tell it what your channel is about.</div></li>
+  <li><div><b>Check the first clips</b>, then let it run. Approve each clip yourself, or let it upload by itself.</div></li>
+</ol>
+
+<h2>Plans</h2>
+<div class="grid" id="plans"><div class="card"><p>Loading prices…</p></div></div>
+<p class="small">Prices are in Indian rupees. Pay with UPI, card or net banking from your dashboard. A plan that ends simply goes back to the free plan — nothing is deleted.</p>
+
+<footer><span>© Raji Studio</span><nav><a href="/about">About</a><a href="/privacy">Privacy</a><a href="/terms">Terms</a><a href="/login">Sign in</a></nav></footer>
+</div>
+<script>
+(function(){
+  var el=document.getElementById('plans');
+  function inr(n){n=Math.round(+n||0);var s=String(n),h=s.slice(0,-3),t=s.slice(-3);if(h)h=h.replace(/\B(?=(\d{2})+(?!\d))/g,',')+',';return '₹'+h+t}
+  function card(title,price,per,text,cls,btn){
+    var c=document.createElement('div');c.className='card plan'+(cls?' '+cls:'');
+    var h=document.createElement('h3');h.textContent=title;c.appendChild(h);
+    var p=document.createElement('div');p.className='price';p.textContent=price;if(per){var s=document.createElement('span');s.textContent=' '+per;p.appendChild(s)}c.appendChild(p);
+    var d=document.createElement('p');d.textContent=text;c.appendChild(d);
+    var a=document.createElement('a');a.className='btn '+(cls?'main':'line');a.href='/register';a.textContent=btn;c.appendChild(a);
+    return c}
+  fetch('/api/public/plans',{credentials:'same-origin'}).then(function(r){if(!r.ok)throw 0;return r.json()}).then(function(d){
+    el.textContent='';var days=+d.trial_days||0;
+    var note=document.getElementById('trial-note');
+    if(days){note.textContent='Free for '+days+' days. No card needed.'+(d.instant?' You can start at once.':' Your account is switched on after a quick check.')}
+    else{note.textContent=d.instant?'You can start at once.':'Your account is switched on after a quick check.';
+      ['top-trial','hero-trial'].forEach(function(id){document.getElementById(id).textContent='Create account'})}
+    if(days)el.appendChild(card('Free trial','₹0','for '+days+' days','Try everything on your own channel. No card needed; nothing is charged by itself when it ends.','trial','Start free trial'));
+    (d.plans||[]).forEach(function(p){el.appendChild(card(p.name,inr(p.price),p.period_text,p.description||'',''  ,days?'Start free trial':'Create account'))});
+    if(!el.children.length)el.appendChild(card('Ask for a price','','','Create an account and choose a plan from your dashboard.','','Create account'));
+  }).catch(function(){el.textContent='';el.appendChild(card('Plans','','','Create an account to see the plans and prices.','','Create account'))});
+})();
+</script>
+</body></html>

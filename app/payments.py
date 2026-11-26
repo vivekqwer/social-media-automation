@@ -459,7 +459,8 @@ def _expiry(a: Account, plan: str, period: str, now=None):
     from . import acl
 
     now = now or utcnow()
-    same = (a.paid_plan or "").lower() == plan.lower() and (acl._plan_of(a) or "").lower() == plan.lower()
+    same = (not a.trial and (a.paid_plan or "").lower() == plan.lower()
+            and (acl._plan_of(a) or "").lower() == plan.lower())  # a free trial's days are not added to a payment
     start = a.plan_expires if same and a.plan_expires and a.plan_expires > now else now  # renewing adds to what is left
     return start + timedelta(days=days)
 
@@ -591,6 +592,7 @@ def _apply_paid(a: Account, plan: str, period: str, amount: int, test: str, how:
             acc.owned_plan = owned  # kept: the plan the account falls back to when this period ends
             acc.plan_expires, acc.expiry_warned = expires, None
             acc.paid_plan, acc.limit_before_pay = pname, before
+        acc.trial = None  # a payment ends a free trial
         if acc.upgrade:
             acc.upgrade = None  # an open "I have paid" request is answered by this payment
         if pay is not None:
@@ -713,7 +715,7 @@ def _free_plan() -> str:
 
 
 def _clear_paid(s, acc: Account):
-    acc.plan_expires = acc.expiry_warned = acc.paid_plan = acc.limit_before_pay = None
+    acc.plan_expires = acc.expiry_warned = acc.paid_plan = acc.limit_before_pay = acc.trial = None
 
 
 def taken_over(account_id: int):
@@ -741,6 +743,7 @@ def expire_due() -> dict:
     Acts only while the account is still on the plan that was paid for. Nothing is deleted: channels over the limit
     stay connected, their uploads just wait (acl.over_cap_channels). What the Super Admin switched off stays off."""
     from . import acl
+    from .trial import WARN_DAYS as TRIAL_WARN_DAYS
 
     now, warned, ended = utcnow(), 0, 0
     with CoreSession() as s:
@@ -758,6 +761,7 @@ def expire_due() -> dict:
                     _clear_paid(s, s.get(Account, aid))
                     s.commit()
                 continue
+            was_trial = bool(a.trial)
             if exp <= now:
                 # back to the one-time plan the account owns (bought before this monthly / yearly one), else the free plan
                 owned = acl._plan_name(acl.config(), a.owned_plan) if a.owned_plan else None
@@ -779,16 +783,27 @@ def expire_due() -> dict:
                 acl.invalidate()
                 acl.record_plan(aid, pname, kept, True, a.tenant_id)
                 where = f"the plan “{owned}” you own" if owned else ("the plan “" + pname + "”" if pname else "the free switches")
-                acl.record(aid, "system", "payment", f"The plan “{old}” ended — back to {where} with {lim} channel(s)", a.tenant_id)
+                label = "The free trial" if was_trial else "The plan"
+                acl.record(aid, "system", "payment", f"{label} “{old}” ended — back to {where} with {lim} channel(s)", a.tenant_id)
                 back = f"back on your plan “{_e(owned)}”" if owned else "back on the free plan"
-                _tell_customer(a, f"⏰ Your plan “{_e(old)}” has ended. Your account is {back} with {lim} YouTube "
-                                  f"channel{'' if lim == 1 else 's'}. Nothing was deleted — renew on My channels → Your plan to switch "
-                                  "everything on again.")
-                _tell_owner(f"⏰ The plan “{_e(old)}” of {_e(a.brand or a.name)} ({_e(a.email)}) ended — moved {back.replace('your', 'their')}.")
+                if was_trial:
+                    _tell_customer(a, f"⏰ Your free trial has ended. Your account is {back} with {lim} YouTube "
+                                      f"channel{'' if lim == 1 else 's'}. Nothing was deleted — choose a plan on My channels → "
+                                      "Your plan to switch everything on again.")
+                else:
+                    _tell_customer(a, f"⏰ Your plan “{_e(old)}” has ended. Your account is {back} with {lim} YouTube "
+                                      f"channel{'' if lim == 1 else 's'}. Nothing was deleted — renew on My channels → Your plan to switch "
+                                      "everything on again.")
+                _tell_owner(f"⏰ The {'free trial' if was_trial else 'plan'} “{_e(old)}” of {_e(a.brand or a.name)} ({_e(a.email)}) "
+                            f"ended — moved {back.replace('your', 'their')}.")
                 ended += 1
-            elif exp - now <= timedelta(days=WARN_DAYS) and warned_for != exp:
-                _tell_customer(a, f"⏰ Your plan “{_e(acl._plan_of(a))}” ends on {exp:%d %b %Y}. Renew it on My channels → Your plan "
-                                  "so nothing stops.")
+            elif exp - now <= timedelta(days=TRIAL_WARN_DAYS if was_trial else WARN_DAYS) and warned_for != exp:
+                if was_trial:
+                    _tell_customer(a, f"⏰ Your free trial ends on {exp:%d %b %Y}. Choose a plan on My channels → Your plan so "
+                                      "nothing stops. No card was needed for the trial; nothing is charged by itself.")
+                else:
+                    _tell_customer(a, f"⏰ Your plan “{_e(acl._plan_of(a))}” ends on {exp:%d %b %Y}. Renew it on My channels → Your plan "
+                                      "so nothing stops.")
                 with CoreSession() as s:
                     s.get(Account, aid).expiry_warned = exp
                     s.commit()

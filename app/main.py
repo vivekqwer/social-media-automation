@@ -1,5 +1,6 @@
 import base64
 import json
+import logging
 import os
 import re
 import secrets
@@ -46,7 +47,7 @@ from .tts import VOICES, synth
 MODES = {"cc", "permission", "commentary"}
 # public pages Google (OAuth consent / API audit) must be able to open without the dashboard password
 PUBLIC_PATHS = {
-    "/healthz", "/privacy", "/terms", "/about",
+    "/healthz", "/privacy", "/terms", "/about", "/welcome", "/api/public/plans",  # the home page and its price list
     "/login", "/forgot", "/reset", "/api/login", "/api/logout", "/api/reset-password", "/register", "/api/register",
     "/auth/reset/start", "/auth/callback",
     "/api/pay/razorpay/webhook",  # Razorpay's own call: checked with the webhook secret inside the route
@@ -227,6 +228,8 @@ async def auth_gate(request: Request, call_next):
             return PlainTextResponse("Set the APP_PASSWORD env var before using this app.", status_code=503)
         return await call_next(request)
     who = auth.request_identity(request)
+    if not who and path in ("/", "/index.html") and request.method in ("GET", "HEAD"):
+        return _secure(_home_page())  # a visitor who is not signed in sees the public home page, not the sign-in form
     if who:
         if path.startswith("/api/admin/") and who["role"] != "super":
             return JSONResponse({"detail": "Only the Super Admin can do this."}, status_code=403)
@@ -369,7 +372,21 @@ def api_register(body: RegisterIn, request: Request):
     except ValueError as e:
         raise HTTPException(400, str(e))
     auth.note_fail(ip, "register")  # at most 3 accounts per connection in 10 minutes, 40 an hour in total
+    from . import trial
     from .telegram import esc
+
+    if trial.config()["approve"] == "auto":  # Super Admin's choice (Users -> New accounts): no waiting, the trial starts now
+        try:
+            out = accounts.approve(acc.id)
+        except Exception:  # noqa: BLE001  (the account stays pending: the Super Admin approves it by hand)
+            logging.getLogger(__name__).exception("automatic approval of account %s failed", acc.id)
+            out = None
+        if out and out.get("status") == "active":
+            acl.record(acc.id, "system", "admin.account", "Approved by itself (new accounts start at once)", out.get("tenant_id"))
+            t = trial.of(accounts.get(acc.id))
+            _tell_owner(f"🆕 <b>New account started</b>\n{esc(acc.name)} — {esc(acc.email)}\nSystem name: {esc(acc.brand)}\n"
+                        + (f"Free trial until {t['ends'][:10]}." if t else "No free trial (switched off)."))
+            return {"ok": True, "status": "active", "trial_days": trial.config()["trial_days"] if t else 0}
 
     _tell_owner(f"🆕 <b>New account waiting for approval</b>\n{esc(acc.name)} — {esc(acc.email)}\nSystem name: {esc(acc.brand)}\n"
                 "Open Users in the dashboard to approve it.")
@@ -386,6 +403,9 @@ def api_me(request: Request):
         acc = accounts.get(who["account_id"])
         who["upgrade"] = acc.upgrade if acc else None
         who["plan_expires"] = acc.plan_expires.isoformat() + "Z" if acc and acc.plan_expires else None
+        from . import trial
+
+        who["trial"] = trial.of(acc)  # {"ends", "days_left", "plan"} while on the free trial (banner on the dashboard)
         who["access"] = acl.for_me(who)  # the dashboard hides what is switched off (the server refuses it anyway)
     who["pay"] = _pay_info() if who["role"] == "user" or who.get("viewing") else None
     if who["tenant"] != tenant.OWNER:
@@ -918,12 +938,49 @@ def admin_activity(account_id: int | None = None, actor: str = Query("", max_len
 
 @app.get("/api/admin/users/{aid}/access")
 def admin_access_get(aid: int, fresh: int = 0):
+    from . import trial
+
     acc = accounts.get(aid)
     if not acc:
         raise HTTPException(404, "Account not found")
     if fresh and acc.tenant_id:
         acl.storage_bytes(acc.tenant_id, fresh=True)  # "Measure again"
-    return acl.public_access(aid, with_usage=True)
+    return {**acl.public_access(aid, with_usage=True), "trial": trial.of(acc)}
+
+
+class TrialIn(BaseModel):
+    action: str = Field(pattern="^(extend|end)$")
+    days: int = Field(7, ge=1, le=90)
+
+
+@app.post("/api/admin/users/{aid}/trial")
+def admin_trial(aid: int, body: TrialIn):
+    """Extend a customer's free trial by some days, or end it now (back to the free plan, nothing deleted)."""
+    from . import trial
+
+    return _acl_call(trial.extend, aid, body.days) if body.action == "extend" else _acl_call(trial.end, aid)
+
+
+class SignupIn(BaseModel):
+    approve: str | None = Field(None, pattern="^(hand|auto)$")
+    trial_on: bool | None = None
+    trial_days: int | None = Field(None, ge=1, le=90)
+    trial_plan: str | None = Field(None, max_length=40)
+
+
+@app.get("/api/admin/signup")
+def admin_signup_get():
+    from . import trial
+
+    return trial.public()
+
+
+@app.post("/api/admin/signup")
+def admin_signup_set(body: SignupIn):
+    """New accounts: approved by hand (as before) or started at once; the free trial (on/off, days, plan)."""
+    from . import trial
+
+    return _acl_call(trial.save, body.approve, body.trial_on, body.trial_days, body.trial_plan)
 
 
 @app.post("/api/admin/users/{aid}/access")
@@ -977,6 +1034,26 @@ def admin_delete_data(aid: int, body: DeleteDataIn):
     """Delete a customer's whole private copy (database part + files). Needs the account's e-mail typed out.
     The account is blocked and signed out first. The owner's own copy can never be deleted here."""
     return _acl_call(acl.delete_account_data, aid, body.email)
+
+
+def _home_page():
+    return FileResponse(_STATIC / "home.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/welcome")
+def page_home():
+    """The public home page (also what a visitor who is not signed in sees at /)."""
+    return _home_page()
+
+
+@app.get("/api/public/plans")
+def public_plans():
+    """Read-only, no sign-in: the plans for sale with their prices (nothing else about the server), and the trial length."""
+    from . import trial
+
+    rows = [{"name": p["name"], "price": p["price"], "period": p["period"], "period_text": p["period_text"],
+             "description": p["description"]} for p in payments.catalog(None)["plans"]]
+    return JSONResponse({"plans": rows, **trial.landing()}, headers={"Cache-Control": "public, max-age=300"})
 
 
 @app.get("/privacy")
@@ -1729,6 +1806,10 @@ def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     if c.pc_item_id:  # from the folder on the PC: the file comes shortly before its upload
         d["from_pc"] = True
         d["pc_on_server"] = pcfolder.on_server(c)
+    if c.thumb_test:  # the thumbnail A/B test (app/growth.py): which one won, in one line
+        from .growth import describe
+
+        d["thumb_test_line"] = describe(c.thumb_test)
     return d
 
 
@@ -1745,6 +1826,14 @@ def list_clips(status: str | None = None, limit: int = Query(60, ge=1, le=200)):
         if status:
             q = q.filter(Clip.status.in_(status.split(",")))
         return _cards(s, q.order_by(Clip.id.desc()).limit(limit).all())
+
+
+@app.get("/api/thumb-tests")
+def thumb_tests():
+    """Thumbnail A/B tests: how many run, which thumbnail won (Analytics page)."""
+    from .growth import thumb_summary
+
+    return thumb_summary()
 
 
 @app.get("/api/overview")
@@ -2947,6 +3036,22 @@ def set_pexels(body: KeyIn):
 # ---------- Instagram + Facebook cross-post (optional module) ----------
 class MetaIn(BaseModel):
     token: str = Field(min_length=20, max_length=1000)
+    page_id: str | None = Field(None, max_length=40)
+
+
+class MetaPageIn(BaseModel):
+    page_id: str = Field(min_length=1, max_length=40)
+
+
+class MetaTargetsIn(BaseModel):
+    facebook: bool | None = None
+    instagram: bool | None = None
+
+
+class MetaAppIn(BaseModel):
+    app_id: str = Field("", max_length=30)
+    app_secret: str = Field("", max_length=64)
+    clear: bool = False
 
 
 @app.get("/media/{cid}/{exp}/{sig}.mp4")
@@ -2958,9 +3063,10 @@ def public_media(cid: int, exp: int, sig: str, t: int = Query(1, ge=1, le=10**9)
     with tenant.use(t):
         with SessionLocal() as s:
             c = s.get(Clip, cid)
-            if not c or not c.output_path or not Path(c.output_path).exists():
+            f = archive.video_path(c) if c else None  # also a video brought back from the PC (no output_path then)
+            if not f or not f.exists():
                 raise HTTPException(404, "Not found")
-            return FileResponse(c.output_path, media_type="video/mp4")
+            return FileResponse(str(f), media_type="video/mp4")
 
 
 @app.get("/api/meta")
@@ -2975,7 +3081,7 @@ def meta_setup(body: MetaIn):
     from . import meta
 
     try:
-        return meta.setup(body.token)
+        return meta.setup(body.token, body.page_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except Exception as e:  # noqa: BLE001
@@ -2988,6 +3094,31 @@ def meta_toggle():
 
     set_setting("meta_on", "0" if get_setting("meta_on") != "0" else "1")
     return meta.status()
+
+
+@app.post("/api/meta/page")
+def meta_page(body: MetaPageIn):
+    """Post to another of the connected account's Facebook Pages (and its Instagram account)."""
+    from . import meta
+
+    return _acl_call(meta.choose_page, body.page_id)
+
+
+@app.post("/api/meta/targets")
+def meta_targets(body: MetaTargetsIn):
+    """Post to Facebook, to Instagram, or to both."""
+    from . import meta
+
+    return meta.set_targets(body.facebook, body.instagram)
+
+
+@app.post("/api/meta/app")
+def meta_app(body: MetaAppIn):
+    """The App ID and App secret of the account's own Meta app (makes the Instagram / Facebook login long-lived).
+    The secret is stored encrypted and never sent back."""
+    from . import meta
+
+    return _acl_call(meta.save_app, body.app_id, body.app_secret, body.clear)
 
 
 @app.delete("/api/meta")
@@ -3009,6 +3140,15 @@ def clip_crosspost(cid: int):
         if not archive.on_server(c):
             raise HTTPException(409, "The video is saved on your PC and is no longer on the server. "
                                      "Press “Get the video back from the PC” first.")
+        if c.meta_done:
+            raise HTTPException(409, "Already posted to Instagram / Facebook.")
+        if not meta.is_public(c):
+            raise HTTPException(409, "The video is not public on YouTube yet. It is posted by itself when it goes public.")
+        if c.meta_result and not meta._ig_pending(c.meta_result):  # the last try failed: try again
+            c.meta_result = None
+            s.commit()
+        elif c.meta_result:
+            raise HTTPException(409, "Instagram is still processing this video. It is published by itself in a few minutes.")
     executor.submit(meta.crosspost, cid)
     return {"started": True}
 
@@ -5121,6 +5261,51 @@ def destination_main(did: int):
         s.query(Channel).filter(Channel.kind == "viral").update({"destination_id": d.id}, synchronize_session=False)
         s.commit()  # viral picks follow the main channel
         return _dest_full(s, d)
+
+
+class TitleLangIn(BaseModel):
+    language: str = Field(pattern="^(en|hinglish|hi)$")
+
+
+def _rewrite_lang(did: int, limit: int = 15) -> int:
+    """After a channel's title language changed: the clips waiting for it get their title, description and hashtags
+    written again (never a clip edited by hand or already on YouTube). Background work: it may ask YouTube's search
+    suggestions; when they cannot be reached the plain templates are used."""
+    from .metadata import build, freshen_clip
+
+    with SessionLocal() as s:
+        ids = [c.id for c in s.query(Clip).filter(Clip.destination_id == did, Clip.youtube_id.is_(None),
+                                                  Clip.status.notin_(["uploading", "uploaded"]), Clip.removed_at.is_(None),
+                                                  Clip.meta_edited.isnot(True)).order_by(Clip.publish_at, Clip.id).limit(limit)]
+    done = 0
+    for cid in ids:
+        try:
+            if acl.allowed("keywords.use") and freshen_clip(cid, force=True):
+                done += 1
+                continue
+            with SessionLocal() as s:  # no keyword research (switched off / offline): the plain templates
+                c = s.get(Clip, cid)
+                if not c or c.youtube_id or c.meta_edited or c.kw and (c.kw.get("basis") or c.kw.get("items")):
+                    continue  # research results stay (they are rewritten in the language when YouTube answers again)
+                meta = build(s.get(Project, c.project_id), c, [])
+                c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]
+                s.commit()
+                done += 1
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("title language: clip %s", cid)
+    return done
+
+
+@app.post("/api/destinations/{did}/language")
+def destination_language(did: int, body: TitleLangIn):
+    """Title language of a channel: English (as before), Hinglish or Hindi. Credit and licence lines stay in English."""
+    with SessionLocal() as s:
+        d = _get(s, Destination, did)
+        d.title_lang = None if body.language == "en" else body.language
+        s.commit()
+        out = _dest_full(s, d)
+    executor.submit(_rewrite_lang, did)  # the clips already waiting for this channel follow the new language
+    return out
 
 
 class TakeOverIn(BaseModel):
