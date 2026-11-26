@@ -164,7 +164,14 @@ def _core(title: str, channel: str = "") -> tuple[str, str]:
     if channel and str(channel).strip():  # "... by <channel>"
         parts = [re.sub(r"(?i)\bby\s+" + re.escape(str(channel).strip()) + r"\b", " ", p).strip() for p in parts]
         parts = [" ".join(p.split()) for p in parts if p.strip()]
-    pick = next((p for p in parts if len(re.findall(r"[^\W\d_]{2,}", p)) >= 2), parts[0] if parts else "")
+    # the part that says most (a short brand tag like "B@d-g Ent" or "XYZ TV" before the "|" is not the topic)
+    def _score(p):
+        ws = re.findall(r"[^\W\d_]{2,}", p)
+        brand = bool(re.search(r"[@#]", p)) or (len(ws) <= 2 and any(w.lower() in ("ent", "tv", "official", "media", "films",
+                                                                                      "studio", "studios", "network") for w in ws))
+        return brand
+    good = [p for p in parts if len(re.findall(r"[^\W\d_]{2,}", p)) >= 2]
+    pick = next((p for p in good if not _score(p)), good[0] if good else (parts[0] if parts else ""))
     words = [w.strip(".,;'\"’‘") for w in pick.split()]
     words = [w for w in words if w and w not in ("&", "+", "x", "X")]
     letters = [w for w in words if re.search(r"[A-Za-z]", w)]
@@ -225,10 +232,19 @@ def topic_phrase(project: Project, lead: str | None = None, hint: str | None = N
     """(phrase, kind) the title is about: the clip's own hint (typed by the owner) > the keyword plan's lead phrase
     (when short) > the cleaned core topic of the source title."""
     title = str(project.title or "")
-    for cand in (hint, lead):
+    for i, cand in enumerate((hint, lead)):
         cand = " ".join(str(cand or "").split())
-        if cand and len(cand.split()) <= 5 and len(cand) <= 40:
-            return _nice_phrase(cand, title), "noun"
+        if not cand or len(cand.split()) > 5 or len(cand) > 40:
+            continue
+        ws = [w.lower() for w in cand.split()]
+        if len(set(ws)) < len(ws):
+            continue  # "the internet internet": a broken search phrase
+        if i == 1:  # the keyword plan's phrase must be about this video: most of its words are in the source title
+            src = {w.lower().strip(".,;:!?|()[]\"'") for w in title.split()}
+            real = [w for w in ws if w not in _SMALL]
+            if not real or sum(1 for w in real if w in src) * 2 < len(real):
+                continue
+        return _nice_phrase(cand, title), "noun"
     phrase, kind = _core(title, project.channel or "")
     if phrase:
         return phrase, kind
@@ -267,6 +283,13 @@ def hook_title(project: Project, clip: Clip, lang: str = "en", lead: str | None 
     if hint is None:
         hint = ((getattr(clip, "kw", None) or {}).get("hint") or "")
     topic, kind = topic_phrase(project, lead, hint)
+    seen, ded = set(), []
+    for w in topic.split():  # never "Internet Internet"
+        if w.lower() in seen and w.lower() not in _SMALL:
+            continue
+        seen.add(w.lower())
+        ded.append(w)
+    topic = " ".join(ded) or topic
     pool = SENTENCE[lang] if kind == "sentence" else TEMPLATES[lang]
     rank = sibling_rank(clip) if rank is None else rank
     start = (_key_hash(project.video_id or project.title or "") + rank) % len(pool)

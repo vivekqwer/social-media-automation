@@ -214,7 +214,8 @@ def migrate_owner() -> dict:
 
 
 # ---------------------------------------------------------------- waiting clips onto the new daily times, now
-WAITING = ("fetching", "rendering", "draft", "rendered", "queued")  # holds a slot, not on YouTube yet
+WAITING = ("fetching", "rendering", "draft", "rendered", "queued")
+FILL_LEAD_H = 48  # the first moved slot is at least this far away (the clip still has to be made / uploaded)  # holds a slot, not on YouTube yet
 
 
 def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None = None) -> dict:
@@ -256,9 +257,13 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
             rows = [c for c in rows if c.id not in keep]
             if not rows:
                 continue
-            on_yt = (s.query(func.max(Clip.publish_at)).filter(Clip.destination_id == dest, Clip.youtube_id.isnot(None))
-                     .scalar())
-            base = max(now + timedelta(hours=2), on_yt or now)
+            # days that already have a video waiting on YouTube keep it (moving it costs a YouTube update); the other
+            # days are filled from two days ahead (time for the clip to be made and uploaded) — also a day freed when
+            # a scheduled video was kept private
+            yt_days = {(t - timedelta(minutes=tz)).date() for (t,) in s.query(Clip.publish_at).filter(
+                Clip.destination_id == dest, Clip.youtube_id.isnot(None), Clip.kept_private.isnot(True),
+                Clip.publish_at.isnot(None), Clip.publish_at > now)}
+            base = now + timedelta(hours=FILL_LEAD_H)
             plan, old = [], {c.id: c.publish_at for c in rows}
             for c in rows:  # free their slots first so the daily budget check only counts what is placed
                 c.publish_at = None
@@ -266,6 +271,10 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
             prev = base
             for c in rows:
                 slot = _slot_from_times(prev, times, tz) or (prev + timedelta(hours=12))
+                for _ in range(800):
+                    if (slot - timedelta(minutes=tz)).date() not in yt_days:
+                        break
+                    slot = _slot_from_times(slot, times, tz) or (slot + timedelta(hours=12))
                 slot = fit_capacity(s, slot, times, tz, skip_id=c.id)
                 c.publish_at = slot
                 s.flush()

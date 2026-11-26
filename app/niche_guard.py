@@ -303,9 +303,91 @@ def apply() -> dict:
     return res
 
 
+HIDDEN_NOTE = "Kept private: off topic for this channel's niche (not deleted; it stays on YouTube as private)."
+
+
+def hide_uploaded(limit: int = 12) -> dict:
+    """Videos already on YouTube with a future publish time whose source is off topic: set to private with no publish
+    time (youtube.keep_private, ~51 units each; nothing is deleted), so the channel shows one topic. Only while the
+    day's budget still covers every waiting upload. The freed days are filled by the re-spacing."""
+    from datetime import timedelta
+
+    from . import quota, youtube
+    from .comments import _uploads_due_here
+    from .db import utcnow
+
+    out = {"hidden": 0, "left": 0, "stopped": ""}
+    if not enabled():
+        return out
+    now = utcnow()
+    with SessionLocal() as s:
+        rows = s.query(Clip).filter(Clip.status == "uploaded", Clip.youtube_id.isnot(None), Clip.kept_private.isnot(True),
+                                    Clip.removed_at.is_(None), Clip.publish_at.isnot(None),
+                                    Clip.publish_at > now + timedelta(hours=1)).order_by(Clip.publish_at).all()
+        cache, todo = {}, []
+        for c in rows:
+            if c.destination_id not in cache:
+                cache[c.destination_id] = profile(s, c.destination_id) if c.destination_id else None
+            p = s.get(Project, c.project_id)
+            if p is not None and why_off(cache[c.destination_id], p.title, p.tags, p.channel_url, p.mode):
+                todo.append((c.id, c.destination_id, c.youtube_id))
+    out["left"] = len(todo)
+    bad = set()
+    for cid, did, vid in todo[:limit]:
+        if did in bad:
+            continue
+        if not quota.can_update(_uploads_due_here()) or not quota.shared_room(quota.COST["update"] + quota.COST["read"]):
+            out["stopped"] = "today's YouTube budget is kept for uploads"
+            break
+        try:
+            youtube.keep_private(did, vid)
+        except LookupError:
+            pass  # gone from YouTube: it cannot go public either
+        except youtube.NeedsReconnect:
+            bad.add(did)
+            continue
+        except Exception as e:  # noqa: BLE001
+            m = str(e)
+            log.warning("niche guard: could not keep video %s private: %s", vid, m[:200])
+            if "quotaExceeded" in m or "dailyLimitExceeded" in m:
+                quota.exhaust()
+                out["stopped"] = "YouTube's daily budget is used up"
+                break
+            continue
+        with SessionLocal() as s:
+            c = s.get(Clip, cid)
+            if c is not None:
+                c.kept_private, c.live_noted, c.error = True, True, HIDDEN_NOTE
+                if c.comment_id is None:
+                    c.comment_state = "off"  # a private video gets no first comment
+                s.commit()
+        out["hidden"] += 1
+        out["left"] -= 1
+        try:
+            from . import acl
+
+            acl.record_here("niche.guard", f"Kept private (off topic): clip #{cid} — video {vid} stays on YouTube as private")
+        except Exception:  # noqa: BLE001
+            pass
+    if out["hidden"]:
+        try:
+            from . import tuneups
+
+            out["respaced"] = tuneups.respace_waiting()  # the freed days get waiting clips
+        except Exception:  # noqa: BLE001
+            log.exception("niche guard: re-spacing after keeping videos private")
+    return out
+
+
 def guard_due() -> dict:
     """Timed job (switch "niche.guard", every 6 hours per account)."""
-    return apply()
+    out = apply()
+    try:
+        out = dict(out or {})
+        out["private"] = hide_uploaded()
+    except Exception:  # noqa: BLE001
+        log.exception("niche guard: keeping off-topic videos private")
+    return out
 
 
 def last() -> dict:

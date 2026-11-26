@@ -2815,6 +2815,7 @@ def posts_per_day_set(body: PostsIn):
 
 class NicheGuardIn(BaseModel):
     apply: bool = False  # False = only set words / show the dry run
+    private: bool = False  # also keep off-topic videos already on YouTube (not public yet) private now
     dest_id: int | None = None  # with words: the niche words of this channel ("" = remove them)
     words: str | None = Field(None, max_length=2000)
 
@@ -2842,6 +2843,8 @@ def admin_niche_guard(body: NicheGuardIn):
         out["words"] = niche_guard.set_words(body.dest_id, body.words)
     if body.apply:
         out["result"] = niche_guard.apply()
+    if body.private:
+        out["private"] = niche_guard.hide_uploaded()
     out["preview"] = niche_guard.preview()
     return out
 
