@@ -47,7 +47,14 @@ EXTRA = {
     "food": """food foods street recipe recipes cook cooking cooked kitchen chef eat eating ate taste tasting tasty spicy
         restaurant dhaba thali biryani pizza burger momos momo chaat samosa dosa idli paneer chicken mutton tikka kebab
         paratha roti curry dal sweet sweets mithai dessert cake snack snacks breakfast lunch dinner khana khane nashta
-        vada pav pani puri golgappa noodles maggi chai tea coffee juice lassi butter fry fried bbq grill""",
+        vada pav pani puri golgappa noodles maggi chai tea coffee juice lassi butter fry fried bbq grill
+        chole bhature jalebi gulab jamun kulcha kachori sabzi litti chokha haleem rabri falooda sandwich gol gappe
+        gappa egg omelette anda aloo tikki pakora pakode bhaji pav bhaji halwa kheer ladoo laddu barfi rasgulla
+        rasmalai kulfi ice cream shake rolls roll kathi shawarma tandoori naan kulche rajma chawal rice pulao khichdi
+        upma poha uttapam vadapav misal bhel sev puri dahi papdi lassi thandai sharbat nihari kebabs korma rogan josh
+        fish prawn seafood keema handi kadai makhani masala dabeli pakoras chaap soya halwai mithaiwala vendor wala
+        छोले भटूरे आलू टिक्की चाट समोसा जलेबी पकोड़े बिरयानी मोमोज़ मोमोज पानीपुरी गोलगप्पे खाना स्वाद मिठाई चाय पराठा डोसा
+        नाश्ता कुल्फी लस्सी पनीर चिकन मटन""",
     "tech": """tech technology gadget gadgets phone phones smartphone mobile laptop computer pc unboxing iphone android
         samsung apple camera earbuds headphones watch smartwatch charger app apps ai software hardware""",
     "devops": """devops cloud aws azure gcp kubernetes docker linux programming coding code developer software python
@@ -165,6 +172,8 @@ def off_topic_video(s, dest_id: int | None, info: dict, mode: str | None = None)
     if not dest_id or not enabled():
         return ""
     try:
+        if len([t for t in (info.get("tags") or []) if str(t).strip()]) < 3:
+            return ""  # a skipped video is never tried again: only judge one whose tags say what it is about
         return why_off(profile(s, dest_id), info.get("title"), info.get("tags"), info.get("channel_url"), mode)
     except Exception:  # noqa: BLE001  (the guard never stops a source by failing)
         log.exception("niche guard: video check")

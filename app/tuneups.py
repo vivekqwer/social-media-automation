@@ -226,8 +226,8 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
 
     from sqlalchemy import func, update
 
-    from .autopilot import _slot_from_times, fit_capacity
-    from .db import Clip
+    from .autopilot import SLOT_LOCK, _slot_from_times, fit_capacity
+    from .db import Clip, Project
 
     try:
         v = json.loads(get_setting(POSTS_KEY) or "{}")
@@ -239,7 +239,8 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
         return {"moved": 0, "why": "posts per day not set"}
     now = utcnow()
     out = {"moved": 0, "first": None, "last": None, "channels": 0, "dry": dry}
-    with SessionLocal() as s:
+    with SLOT_LOCK, SessionLocal() as s:
+        viral = {i for (i,) in s.query(Channel.id).filter(Channel.kind == "viral")}
         dests = [d for (d,) in s.query(Clip.destination_id).filter(
             Clip.status.in_(WAITING), Clip.youtube_id.is_(None), Clip.publish_at.isnot(None), Clip.publish_at > now)
             .distinct()]
@@ -247,6 +248,12 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
             rows = (s.query(Clip).filter(Clip.destination_id == dest, Clip.status.in_(WAITING), Clip.youtube_id.is_(None),
                                          Clip.publish_at.isnot(None), Clip.publish_at > now)
                     .order_by(Clip.publish_at, Clip.id).all())
+            keep = set()
+            for c in rows:  # these follow their own times (viral picks, the PC folder's 18:00, own-topic best hours)
+                p = s.get(Project, c.project_id)
+                if c.pc_item_id or (c.kw or {}).get("basis") or (p is not None and p.channel_ref in viral):
+                    keep.add(c.id)
+            rows = [c for c in rows if c.id not in keep]
             if not rows:
                 continue
             on_yt = (s.query(func.max(Clip.publish_at)).filter(Clip.destination_id == dest, Clip.youtube_id.isnot(None))

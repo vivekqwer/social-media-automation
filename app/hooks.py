@@ -350,7 +350,9 @@ def new_title_for(s, c: Clip) -> str | None:
     if p is None or c.meta_edited or (c.kw or {}).get("basis") or not applies(p):
         return None
     k = c.kw or {}
-    t = hook_title(p, c, lang_of(c), lead=k.get("lead"), hint=k.get("hint") or "")
+    from .metadata import _clean
+
+    t = _clean(hook_title(p, c, lang_of(c), lead=k.get("lead"), hint=k.get("hint") or "") or "").strip()  # YouTube refuses < >
     return t if t and t != (c.title or "") else None
 
 
@@ -390,7 +392,7 @@ def retitle_due(limit: int | None = None) -> dict:
         todo = [(c.id, c.destination_id, c.youtube_id, c.title or "", new_title_for(s, c)) for c in candidates(s)]
     bad_dest = set()
     for cid, did, vid, old, new in todo:
-        if out["done"] >= room:
+        if out["done"] + out.get("failed", 0) >= room or out.get("failed", 0) >= 2:
             break
         if not new:
             _mark(cid, {"at": None, "skip": "keeps its title"})
@@ -436,6 +438,7 @@ def retitle_due(limit: int | None = None) -> dict:
                 out["stopped"] = "YouTube's daily budget is used up"
                 break
             log.warning("retitle clip %s: %s", cid, m[:200])
+            out["failed"] = out.get("failed", 0) + 1  # a refused update costs quota too: counts toward the run's limit
             with SessionLocal() as s:
                 c = s.get(Clip, cid)
                 tries = int(((c.kw or {}).get("retitle_tries") or 0)) + 1 if c else 3
