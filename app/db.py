@@ -225,7 +225,7 @@ class Channel(Base):
     auto = Column(Boolean, default=True)
     videos_per_run = Column(Integer, default=3)
     clips_per_video = Column(Integer, default=2)
-    clip_len = Column(Integer, default=30)
+    clip_len = Column(Integer, default=20)  # seconds; 20 since Nov 2026 (shorter Shorts are watched to the end more often)
     aspect = Column(String(8), default="9:16")
     gap_hours = Column(Integer, default=12)  # spacing between scheduled uploads
     destination_id = Column(Integer)  # which of my channels receives the uploads

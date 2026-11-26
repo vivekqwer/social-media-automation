@@ -69,6 +69,7 @@ PERMS = [
     ("source.reel", "sources", "Source type: original reels from scripts", True),
     ("source.viral", "sources", "Viral picks (5 a day)", True),
     ("ideas.autotune", "sources", "Auto-tune: sources make more of what works (Ideas → What works)", True),
+    ("niche.guard", "sources", "One topic per channel: off-topic waiting clips are parked, off-topic videos skipped", True),
 
     ("clips.create", "clips", "Make a clip from a video link", True),
     ("clips.own_video", "clips", "Upload their own video file", True),
@@ -84,10 +85,13 @@ PERMS = [
     ("clips.reminder", "clips", "Like, share & subscribe reminder on their videos", True),
     ("clips.subscribe_anim", "clips", "Animated like + subscribe + bell at the top of their videos", True),
     ("clips.pc_folder", "clips", "Videos from a folder on their PC (Clips → From my PC)", True),
+    ("titles.hook", "clips", "Hook titles (short curiosity titles instead of “video title | Best Moment”)", True),
+    ("clips.short", "clips", "Clips end at a natural pause in the speech (±3 s, when captions are there)", True),
 
     ("uploads.youtube", "uploads", "Upload to YouTube at all", True),
     ("uploads.auto", "uploads", "Automatic upload without review", True),
     ("uploads.comment", "uploads", "First comment under new videos", True),
+    ("titles.retitle", "uploads", "Hook titles for videos already on YouTube that are not public yet (20 a day, uploads first)", True),
 
     ("gmail.connect", "extras", "Connect / disconnect Gmail", True),
     ("gmail.send", "extras", "Permission mails to creators (send, and read their replies)", True),
@@ -345,6 +349,18 @@ ROUTES = [
     ("POST", "/api/admin/park-waiting", SUPER, "Parked clips that were waiting to be made"),
     ("POST", "/api/admin/unpark", SUPER, "Parked clips go back into the line a few a day"),
     ("POST", "/api/admin/queue-cap", SUPER, "Changed how many clips may wait before the sources pause"),
+    # growth fixes (Nov 2026): hook titles, retitles of scheduled videos, one topic per channel, shorter clips, posts a day
+    ("GET", "/api/settings/growth", SIGNED, None),  # read-only: what is on, for the My channels card
+    ("POST", "/api/clips/{cid}/hook-title", "titles.hook", None),  # a suggestion only: nothing is saved (clips.edit inside)
+    ("GET", "/api/retitle", "titles.retitle", None),
+    ("GET", "/api/niche-guard", "niche.guard", None),  # read-only preview of this account's own channels
+    ("GET", "/api/settings/short-clips", "clips.short", None),
+    ("GET", "/api/settings/posts-per-day", SIGNED, None),
+    ("POST", "/api/admin/posts-per-day", SUPER, "Changed public posts per day"),
+    ("GET", "/api/admin/niche-guard", SUPER, None),  # dry run: what would be parked
+    ("POST", "/api/admin/niche-guard", SUPER, "Ran the niche check / changed a channel's niche words"),
+    ("POST", "/api/admin/growth-fixes", SUPER, "Switched a growth fix on / off for this copy"),
+    ("POST", "/api/admin/retitle", SUPER, "Ran the retitle of scheduled videos now"),
     ("GET", "/api/settings/reminder", SIGNED, None),
     ("GET", "/api/phone", SIGNED, None),
     ("POST", "/api/phone", "phone.use", "Changed phone notifications"),

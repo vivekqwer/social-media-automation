@@ -501,6 +501,8 @@ def start():
     #   remake_tick          "Animated like + subscribe + bell" (and the account's own switch in My channels)
     #   thumb_tests          "Thumbnails" (with swap_weak_thumbnails: the A/B test of the second thumbnail)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
+    #   retitle_due          "Hook titles for videos already on YouTube" (and "Hook titles"; 20 a day, uploads first)
+    #   guard_due            "One topic per channel" (parks off-topic waiting clips; never more than 40% of a channel's line)
     #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
     #                        and the creators' answers stays with "Permission mails to creators"
     #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time,
@@ -595,6 +597,12 @@ def start():
     from .pcfolder import due as pc_due
     add(when_on("clips.pc_folder", pc_due), "interval", minutes=2, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # PC-folder videos: ask for files, move missed times
+    from .hooks import retitle_due
+    add(when_on("titles.retitle", retitle_due), "interval", hours=1, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=14))  # hook titles on scheduled videos, 20 a day max
+    from .niche_guard import guard_due
+    add(when_on("niche.guard", guard_due), "interval", hours=6, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=16))  # one topic per channel: park off-topic waiting clips
     from .subscribe_anim import remake_tick  # waiting clips made before the animation existed get it, one at a time,
     add(when_on("clips.subscribe_anim", remake_tick), "interval", minutes=2, max_instances=1, coalesce=True,  # only
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=9))  # when nothing else is being made

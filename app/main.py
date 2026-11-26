@@ -80,6 +80,9 @@ async def lifespan(app: FastAPI):
     from . import permissions as _perm
 
     _perm.migrate_auto_send()  # owner's copy only: ON when the owner's Gmail is already connected (once)
+    from . import tuneups as _tune
+
+    _tune.migrate_owner()  # owner's copy only, once each: sources 30/35 s -> 20 s; 2 public posts a day if the budget holds
     sch = scheduler.start()
     yield
     sch.shutdown(wait=False)
@@ -1172,7 +1175,7 @@ class ChannelIn(BaseModel):
     auto: bool = True
     videos_per_run: int = Field(3, ge=1, le=20)
     clips_per_video: int = Field(2, ge=1, le=10)
-    clip_len: int = Field(30, ge=10, le=120)
+    clip_len: int = Field(20, ge=10, le=120)
     aspect: Literal["16:9", "9:16", "1:1"] = "9:16"
     gap_hours: int = Field(12, ge=1, le=720)
     destination_id: int | None = None
@@ -2708,6 +2711,150 @@ def upload_lead_set(body: UploadLeadIn):
 
     set_setting("upload_lead_days", str(body.days) if body.days else "")
     return {"days": quota.upload_lead_hours() // 24}
+
+
+# ---------- growth fixes (Nov 2026): hook titles, retitles, one topic per channel, shorter clips, posts a day ----------
+GROWTH_KEYS = ("titles.hook", "titles.retitle", "niche.guard", "clips.short")
+
+
+@app.get("/api/settings/growth")
+def growth_get():
+    """What is on for this account (My channels card). Read-only."""
+    from . import hooks, niche_guard, tuneups
+
+    on = {k: hooks.on(k) for k in GROWTH_KEYS}
+    out = {"on": on, "posts": tuneups.posts_status(), "short": {"new_len": tuneups.NEW_LEN, "window": tuneups.WINDOW},
+           "niche": niche_guard.last()}
+    if on["titles.retitle"]:
+        r = hooks.status()
+        out["retitle"] = {"done": r["done"], "today": r["today"], "per_day": r["per_day"]}
+    return out
+
+
+@app.post("/api/clips/{cid}/hook-title")
+def clip_hook_title(cid: int):
+    """A hook title for this clip (a suggestion: nothing is saved; the editor puts it in the title box)."""
+    from . import hooks
+    from .metadata import lang_of
+
+    acl.need("clips.edit")
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = s.get(Project, c.project_id)
+        if p is None or p.mode == "original":
+            raise HTTPException(400, "This is your own video: its title stays yours.")
+        k = c.kw or {}
+        return {"title": hooks.hook_title(p, c, lang_of(c), lead=k.get("lead"), hint=k.get("hint") or "")}
+
+
+@app.get("/api/retitle")
+def retitle_get():
+    from . import hooks
+
+    return hooks.status()
+
+
+@app.get("/api/niche-guard")
+def niche_guard_get():
+    """This account's own channels: which waiting clips are off topic (nothing changes)."""
+    from . import niche_guard
+
+    return niche_guard.preview()
+
+
+@app.get("/api/settings/short-clips")
+def short_clips_get():
+    from . import tuneups
+
+    return tuneups.short_status()
+
+
+@app.get("/api/settings/posts-per-day")
+def posts_per_day_get():
+    from . import tuneups
+
+    return tuneups.posts_status()
+
+
+class PostsIn(BaseModel):
+    n: int = Field(ge=1, le=3)
+    times: str = Field("", max_length=40)  # empty = 18:00 / 13:00, 19:00 / 10:00, 14:00, 19:00 (IST)
+    tz_offset: int = Field(-330, ge=-900, le=900)
+    respace: bool = True  # also move the clips that wait (not on YouTube yet) onto the new times
+    dry: bool = False  # only show what would move
+
+
+@app.post("/api/admin/posts-per-day")
+def posts_per_day_set(body: PostsIn):
+    """Public posts a day for the copy being viewed (the owner's own unless viewing a customer). Clips that already
+    have a publish time keep it; new ones follow the new times. Refused when the YouTube budget cannot hold it."""
+    from . import tuneups
+
+    try:
+        if body.dry:
+            return {"respaced": tuneups.respace_waiting(dry=True, times=tuneups.clean_times(body.times or None, body.n),
+                                                        tz=body.tz_offset)}
+        out = tuneups.set_posts_per_day(body.n, body.times or None, body.tz_offset)
+        if body.respace:
+            out["respaced"] = tuneups.respace_waiting()
+        return out
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class NicheGuardIn(BaseModel):
+    apply: bool = False  # False = only set words / show the dry run
+    dest_id: int | None = None  # with words: the niche words of this channel ("" = remove them)
+    words: str | None = Field(None, max_length=300)
+
+
+@app.get("/api/admin/niche-guard")
+def admin_niche_guard_preview():
+    """Dry run for the copy being viewed: what the niche check would park, per channel (nothing changes)."""
+    from . import niche_guard
+
+    return niche_guard.preview()
+
+
+@app.post("/api/admin/niche-guard")
+def admin_niche_guard(body: NicheGuardIn):
+    """Set a channel's niche words and/or park the off-topic waiting clips now (never more than 40% of a channel's
+    line: then only a report and a message to the owner)."""
+    from . import niche_guard
+
+    out = {}
+    if body.words is not None:
+        if body.dest_id is None:
+            raise HTTPException(400, "Say which channel the words are for (dest_id).")
+        with SessionLocal() as s:
+            _get(s, Destination, body.dest_id)
+        out["words"] = niche_guard.set_words(body.dest_id, body.words)
+    if body.apply:
+        out["result"] = niche_guard.apply()
+    out["preview"] = niche_guard.preview()
+    return out
+
+
+class GrowthFixIn(BaseModel):
+    key: Literal["titles.hook", "titles.retitle", "niche.guard", "clips.short"]
+    on: bool
+
+
+@app.post("/api/admin/growth-fixes")
+def admin_growth_fix(body: GrowthFixIn):
+    """Switch one growth fix off (or on again) for the copy being viewed — also the owner's own copy, which the
+    per-account switches (Access) never restrict."""
+    from . import hooks
+
+    return {"off": hooks.set_off(body.key, not body.on)}
+
+
+@app.post("/api/admin/retitle")
+def admin_retitle():
+    """Run the retitle of scheduled videos now (same daily cap and budget rules as the timed job)."""
+    from . import hooks
+
+    return hooks.retitle_due()
 
 
 class ReminderIn(BaseModel):

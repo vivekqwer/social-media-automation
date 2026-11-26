@@ -1,0 +1,1284 @@
+
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const T=s=>{if(s==null||isNaN(s))return'-';s=Math.round(s);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')};
+const when=iso=>iso?new Date(iso).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):'as soon as possible';
+const thumb=id=>id?`https://i.ytimg.com/vi/${id}/mqdefault.jpg`:'';
+const LABEL={fetching:'Getting video (helper PC)…',draft:'Draft',rendering:'Rendering…',rendered:'Ready to review',queued:'Queued',uploading:'Uploading…',uploaded:'Uploaded',failed:'Failed'};
+const P={
+ dashboard:'<rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/>',
+ film:'<rect x="2" y="2" width="20" height="20" rx="2.2"/><path d="M7 2v20M17 2v20M2 12h20M2 7h5M2 17h5M17 17h5M17 7h5"/>',
+ rss:'<path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1"/>',
+ youtube:'<path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/>',
+ logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>',
+ plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',check:'<path d="M20 6 9 17l-5-5"/>',x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+ clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+ alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+ upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
+ play:'<polygon points="6 3 20 12 6 21 6 3"/>',trash:'<path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/>',
+ pencil:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',link:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+ scissors:'<circle cx="6" cy="6" r="3"/><path d="M8.12 8.12 12 12"/><path d="M20 4 8.12 15.88"/><circle cx="6" cy="18" r="3"/><path d="M14.8 14.8 20 20"/>',
+ menu:'<line x1="4" x2="20" y1="12" y2="12"/><line x1="4" x2="20" y1="6" y2="6"/><line x1="4" x2="20" y1="18" y2="18"/>',
+ mic:'<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/>',
+ captions:'<rect width="18" height="14" x="3" y="5" rx="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>',
+ sparkles:'<path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>',
+ refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
+ pause:'<rect x="14" y="4" width="4" height="16" rx="1"/><rect x="6" y="4" width="4" height="16" rx="1"/>',
+ inbox:'<polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>',
+ arrow:'<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>',
+ zap:'<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+ image:'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+ chart:'<path d="M3 3v16a2 2 0 0 0 2 2h16"/><path d="m19 9-5 5-4-4-3 3"/>',
+ bell:'<path d="M10.27 21a2 2 0 0 0 3.46 0"/><path d="M3.26 15.33A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 0 0 6 8c0 4.5-1.41 5.96-2.74 7.33"/>'
+};
+const ico=(n,c='')=>`<svg class="ico ${c}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||''}</svg>`;
+function paintIcons(root=document){$$('[data-ico]',root).forEach(e=>{e.outerHTML=ico(e.dataset.ico)})}
+let ANPOLL=null,AN=null,DESTS=[],OV=null,TAB='rendered',CUR=null,POLL=null,LOCK=false,VIEW='out',VOICES={};
+
+async function api(path,method='GET',body){
+  const o={method,headers:{}};if(window.ME&&ME.tenant)o.headers['X-Copy']=String(ME.tenant);
+  if(body instanceof FormData)o.body=body;else if(body!==undefined){o.headers['Content-Type']='application/json';o.body=JSON.stringify(body)}
+  const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),180000);o.signal=ac.signal;
+  let r;try{r=await fetch(path,o)}catch(e){throw new Error(e.name==='AbortError'?'The server took too long — please try again.':'Network problem — check your internet and try again.')}finally{clearTimeout(tm)}
+  if(r.status===401){location.href='/login?next='+encodeURIComponent(location.pathname);throw new Error('Session expired — please sign in again')}
+  if(r.status===409){let j={};try{j=await r.clone().json()}catch(e){}if(j.reload){setTimeout(()=>location.reload(),600);throw new Error(j.detail)}}
+  if(!r.ok){let m=r.statusText;try{const j=await r.json();m=j.detail||m;if(Array.isArray(m))m=m.map(plainErr).join(' ')}catch(e){}throw new Error(m)}
+  return r.json();
+}
+/* a 422 from the server ({loc,msg}) as a plain sentence: "Channels must be at least 2." — never the raw text */
+function plainErr(x){const N={channels:'The channel count',channel_limit:'The channel count',message:'The message',plan:'The plan',price:'The price',period:'The billing period',description:'The description',name:'The name',brand:'The name',email:'The email address',password:'The password',upi:'The UPI ID',text:'The text',note:'The note',key_id:'The Key ID',key_secret:'The Key Secret',webhook_secret:'The webhook secret'};
+  const k=String((x.loc||[]).filter(p=>!['body','query','path','header','cookie'].includes(p)&&isNaN(p)).slice(-1)[0]||''),F=N[k]||(k?(k[0].toUpperCase()+k.slice(1)).replace(/_/g,' '):'This value'),m=String(x.msg||'');let w;
+  if((w=m.match(/greater than or equal to (\S+)/)))return `${F} must be at least ${w[1]}.`;if((w=m.match(/greater than (\S+)/)))return `${F} must be more than ${w[1]}.`;
+  if((w=m.match(/less than or equal to (\S+)/)))return `${F} must be at most ${w[1]}.`;if((w=m.match(/less than (\S+)/)))return `${F} must be less than ${w[1]}.`;
+  if((w=m.match(/at least (\d+) character/)))return `${F} is too short (at least ${w[1]} characters).`;if((w=m.match(/at most (\d+) character/)))return `${F} is too long (at most ${w[1]} characters).`;
+  if(/required|missing/i.test(m))return `${F} is missing.`;if(/integer|number|float/i.test(m))return `${F} must be a number.`;if(/bool/i.test(m))return `${F} must be yes or no.`;
+  return `${F} is not valid.`}
+const inr=n=>{n=Math.round((Number(n)||0)*100)/100;return '₹'+n.toLocaleString('en-IN',Number.isInteger(n)?{}:{minimumFractionDigits:2,maximumFractionDigits:2})};/* ₹2,499 · ₹1,00,000 — the same as payments.inr() on the server */
+function toast(msg,bad){const d=document.createElement('div');d.className='toast'+(bad?' bad':'');d.innerHTML=ico(bad?'alert':'check')+'<span>'+esc(msg)+'</span>';$('#toasts').appendChild(d);setTimeout(()=>d.remove(),bad?6500:3500)}
+const fail=e=>toast(e.message||String(e),true);
+async function once(fn,btn){if(LOCK){toast('Still working on the previous action…');return}LOCK=true;if(btn)btn.disabled=true;try{await fn()}catch(e){fail(e)}finally{LOCK=false;if(btn)btn.disabled=false}}
+const empty=(icon,title,sub,action='')=>`<div class="empty"><div class="ei">${ico(icon,'lg')}</div><b>${title}</b><span class="sm">${sub||''}</span>${action}</div>`;
+const skel=(n=3)=>Array.from({length:n},()=>'<div class="sk" style="height:54px;margin-bottom:10px"></div>').join('');
+
+const TITLES={none:'Nothing switched on',start:'Get started',users:'Users',guide:'Setup guide',viral:'Viral today',dashboard:'Dashboard',clips:'Clips',sources:'Sources',analytics:'Analytics',ideas:'Ideas',alerts:'Alerts',settings:'My channels'};
+function go(p){
+  if(window.OBLOCK&&p!=='start'){p='start';if(!window.OBSRC)toast('Finish “Get started” first — the rest opens when the setup is done');window.OBSRC=false}
+  if(!pageOn(p))p=firstPage();
+  $$('main section').forEach(s=>s.classList.toggle('hide',s.id!=='p-'+p));
+  $$('.nav[data-p]').forEach(n=>n.classList.toggle('on',n.dataset.p===p));
+  $('#crumb').textContent=TITLES[p]||p;$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on');
+  clearInterval(ANPOLL);const L={dashboard:loadDash,clips:loadClips,sources:loadSources,settings:loadDests,alerts:loadAlerts,analytics:loadAnalytics,ideas:loadIdeas,viral:loadViral,guide:loadGuide,users:loadUsers,start:loadStart}[p];if(L)Promise.resolve().then(L).catch(fail);
+}
+$$('.nav[data-p]').forEach(n=>n.onclick=()=>go(n.dataset.p));
+$('#logout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST'})}catch(e){}location.href='/login'};
+$('#burger').onclick=()=>{$('#sb').classList.add('on');$('#sb-scrim').classList.add('on')};
+$('#sb-scrim').onclick=()=>{$('#sb').classList.remove('on');$('#sb-scrim').classList.remove('on')};
+$('#top-add').onclick=()=>openAdd();$('#top-new').onclick=()=>openNewModal();
+
+let AISRC=new Set();
+async function loadOverview(){
+  OV=await api('/api/overview');DESTS=OV.destinations;AISRC=new Set(OV.ai_sources||[]);
+  const opts=DESTS.length?DESTS.map(d=>`<option value="${d.id}">→ ${esc(d.name)}${d.is_main&&DESTS.length>1?' (main)':''}${d.paused?' (uploads paused)':''}${d.needs_reconnect?' (reconnect needed)':''}</option>`).join(''):'<option value="">Connect a channel first</option>';
+  ['#h-dest','#s-dest','#q-dest','#e-dest'].forEach(sel=>{const el=$(sel),v=el.value;el.innerHTML=opts;if(DESTS.some(d=>String(d.id)===v))el.value=v});
+  const rv=OV.counts.rendered;const b=$('#b-review');b.style.display=rv?'':'none';b.textContent=rv;
+  const na=OV.alerts_badge??OV.alerts_unseen??0;const ba=$('#b-alerts');ba.style.display=na?'':'none';ba.textContent=na;
+  return OV;
+}
+const num=n=>n==null?'—':Number(n).toLocaleString('en-IN');
+const delta=n=>n==null?'<span class="mut sm">—</span>':`<span class="sm" style="color:${n>0?'var(--ok)':n<0?'var(--bad)':'var(--mfg)'}">${n>0?'+':''}${num(n)}</span>`;
+function spark(pts,key){if(!pts||pts.length<2)return '';const v=pts.map(p=>p[key]||0),mn=Math.min(...v),mx=Math.max(...v),W=160,H=36;
+  const xy=v.map((y,i)=>`${(i*W/(v.length-1)).toFixed(1)},${(H-2-(mx>mn?(y-mn)/(mx-mn):.5)*(H-4)).toFixed(1)}`).join(' ');
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-label="30-day trend"><polyline fill="none" stroke="var(--brand)" stroke-width="2" points="${xy}"/></svg>`}
+const hrs=m=>m==null?'—':(m/60>=10?Math.round(m/60).toLocaleString('en-IN'):(m/60).toFixed(1))+' h';
+const dur=s=>s?Math.floor(s/60)+':'+String(s%60).padStart(2,'0'):'—';
+function watchCard(c){const w=c.watch,st=c.watch_status||'';
+  if(!w){const msg=st==='reconnect'?`Connect <b>${esc(c.name)}</b> once more to allow watch-time stats. <a class="btn sm" href="/auth/login">Reconnect</a>`
+      :st==='api_off'?'The YouTube Analytics API is not switched on in Google Cloud yet.':st.startsWith('error')?esc(st.slice(7,160)):'Loading watch time…';
+    return `<div class="card stat"><div class="l">${esc(c.name)} · watch time<span class="ic">${ico('clock')}</span></div><div class="sm" style="margin-top:8px">${msg}</div></div>`}
+  return `<div class="card stat"><div class="l">${esc(c.name)} · watch time (28 days)<span class="ic">${ico('clock')}</span></div><div class="v">${hrs(w.minutes_28d)}</div>
+    <div class="d">${hrs(w.lifetime_minutes)} all time · subs +${num(w.subs_gained_28d)} / −${num(w.subs_lost_28d)}</div><div>${spark(w.daily,'minutes')}</div></div>`}
+function healthCard(c){const h=c.health||{score:null,notes:[]},b=c.best_hours||{};
+  const col=h.score>=80?'var(--ok)':h.score>=50?'var(--warn)':'var(--bad)';
+  const best=b.enough?b.ranked.slice(0,3).map(x=>`${String(x.hour).padStart(2,'0')}:00`).join(', '):`needs ${Math.max(0,8-(b.videos||0))} more public videos`;
+  return `<div class="card stat"><div class="l">${esc(c.name)} · channel health<span class="ic">${ico('check')}</span></div><div class="v" style="color:${col}">${h.score==null?'—':h.score}<span class="mut sm">/100</span></div>
+    <div class="d">${esc(h.notes.join(' · '))}</div><div class="sm" style="margin-top:6px">Best upload times so far: <b>${esc(best)}</b></div></div>`}
+function watchDetails(c){const w=c.watch;if(!w)return '';const bar=(v,mx)=>`<div class="bar" style="width:100%;max-width:none"><i style="width:${mx?Math.round(v*100/mx):0}%"></i></div>`;
+  const tmax=Math.max(1,...w.traffic.map(t=>t.views)),cmax=Math.max(1,...w.countries.map(t=>t.views));
+  return `<div class="grid cols" style="margin-top:16px">
+    <div class="card"><div class="ch"><div><h3>Where viewers come from</h3><p>${esc(c.name)} · last 28 days</p></div></div><div class="cb">${w.traffic.length?w.traffic.map(t=>`<div style="margin-bottom:10px"><div class="row sm" style="justify-content:space-between"><span>${esc(t.source)}</span><span class="mut">${num(t.views)} views · ${hrs(t.minutes)}</span></div>${bar(t.views,tmax)}</div>`).join(''):'<span class="mut sm">No data yet — YouTube adds it 1–3 days after views come in.</span>'}</div></div>
+    <div class="card"><div class="ch"><div><h3>Top countries</h3><p>${esc(c.name)} · last 28 days</p></div></div><div class="cb">${w.countries.length?w.countries.map(t=>`<div style="margin-bottom:10px"><div class="row sm" style="justify-content:space-between"><span>${esc(t.country)}</span><span class="mut">${num(t.views)} views · ${hrs(t.minutes)}</span></div>${bar(t.views,cmax)}</div>`).join(''):'<span class="mut sm">No data yet.</span>'}</div></div>
+  </div><div class="mut sm" style="margin-top:6px">Watch-time numbers are added by YouTube 1–3 days after the views (updated ${when(w.fetched_at)}).</div>`}
+function renderAnalytics(){
+  const d=AN;if(!d)return;
+  const last=d.channels.map(c=>c.synced_at).filter(Boolean).sort().pop();
+  $('#an-desc').textContent='Live from YouTube — updates every 2 minutes while this page is open (every 10 minutes in the background)'+(last?' · last update '+when(last):'')+'.';
+  $('#an-chans').innerHTML=d.channels.length?`<div class="grid stats">${d.channels.map(c=>`
+    <div class="card stat"><div class="l">${esc(c.name)} · subscribers<span class="ic">${ico('youtube')}</span></div><div class="v">${c.subscribers_hidden?'hidden':num(c.subscribers)}</div><div class="d">${delta(c.subs_24h)} today · ${delta(c.subs_7d)} this week</div></div>
+    <div class="card stat"><div class="l">${esc(c.name)} · total views<span class="ic">${ico('chart')}</span></div><div class="v">${num(c.views)}</div><div class="d">${delta(c.views_24h)} today · ${delta(c.views_7d)} this week</div><div>${spark(c.daily,'views')}</div></div>
+    <div class="card stat"><div class="l">${esc(c.name)} · videos<span class="ic">${ico('film')}</span></div><div class="v">${num(c.videos)}</div><div class="d">${c.synced_at?'updated '+when(c.synced_at):'first update in a minute'}</div></div>
+    ${watchCard(c)}${healthCard(c)}`).join('')}</div>${d.channels.map(watchDetails).join('')}`
+    :empty('youtube','No channel connected','Connect a YouTube channel to see its numbers.');
+  const sort=$('#an-sort').value,v=[...d.videos];
+  if(sort==='views')v.sort((a,b)=>b.views-a.views);if(sort==='new')v.sort((a,b)=>(b.new_views||0)-(a.new_views||0));
+  $('#an-videos').innerHTML=v.length?`<table class="tbl"><thead><tr><th>Video</th><th>Channel</th><th>Published</th><th style="text-align:right">Views</th><th style="text-align:right">New</th><th style="text-align:right">Likes</th><th style="text-align:right">Comments</th><th style="text-align:right" title="(likes + comments) / views">Engagement</th><th style="text-align:right" title="last 28 days">Watch time</th><th style="text-align:right" title="average time watched / % of the video">Avg viewed</th></tr></thead><tbody>${v.map(x=>`<tr>
+    <td><a href="https://youtu.be/${esc(x.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(x.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(x.title)}${x.privacy&&x.privacy!=='public'?` <span class="badge outline">${esc(x.privacy)}</span>`:''}</span></a></td>
+    <td class="mut sm">${esc(x.channel||'')}</td><td class="mut sm">${x.published_at?when(x.published_at):'—'}</td>
+    <td style="text-align:right"><b>${num(x.views)}</b></td><td style="text-align:right">${delta(x.new_views)}</td><td style="text-align:right">${num(x.likes)}</td><td style="text-align:right">${num(x.comments)}</td><td style="text-align:right" class="mut sm">${x.views?((x.likes+x.comments)*100/x.views).toFixed(1)+'%':'—'}</td><td style="text-align:right">${x.watch?hrs(x.watch.minutes):'—'}</td><td style="text-align:right" class="mut sm">${x.watch?dur(x.watch.avg_seconds)+' · '+x.watch.avg_percent+'%':'—'}</td></tr>`).join('')}</tbody></table>`
+    :`<div class="cb">${empty('film','No videos yet','Numbers appear after the first update.')}</div>`;
+}
+async function loadAnalytics(){
+  if(!AN){$('#an-chans').innerHTML=skel(1);$('#an-videos').innerHTML='<div class="cb">'+skel(3)+'</div>'}
+  AN=await api('/api/analytics');renderAnalytics();
+  // live mode: while this page is open, ask the server for fresh numbers every 2 minutes
+  clearInterval(ANPOLL);ANPOLL=setInterval(async()=>{if($('#p-analytics').classList.contains('hide'))return clearInterval(ANPOLL);try{AN=await api('/api/analytics/sync?live=1','POST');renderAnalytics()}catch(e){}},120000);
+}
+$('#an-sort').onchange=renderAnalytics;
+$('#an-report').onclick=()=>once(async()=>{const r=await api('/api/reports/weekly','POST');window.open('/api/reports/'+r.file,'_blank');toast('Report made — also sent to Telegram if connected')},$('#an-report'));
+$('#an-sync').onclick=()=>once(async()=>{const r=await api('/api/analytics/sync','POST');AN=r;renderAnalytics();toast(r.errors&&r.errors.length?'Some channels could not be read: '+r.errors[0]:'Updated from YouTube',!!(r.errors&&r.errors.length))},$('#an-sync'));
+function ideaRow(v,extra){return `<tr><td><a href="https://youtu.be/${esc(v.video_id)}" target="_blank" rel="noopener" class="row" style="gap:10px;flex-wrap:nowrap;color:inherit;text-decoration:none"><img src="https://i.ytimg.com/vi/${esc(v.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><span>${esc(v.title)}</span></a></td><td class="mut sm">${esc(v.channel||'')}</td>${extra}<td style="text-align:right"><button class="btn outline sm" data-topic="${esc(v.title)}">Add as topic</button></td></tr>`}
+// ---------- Ideas -> What works (app/learn.py): what the channel's numbers say, and auto-tune ----------
+let WW=null;
+const wwPct=r=>`<b style="color:${r.verdict==='win'?'var(--ok)':r.verdict==='weak'?'var(--bad)':'inherit'}">${r.ratio}×</b>`;
+function wwTable(title,rows,name){if(!rows||!rows.length)return'';return `<div class="kwg"><b>${title}</b><div style="overflow-x:auto;max-width:100%"><table class="tbl" style="margin-top:6px"><thead><tr><th>${name}</th><th style="text-align:right">Videos</th><th style="text-align:right">Views a day</th><th style="text-align:right">vs your usual</th><th style="text-align:right">Likes</th></tr></thead><tbody>${rows.slice(0,8).map(r=>`<tr><td>${esc(r.label)}</td><td style="text-align:right">${r.n}</td><td style="text-align:right">${num(r.vpd)}</td><td style="text-align:right">${wwPct(r)}</td><td style="text-align:right" class="mut sm">${r.like_rate==null?'—':r.like_rate+'%'}</td></tr>`).join('')}</tbody></table></div></div>`}
+function renderWW(){const w=WW,a=w.autotune,box=$('#ww-out');
+  const tune=`<div style="margin-top:12px;padding:12px 14px;border:1px solid var(--border);border-radius:var(--r);background:${a.on?'var(--brand-soft)':'transparent'}"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="ww-tune" ${a.on?'checked':''}><i></i></span>Auto-tune: make more of what works</label>
+    <div class="mut sm" style="margin-top:6px">Once a day: a source whose clips do 1.5× better than your usual makes <b>one more video per run</b> (at most twice its own setting, never above your account's limits); one that does much worse makes one fewer (never below 1). Nothing is paused or deleted and upload times are never changed. Words that do best get a little extra weight in titles and tags. Needs at least 5 videos per source before it changes anything.</div>
+    ${a.changed.length?`<div class="sm" style="margin-top:8px"><b>Changed now:</b> ${a.changed.map(c=>`“${esc(c.source)}” ${c.now} video${c.now===1?'':'s'} per run (its own setting: ${c.orig})`).join(' · ')}</div>`:''}
+    ${(a.held||[]).map(h=>`<div class="mut sm" style="margin-top:4px">${esc(h)}</div>`).join('')}
+    ${a.log.length?`<div class="sm" style="margin-top:8px"><b>What auto-tune did</b>${a.log.slice(0,6).map(l=>`<div class="mut sm">${esc(when(l.at))} — ${esc(l.text)}</div>`).join('')}</div>`:''}
+    ${a.changed.length?`<button class="btn outline sm" id="ww-undo" style="margin-top:10px">Undo auto-tune</button> <span class="mut sm">puts every source back to its own setting and switches auto-tune off</span>`:''}</div>`;
+  if(!w.enough){box.innerHTML=`<div class="mut sm">Not enough to judge yet: ${esc(w.why)} This card fills in by itself — nothing is changed until then.</div>`+tune;bindWW();return}
+  const lines=w.lines.length?`<ul style="margin:0;padding-left:18px">${w.lines.map(l=>`<li style="margin:4px 0">${esc(l)}</li>`).join('')}</ul>`:'<div class="mut sm">No clear winner or loser yet — every group is close to your usual.</div>';
+  const topics=w.topics.length?`<div class="kwg"><b>Topic ideas from what works</b><div class="mut sm">Made from your best words, what people search and today's trending lists.</div>${w.topics.map((t,i)=>`<div class="row" style="gap:8px;margin-top:6px;flex-wrap:wrap"><span class="grow"><b>${esc(t.topic)}</b> <span class="mut sm">· ${esc(t.why)}</span></span><button class="btn outline sm" data-wwkw="${i}">Keywords</button><button class="btn outline sm" data-wwsrc="${i}">Find sources for this</button></div>`).join('')}</div>`:'';
+  box.innerHTML=`<div class="mut sm" style="margin-bottom:8px">${w.videos} clips judged · your usual: ${num(w.usual)} views a day per video${w.stale?' · <b>numbers from YouTube are more than 2 days old — auto-tune waits</b>':''}</div>`+lines
+    +(w.hour_tip?`<div class="mut sm" style="margin-top:6px">${esc(w.hour_tip)}</div>`:'')+tune+topics
+    +`<details style="margin-top:12px"><summary class="sm" style="cursor:pointer">The numbers behind it</summary>${wwTable('Sources',w.sources,'Source')}${wwTable('Words in titles and tags',w.words,'Word')}${wwTable('Clip length',w.lengths,'Length')}${wwTable('Upload hour (your time)',w.hours,'Hour')}${wwTable('Shorts picture',w.layouts,'Picture')}<div class="mut sm" style="margin-top:8px">Only groups with 5 or more videos are shown. “vs your usual” = the middle video of the group compared with the middle video of your channel (views per day).</div></details>`;
+  bindWW()}
+function bindWW(){
+  const t=$('#ww-tune');if(t)t.onchange=()=>once(async()=>{const r=await api('/api/insights/autotune','POST',{on:t.checked});WW=r.card;renderWW();toast(r.on?'Auto-tune is on — it acts once a day':'Auto-tune is off — sources keep their current numbers')}).then(()=>{if(WW)t.checked=WW.autotune.on});
+  const u=$('#ww-undo');if(u)u.onclick=()=>{if(!confirm('Put every source back to its own setting and switch auto-tune off?'))return;once(async()=>{const r=await api('/api/insights/undo','POST');WW=r.card;renderWW();toast(r.restored?r.restored+' source(s) put back':'Nothing to put back')},u)};
+  $$('[data-wwkw]').forEach(b=>b.onclick=()=>{$('#kr-q').value=WW.topics[+b.dataset.wwkw].topic;$('#kr-q').scrollIntoView({behavior:'smooth',block:'center'});$('#kr-go').click()});
+  $$('[data-wwsrc]').forEach(b=>b.onclick=()=>{openAdd();$('#s-kind').value='topic';$('#s-kind').onchange();$('#s-q').value=WW.topics[+b.dataset.wwsrc].topic;toast('Check the topic, then press Add sources — only Creative Commons videos are used')})}
+async function loadWW(){if(!WW)$('#ww-out').innerHTML=skel(2);WW=await api('/api/insights');renderWW()}
+async function loadIdeas(){
+  loadWW().catch(e=>{$('#ww-out').innerHTML='';fail(e)});
+  $('#id-out').innerHTML=$('#id-trend').innerHTML='<div class="cb">'+skel(2)+'</div>';loadPerms().catch(fail);
+  const d=await api('/api/ideas?category='+$('#id-cat').value);
+  $('#id-desc').textContent='Channels you watch. Every day the system finds their videos doing 3× or more better than usual'+(d.checked_at?' · last check '+when(d.checked_at):'')+'.';
+  $('#id-chans').innerHTML=d.channels.map(c=>`<span class="badge outline">${esc(c.name)} <button class="btn ghost sm icon" data-unc="${esc(c.url)}" title="Stop tracking" style="height:18px;width:18px;padding:0">${ico('x')}</button></span>`).join('')||'<span class="mut sm">No channels yet — add the channels in your niche.</span>';
+  $('#id-out').innerHTML=d.outliers.length?`<table class="tbl"><thead><tr><th>Video doing well</th><th>Channel</th><th style="text-align:right">× normal</th><th style="text-align:right">Views</th><th style="text-align:right">Age</th><th></th></tr></thead><tbody>${d.outliers.map(v=>ideaRow(v,`<td style="text-align:right"><b>${v.ratio}×</b></td><td style="text-align:right">${num(v.views)}</td><td style="text-align:right" class="mut sm">${v.age_days} d</td>`)).join('')}</tbody></table>`
+    :`<div class="cb mut sm">${d.channels.length?'No outliers right now — the check runs every day.':''}</div>`;
+  $('#id-trend').innerHTML=d.trending_error?`<div class="cb mut sm">${esc(d.trending_error)}</div>`:d.trending.length?`<table class="tbl"><thead><tr><th>Trending video</th><th>Channel</th><th style="text-align:right">Views</th><th></th></tr></thead><tbody>${d.trending.map(v=>ideaRow(v,`<td style="text-align:right">${num(v.views)}</td>`)).join('')}</tbody></table>`:'<div class="cb mut sm">Nothing yet.</div>';
+  $$('[data-unc]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/ideas/competitors?url='+encodeURIComponent(b.dataset.unc),'DELETE');loadIdeas()}));
+  $$('[data-topic]').forEach(b=>b.onclick=()=>{const words=b.dataset.topic.replace(/[#|:()\[\]!?.,'"]/g,' ').split(/\s+/).filter(w=>w.length>2).slice(0,4).join(' ').toLowerCase();
+    const t=prompt('Add this as a topic source (Creative Commons videos only). Edit the words if you like:',words);if(!t)return;
+    once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
+}
+$('#id-cat').onchange=()=>once(loadIdeas);
+// ---------- Ideas -> Keyword research (same engine and saved results as the editor's keyword helper) ----------
+const KRG=[['top','Most typed'],['questions','Questions people ask'],['long','Long phrases (more exact)'],['hindi','Hindi / Hinglish'],['trending','On today’s trending lists']];
+const krPicked=()=>$$('#kr-out .chips span.on').map(s=>s.dataset.k).filter((k,i,a)=>a.indexOf(k)===i);
+async function krRun(){const q=$('#kr-q').value.trim();if(!q)throw new Error('Type a topic first, for example: street food india');
+  $('#kr-out').innerHTML=skel(2);let r;try{r=await api('/api/keywords?q='+encodeURIComponent(q))}catch(e){$('#kr-out').innerHTML='';throw e}
+  const g={...r.groups,trending:r.trending||[]};
+  const groups=KRG.filter(([k])=>(g[k]||[]).length).map(([k,name])=>`<div class="kwg"><b>${name}</b><div class="chips">${g[k].map(x=>`<span data-k="${esc(x)}">${esc(x)}</span>`).join('')}</div></div>`).join('');
+  $('#kr-out').innerHTML=(r.note?`<div class="mut sm" style="margin-top:10px">${esc(r.note)}</div>`:'')+(groups?groups+`<div class="mut sm" style="margin-top:12px">Most typed first in every group. Click the phrases you want, then:</div>
+    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="kr-src">Use for a new topic source</button><button class="btn outline sm" id="kr-copy">Copy</button><span class="mut sm" id="kr-n"></span></div>`:'')}
+$('#kr-go').onclick=()=>once(krRun,$('#kr-go'));
+$('#kr-q').onkeydown=e=>{if(e.key==='Enter')$('#kr-go').click()};
+$('#kr-out').onclick=e=>{const chip=e.target.closest('.chips span[data-k]'),btn=e.target.closest('button');
+  if(chip){const on=!chip.classList.contains('on');$$('#kr-out .chips span[data-k]').filter(s=>s.dataset.k===chip.dataset.k).forEach(s=>s.classList.toggle('on',on));const n=krPicked().length;$('#kr-n').textContent=n?n+' chosen':'';return}
+  if(!btn)return;const picked=krPicked();if(!picked.length){toast('Click the phrases you want first',true);return}
+  if(btn.id==='kr-copy'){const t=picked.join(', ');navigator.clipboard.writeText(t).then(()=>toast('Copied')).catch(()=>prompt('Copy these keywords:',t))}
+  if(btn.id==='kr-src'){openAdd();$('#s-kind').value='topic';$('#s-kind').onchange();$('#s-q').value=picked.join(String.fromCharCode(10));toast('Check the topics, then press Add sources — only Creative Commons videos are used')}};
+let VRT=null,VRDAY='';
+const STEPC={done:'uploaded',queued:'uploaded',clip:'queued',review:'queued',mail:'queued',wait:'outline',reply:'queued',no:'outline',failed:'failed'};
+const STEPL={done:'On YouTube',queued:'Scheduled',clip:'Clipping',review:'Review',mail:'Needs you',wait:'Waiting',reply:'Replied',no:'Not used',failed:'Failed'};
+const WHY={cc:'Creative Commons',allowed:'Creator said yes',ask:'Permission needed'};
+const vago=t=>{if(!t)return'—';const m=Math.round((Date.now()-new Date(t))/60000);return m<60?m+' min ago':m<1440?Math.round(m/60)+' h ago':new Date(t).toLocaleDateString()};
+const vwhen=t=>new Date(t).toLocaleString([], {weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
+async function loadViral(){
+  clearTimeout(VRT);
+  if(!$('#p-viral').classList.contains('hide'))VRT=setTimeout(()=>loadViral().catch(()=>{}),60000);
+  const v=await api('/api/viral'+(VRDAY?'?day='+VRDAY:''));
+  $('#vr-day').innerHTML=(v.days.length?v.days:[v.today]).map(d=>`<option value="${d}" ${d===v.day?'selected':''}>${d===v.today?'Today · ':''}${new Date(d+'T00:00').toLocaleDateString([], {weekday:'short',day:'numeric',month:'short'})}</option>`).join('');
+  $('#vr-upd').textContent=vago(v.updated);
+  $('#vr-sub').textContent=`${v.picks.length} of ${v.per_day} picked on ${v.day}. Steps: pick → permission (if needed) → clip at the most-replayed part → upload.`;
+  $('#vr-send').textContent=v.ready_mails?`Send all ready mails (${v.ready_mails})`:'No mails to send';$('#vr-send').disabled=!v.ready_mails;
+  $('#vr-picks').innerHTML=v.picks.length?v.picks.map(p=>{const s=p.status;return `<div class="item" style="flex-wrap:wrap"><img src="https://i.ytimg.com/vi/${esc(p.video_id)}/mqdefault.jpg" style="width:112px;border-radius:8px" alt="">
+    <div class="tx grow"><b>${esc(p.title)}</b><span class="mut sm" style="display:block">${esc(p.channel)} · ${num(p.views)} views · ${WHY[p.why]||''}${p.by_hand?' · picked by you':''}</span>
+    <span class="sm" style="display:block;margin-top:4px"><span class="badge ${STEPC[s.step]||'outline'}">${STEPL[s.step]||s.step}</span> ${esc(s.at?'Goes up '+vwhen(s.at):s.text)}</span></div>
+    ${s.youtube_id?`<a class="btn outline sm" target="_blank" rel="noopener" href="https://youtube.com/shorts/${esc(s.youtube_id)}">Open</a>`:''}
+    ${s.action==='send'||s.action==='email'||s.action==='decide'?`<button class="btn sm" data-vrgo="1">${s.action==='send'?'See mail':s.action==='email'?'Add email':'Read reply'}</button>`:''}
+    ${s.step==='review'?`<button class="btn sm" data-vrclip="${s.clip_id}">Review</button>`:''}</div>`}).join('')
+    :'<span class="mut sm">Picks appear after the first check of the day (every 2 hours). Press “Refresh now”.</span>';
+  const tbl=(rows,short)=>rows.length?`<table class="tbl"><thead><tr><th>#</th><th>Video</th><th>Channel</th><th>Uploaded</th><th style="text-align:right">Views</th><th style="text-align:right">Gain</th><th style="text-align:right">Likes</th><th>Use</th><th></th></tr></thead><tbody>${rows.map((r,i)=>`<tr>
+    <td class="mut">${i+1}</td><td><div class="row" style="gap:8px;flex-wrap:nowrap"><img src="https://i.ytimg.com/vi/${esc(r.video_id)}/default.jpg" style="width:64px;border-radius:6px" alt=""><a href="https://youtube.com/watch?v=${esc(r.video_id)}" target="_blank" rel="noopener">${esc(r.title.slice(0,80))}</a></div></td>
+    <td>${esc(r.channel)}</td><td class="mut sm">${r.published?new Date(r.published).toLocaleString([], {day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):''}</td>
+    <td style="text-align:right">${num(r.views)}</td><td style="text-align:right;color:var(--ok)">${r.gain?'+'+num(r.gain):'—'}</td><td style="text-align:right">${num(r.likes)}</td>
+    <td>${r.cc?'<span class="badge uploaded">CC</span>':r.creator==='granted'?'<span class="badge uploaded">Allowed</span>':r.creator?'<span class="badge outline">'+esc(r.creator)+'</span>':'<span class="badge outline">Ask first</span>'}</td>
+    <td>${r.picked?'<span class="badge queued">Picked</span>':!short&&v.day===v.today&&r.duration>=90?`<button class="btn outline sm" data-vrpick="${esc(r.video_id)}">Pick</button>`:''}</td></tr>`).join('')}</tbody></table>`
+    :'<div class="cb mut sm">Nothing saved for this day yet.</div>';
+  $('#vr-videos').innerHTML=tbl(v.videos,false);$('#vr-shorts').innerHTML=tbl(v.shorts,true);
+  $$('[data-vrgo]').forEach(b=>b.onclick=()=>go('ideas'));
+  $$('[data-vrclip]').forEach(b=>b.onclick=()=>{go('clips');setTimeout(()=>{try{openEditor(+b.dataset.vrclip)}catch(e){}},600)});
+  $$('[data-vrpick]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/viral/pick','POST',{video_id:b.dataset.vrpick});toast('Picked — see Today\'s picks');VRDAY='';loadViral()},b));
+}
+$('#vr-day').onchange=()=>{VRDAY=$('#vr-day').value;loadViral().catch(fail)};
+$('#vr-refresh').onclick=()=>once(async()=>{await api('/api/viral/refresh','POST');VRDAY='';await loadViral();toast('Updated')},$('#vr-refresh'));
+$('#vr-send').onclick=()=>once(async()=>{if(!confirm('Send the ready permission mails from your Gmail now?'))return;const r=await api('/api/viral/send','POST');toast(r.sent+' mail(s) sent'+(r.errors.length?' — '+r.errors.join('; '):''));loadViral()},$('#vr-send'));
+async function loadPerms(){
+  const L=await api('/api/permissions');const lab={new:['To ask','queued'],asked:['Asked','outline'],replied:['Replied!','queued'],granted:['Allowed','uploaded'],skipped:['Skipped','outline'],declined:['Said no','outline']};
+  $('#pm-list').innerHTML=L.length?L.map(c=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(c.name)}</b> <span class="badge ${lab[c.status][1]}">${lab[c.status][0]}</span><span class="mut sm" style="display:block">${esc((c.video_title||'').slice(0,80))} · ${num(c.views)} views</span>
+    ${c.status==='granted'?`<span class="sm" style="display:block;color:var(--ok)">${c.auto_granted?'Said yes by mail — started automatically. ':''}Proof: ${esc(c.proof||'')}</span>`:''}</div>
+    ${c.status==='granted'&&c.auto_granted?`<button class="btn outline sm" data-pmundo="${esc(c.channel_id)}">Undo</button>`:''}
+    <a class="btn ghost sm" href="${esc(c.url)}/about" target="_blank" rel="noopener">Open channel</a>
+    ${c.status==='replied'?`<div class="sm" style="flex-basis:100%;margin:6px 0;padding:8px;background:var(--muted);border-radius:8px"><b>Reply from ${esc(c.reply_from||'')}:</b> ${esc(c.reply||'')}</div><button class="btn sm" data-pmgr="${esc(c.channel_id)}">✅ Permission given</button><button class="btn outline sm" data-pmno="${esc(c.channel_id)}">They said no</button>`:''}
+    ${['new','asked'].includes(c.status)&&!c.mailed?`<details style="flex-basis:100%;margin:6px 0"><summary class="sm" style="cursor:pointer">See / edit the mail</summary>
+      <input class="pm-subj" data-cid="${esc(c.channel_id)}" value="${esc(c.subject||'')}" style="width:100%;margin:6px 0">
+      <textarea class="pm-msg" data-cid="${esc(c.channel_id)}" rows="9" style="width:100%">${esc(c.message||'')}</textarea></details>`:''}
+    ${['new','asked'].includes(c.status)&&!c.mailed?`<input class="pm-email" data-cid="${esc(c.channel_id)}" placeholder="${c.email_checked?'no public email — see About page':'creator\'s email'}" value="${esc(c.email||'')}" style="width:220px">${c.email_from?`<span class="mut sm">found in ${esc(c.email_from)}</span>`:''}<button class="btn sm" data-pmsend="${esc(c.channel_id)}">Send mail</button>`:''}
+    ${c.mailed&&c.status==='asked'?'<span class="mut sm">Mail sent — waiting for their reply</span>':''}
+    ${!['granted','replied','declined'].includes(c.status)?`<button class="btn outline sm" data-pmcopy="${esc(c.channel_id)}">Copy message</button><button class="btn outline sm" data-pmask="${esc(c.channel_id)}">Asked</button><button class="btn sm" data-pmyes="${esc(c.channel_id)}">They said yes</button><button class="btn ghost sm" data-pmskip="${esc(c.channel_id)}">Skip</button>`:''}</div>`).join('')
+    :'<span class="mut sm">Nothing yet — press “Find creators now” or wait for the morning check.</span>';
+  const byId=Object.fromEntries(L.map(c=>[c.channel_id,c]));
+  $$('[data-pmcopy]').forEach(b=>b.onclick=async()=>{try{await navigator.clipboard.writeText(byId[b.dataset.pmcopy].message);toast('Message copied — paste it to the creator (Instagram, email or channel links)')}catch(e){prompt('Copy this message:',byId[b.dataset.pmcopy].message)}});
+  $$('[data-pmsend]').forEach(b=>b.onclick=()=>once(async()=>{const id=b.dataset.pmsend,em=$(`.pm-email[data-cid="${id}"]`).value.trim();
+    await api(`/api/permissions/${id}/email`,'POST',{email:em});
+    const m=$(`.pm-msg[data-cid="${id}"]`),sj=$(`.pm-subj[data-cid="${id}"]`);if(m&&m.value.trim()!==(byId[id].message||'').trim()||sj&&sj.value.trim()!==(byId[id].subject||''))await api(`/api/permissions/${id}/message`,'POST',{subject:sj?sj.value:'',message:m.value});
+    await api(`/api/permissions/${id}/send`,'POST');toast('Mail sent from your Gmail');loadPerms()},b));
+  $$('[data-pmgr]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmgr}/grant-reply`,'POST');toast('Saved — their new videos will be uploaded automatically, with credit');loadPerms()}));
+  $$('[data-pmundo]').forEach(b=>b.onclick=()=>once(async()=>{if(!confirm('Stop uploading this creator\'s videos?'))return;await api(`/api/permissions/${b.dataset.pmundo}/revoke`,'POST');toast('Stopped — decide again from their reply');loadPerms()}));
+  $$('[data-pmno]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmno}/mark/declined`,'POST');loadPerms()}));
+  $$('[data-pmask]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmask}/mark/asked`,'POST');loadPerms()}));
+  $$('[data-pmskip]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/permissions/${b.dataset.pmskip}/mark/skipped`,'POST');loadPerms()}));
+  $$('[data-pmyes]').forEach(b=>b.onclick=()=>{const proof=prompt('How did they say yes? Who, how and when (e.g. "Instagram reply from @name on 22 Nov 2026"):');if(!proof)return;
+    once(async()=>{await api(`/api/permissions/${b.dataset.pmyes}/grant`,'POST',{proof});toast('Saved — their new videos will be clipped and uploaded automatically');loadPerms()})});
+}
+$('#pm-emails').onclick=()=>once(async()=>{const r=await api('/api/permissions/find-emails','POST');toast(r.found?r.found+' email(s) found — check and press Send':'No public emails in their channel descriptions — use the About page');loadPerms()},$('#pm-emails'));
+$('#pm-find').onclick=()=>once(async()=>{const r=await api('/api/permissions/refresh','POST');toast(r.length?r.length+' new creator(s) found':'No new creators right now');loadPerms()},$('#pm-find'));
+$('#id-add').onclick=()=>once(async()=>{const q=$('#id-q').value.trim();if(!q)throw new Error('Type a channel link or @handle');await api('/api/ideas/competitors','POST',{query:q});$('#id-q').value='';toast('Tracking — press Check now or wait for the daily check');loadIdeas()},$('#id-add'));
+$('#id-scan').onclick=()=>once(async()=>{await api('/api/ideas/scan','POST');toast('Checked');loadIdeas()},$('#id-scan'));
+let ALTAB='all',ALB=null,ALSHOW=[];
+const ALTABS=[['all','All'],['deleted','Deleted'],['strikes','Strikes & copyright'],['broken','Not working'],['system','System errors']];
+const ALHINT={all:'Everything in one list: what is wrong right now first, then the history, newest first.',
+  deleted:'Videos that are gone from YouTube — deleted by you, or by YouTube without a copyright reason.',
+  strikes:'Videos YouTube rejected, blocked or claimed, and channels whose uploads were paused because of it. YouTube does not tell apps about strikes or who made a claim — press “Open in YouTube Studio” on an item for that.',
+  broken:'Things that are not working right now. Each one disappears by itself when it is fixed.',
+  system:'Unexpected problems on the server or in a background job. The system carries on by itself; they are kept here so they can be sent to the person who looks after it.'};
+const ALEMPTY={all:['No problems found','Everything is working and your uploaded videos are fine on YouTube.'],deleted:['No deleted videos','None of your uploaded videos has disappeared from YouTube.'],
+  strikes:['No strikes or copyright problems','YouTube has not rejected, blocked or claimed any of your videos.'],broken:['Everything is working','Clips, uploads, the helper PC, sources and logins are fine.'],
+  system:['No system errors','Nothing unexpected happened on the server.']};
+const ALCLS={bad:'failed',warn:'queued',info:'outline'};
+function alItems(tab){if(!ALB)return[];if(tab!=='all')return ALB.tabs[tab]||[];
+  const all=[].concat(ALB.tabs.strikes||[],ALB.tabs.deleted||[],ALB.tabs.broken||[],ALB.tabs.system||[]),rank={bad:0,warn:1,info:2};
+  return all.filter(i=>!i.at).sort((x,y)=>(rank[x.level]??1)-(rank[y.level]??1)).concat(all.filter(i=>i.at).sort((x,y)=>String(y.at).localeCompare(String(x.at))))}
+function alCard(a,n){const x=a.details||{},fresh=!a.seen&&a.level!=='info';
+  const row=(k,v)=>v?`<div><span class="mut sm">${k}</span><div>${v}</div></div>`:'';
+  const acts=(a.actions||[]).map((b,i)=>{
+    if(b.do==='link')return /^https:\/\/studio\.youtube\.com\//.test(b.href||'')?`<a class="btn outline sm" target="_blank" rel="noopener" href="${esc(b.href)}">${ico('youtube')}${esc(b.label)}</a>`:'';
+    if(b.do==='fix'){const f=FIXBTN[b.fix];if(!f)return'';return f[1]?`<a class="btn sm" href="${esc(f[1])}" ${f[1].startsWith('http')?'target="_blank" rel="noopener"':''}>${esc(f[0])}</a>`:`<button class="btn sm" data-alact="${n}:${i}">${esc(f[0])}</button>`}
+    return `<button class="btn ${b.do==='dismiss'?'ghost':'outline'} sm" data-alact="${n}:${i}" data-alact-do="${esc(b.do||'')}">${b.do==='again'||b.do==='retry_clip'?ico('refresh'):''}${esc(b.label||'Open')}</button>`}).join('');
+  const grid=a.kind!=='now'&&a.details?`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px">
+        ${row('Your channel',esc(x.my_channel||''))}
+        ${row('Video on YouTube',x.youtube_id?`<a href="https://youtu.be/${esc(x.youtube_id)}" target="_blank" rel="noopener">youtu.be/${esc(x.youtube_id)}</a>`:'')}
+        ${row('Uploaded',x.uploaded_at?when(x.uploaded_at):'')}
+        ${row('Went / goes live',x.publish_at?when(x.publish_at):'')}
+        ${row('Original creator',esc(x.source_channel||''))}
+        ${row('Original video',/^https?:\/\//.test(x.source_url||'')?`<a href="${esc(x.source_url)}" target="_blank" rel="noopener">${esc(x.source_title||x.source_url)}</a>`:esc(x.source_title||''))}
+        ${row('Part used',Array.isArray(x.clip_range)?`${T(x.clip_range[0])}–${T(x.clip_range[1])} · ${esc(x.source_mode||'')}`:'')}
+      </div>`:'';
+  return `<div class="card" style="margin-bottom:12px${fresh?';border-color:var(--'+(a.level==='bad'?'bad':'warn')+')':''}${a.seen?';opacity:.82':''}"><div class="cb">
+      <div class="row" style="justify-content:space-between"><div class="row"><span class="badge ${ALCLS[a.level]||'outline'}">${esc(a.label||'')}</span>${fresh?'<span class="badge failed">new</span>':''}${a.count>1?'<span class="badge outline">×'+Number(a.count)+'</span>':''}<b>${esc(a.title||'')}</b></div><span class="mut sm">${a.at?when(a.at):'right now'}</span></div>
+      <p style="margin:10px 0">${esc(a.text||'')}</p>${a.tech?`<p class="mut sm" style="margin:0 0 10px;word-break:break-word">Details for support: ${esc(a.tech)}</p>`:''}
+      ${grid}<div class="row" style="margin-top:12px;flex-wrap:wrap">${acts}</div>
+    </div></div>`}
+function renderAlerts(){
+  const d=ALB;if(!d)return;
+  $('#al-tabs').innerHTML=ALTABS.map(([k,l])=>`<button class="tab${k===ALTAB?' on':''}" data-t="${k}">${esc(l)}${d.counts[k]?` <span class="badge failed" style="margin-left:4px">${Number(d.counts[k])}</span>`:d.totals[k]?` <span class="mut sm">${Number(d.totals[k])}</span>`:''}</button>`).join('');
+  $$('#al-tabs .tab').forEach(b=>b.onclick=()=>{ALTAB=b.dataset.t;renderAlerts()});
+  const on=$('#al-tabs .tab.on'),bar=$('#al-tabs');if(on&&bar.scrollWidth>bar.clientWidth)bar.scrollLeft=Math.max(0,on.offsetLeft-bar.offsetLeft-12);
+  $('#al-hint').textContent=ALHINT[ALTAB]||'';
+  ALSHOW=alItems(ALTAB);
+  $('#al-seen').classList.toggle('hide',!ALSHOW.some(i=>!i.seen));
+  $('#al-retry').classList.toggle('hide',!(d.failed_clips>1&&(ALTAB==='all'||ALTAB==='broken')));
+  const em=ALEMPTY[ALTAB]||ALEMPTY.all;
+  $('#al-list').innerHTML=ALSHOW.length?ALSHOW.map(alCard).join(''):empty('bell',em[0],ALTAB==='all'&&!d.watching?'Alerts appear here once videos are uploaded.':em[1]);
+  $$('[data-alact]',$('#al-list')).forEach(btn=>btn.onclick=()=>{const [n,i]=btn.dataset.alact.split(':').map(Number),a=ALSHOW[n],b=a&&(a.actions||[])[i];if(b)once(()=>alAct(a,b),btn)});
+}
+async function alAct(a,b){
+  if(b.do==='open_clip'){openEditor(+b.id);return}
+  if(b.do==='go'){go(b.page);return}
+  if(b.do==='again'){await uploadAgain(+b.id,b.ys);return}
+  if(b.do==='remove'){await removeGone(+b.id);loadAlerts();return}
+  if(b.do==='restore'){await api(`/api/clips/${+b.id}/restore`,'POST');toast('It shows in the lists again');loadAlerts();return}
+  if(b.do==='retry_clip'){await api(`/api/clips/${+b.id}/render`,'POST');toast('The clip is being made again — it leaves this list when it works')}
+  else if(b.do==='dismiss'){await api('/api/alerts/board/seen','POST',{tab:'all',id:a.id});toast('Marked as seen — it stays in the list as history')}
+  else if(b.do==='fix'){
+    if(b.fix==='resume'&&!confirm('Resume uploads to this channel? Only do this if the strike or removal is dealt with.'))return;
+    if(await doFix(b)===false)return}
+  await loadAlerts();loadOverview().catch(()=>{});
+}
+async function loadAlerts(){
+  if(!ALB)$('#al-list').innerHTML=skel(2);
+  let d;try{d=await api('/api/alerts/board')}catch(e){$('#al-list').innerHTML=empty('alert','The alerts could not be loaded','Check your internet and press Check now again.');return fail(e)}
+  ALB=d;
+  $('#al-desc').textContent=`Every problem in one place. Watching ${d.watching} uploaded video${d.watching===1?'':'s'} on YouTube every 2 hours`+(d.last_check?` · last check ${when(d.last_check)}`:'')+'.';
+  const ba=$('#b-alerts');ba.style.display=d.badge?'':'none';ba.textContent=d.badge;
+  renderAlerts();
+}
+$('#al-check').onclick=()=>once(async()=>{const r=await api('/api/alerts/check','POST');toast(`Checked ${r.checked} video${r.checked===1?'':'s'} — ${r.new_alerts} new alert${r.new_alerts===1?'':'s'}`);await loadAlerts();loadOverview().catch(()=>{})},$('#al-check'));
+$('#al-seen').onclick=()=>once(async()=>{const r=await api('/api/alerts/board/seen','POST',{tab:ALTAB});toast(r.marked?`${r.marked} item${r.marked===1?'':'s'} marked as seen — nothing was deleted`:'Nothing new here');await loadAlerts()},$('#al-seen'));
+$('#al-retry').onclick=()=>once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`);await loadAlerts()},$('#al-retry'));
+function clipMini(c,actions){
+  return `<div class="item"><div class="th" style="background-image:url('${thumb(c.video_id)}')" data-open="${c.id}"></div>
+  <div class="tx"><b>${esc(c.title||c.source_title||'Clip #'+c.id)}</b><span class="mut sm">${esc(c.source_channel||'')} · ${T(c.start)}–${T(c.end)}${c.status==='queued'?' · '+when(c.publish_at):''}</span>${c.error?`<span class="sm" style="color:var(--bad);display:block">${esc((c.error||'').slice(0,110))}</span>`:''}</div>${actions||''}</div>`;
+}
+function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
+
+const FIXBTN={connect:['Connect / reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper'],
+  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys']};
+async function loadHealth(h0,target){
+  let h=h0;if(!h){try{h=await api('/api/health')}catch(e){return}}
+  $(target||'#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
+    const btn=!b?'':b[1]?`<a class="btn sm" href="${b[1]}" ${b[1].startsWith('http')?'target="_blank" rel="noopener"':''}>${b[0]}</a>`:`<button class="btn sm" data-hfix="${i}">${b[0]}</button>`;
+    return `<div class="item"><span class="badge ${it.level==='bad'?'failed':it.level==='warn'?'queued':'outline'}">${it.level==='bad'?'Fix now':it.level==='warn'?'Check':'Info'}</span><div class="tx grow"><span>${esc(it.text)}</span></div>${btn}</div>`}).join('')
+    :`<div class="row" style="gap:10px">${ico('check')}<b>Everything is working.</b><span class="mut sm">Uploads, thumbnails, sources and the helper are fine.</span></div>`;
+  $$('[data-hfix]',$(target||'#hl-list')).forEach(b=>b.onclick=()=>once(async()=>{const it=h.items[+b.dataset.hfix];
+    if(await doFix(it)===false)return;
+    if(target)loadGuide();else loadDash()}));
+}
+async function doFix(it){  // returns false when it only opened another page (nothing to reload)
+  if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return false}
+  if(it.fix==='add_source'){openAdd();return false}if(it.fix==='sources'){go('sources');return false}if(it.fix==='guide'){go('guide');return false}
+  if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return false}
+  if(it.fix==='resume'){await api(`/api/destinations/${+it.id}/resume`,'POST');toast('Uploads resumed')}
+  else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
+  else if(it.fix==='run_source'){await api(`/api/channels/${+it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
+}
+const SUHELP={helper:'The helper PC is your own computer. It starts by itself when you sign in to Windows (worker\\install_autostart.bat was run once). If it is offline: turn the PC on and make sure the internet works.',
+  ollama:'The local AI (Ollama) writes reel scripts for free on your PC. It is being installed for you. If you ever need to install it again: get it from ollama.com, then run:  ollama pull qwen2.5:3b'};
+async function loadSetup(){
+  let d;try{d=await api('/api/setup')}catch(e){return}
+  const b=$('#su-badge');b.className='badge '+(d.done===d.total?'uploaded':'queued');b.textContent=`${d.done} / ${d.total} done`;
+  const row=it=>`<div class="item"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}
+      <span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${(it.how||[]).length?`<button class="btn ghost sm" data-how="${it.key}">How?</button>`:''}${suBtn(it)}</div>`;
+  const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
+  const up=(d.upcoming||[]).map(c=>`<div class="item"><span style="font-size:18px">📅</span><div class="tx grow"><b>${esc(c.title||'Clip #'+c.id)}</b><span class="mut sm" style="display:block">${c.status==='uploading'?'Uploading now':c.at?'Goes up '+new Date(c.at).toLocaleString([], {weekday:'short',day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'}):'Next free slot'}</span></div></div>`).join('');
+  $('#su-list').innerHTML=must.map(row).join('')+'<div class="mut sm" style="margin:12px 0 4px">Optional extras</div>'+opt.map(row).join('')
+    +(up?'<div class="mut sm" style="margin:12px 0 4px">Next uploads (automatic)</div>'+up:'');
+  clearTimeout(window._suT);if(d.items.some(i=>i.key==='ai'&&!i.done&&i.blocked))window._suT=setTimeout(()=>{if(location.hash===''||$('#setup').offsetParent)loadSetup()},20000);
+  $$('[data-how]',$('#su-list')).forEach(b=>b.onclick=()=>{window.GUIDEOPEN=b.dataset.how;go('guide')});
+  wireSu(d,$('#su-list'),loadSetup);
+}
+const suBtn=it=>{const a=it.action||{};return it.done?'':a.href?`<a class="btn sm" href="${a.href}">${esc(a.label)}</a>`:a.url?`<a class="btn sm" href="${a.url}" target="_blank" rel="noopener">${esc(a.label)}</a>`:`<button class="btn sm" data-su="${it.key}">${esc(a.label||'Open')}</button>`};
+function wireSu(d,root,again){
+  $$('[data-su]',root).forEach(btn=>btn.onclick=()=>{const it=d.items.find(i=>i.key===btn.dataset.su),a=it.action||{};
+    if(a.open==='add_source'){openAdd();return}const loadSetup=again;
+    if(a.go)go(a.go);else if(a.help){window.GUIDEOPEN=a.help==='ollama'?'ai':a.help;go('guide')}else if(a.fix==='setup_ai')once(async()=>{const r=await api('/api/ai/setup','POST');toast(r.status);loadSetup()});else if(a.fix==='retry_failed')once(async()=>{const r=await api('/api/fix/retry-failed','POST');toast(r.retried+' clip(s) are being made again');loadSetup()})});
+}
+$('#hl-refresh').onclick=()=>once(loadHealth,$('#hl-refresh'));
+async function loadDash(){
+  if(!OV){$('#kpis').innerHTML=Array.from({length:4},()=>'<div class="card stat"><div class="sk" style="height:70px"></div></div>').join('');['#d-review','#d-up','#d-rec','#d-fail','#d-pipe'].forEach(s=>$(s).innerHTML=skel(2))}
+  try{await loadOverview()}catch(e){return fail(e)}
+  const c=OV.counts;
+  const st=[['Sources',OV.sources,'rss',OV.videos_analyzed+' videos analysed'],['Ready to review',c.rendered,'inbox',c.rendered?'Waiting for you':'All clear'],['Scheduled',c.queued+c.uploading,'clock',c.uploading?c.uploading+' uploading now':'Going out on schedule'],['Uploaded',c.uploaded,'upload',c.failed?c.failed+' failed':'No failures']];
+  $('#kpis').innerHTML=st.map(([k,v,i,d])=>`<div class="card stat"><div class="l">${k}<span class="ic">${ico(i)}</span></div><div class="v">${v}</div><div class="d">${esc(d)}</div></div>`).join('');
+  let al='';
+  if(!OV.youtube_configured)al+=`<div class="alert bad">${ico('alert')}Google OAuth keys are not set on the server (GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET).</div>`;
+  else if(!DESTS.length)al+=`<div class="alert">${ico('alert')}No YouTube channel connected yet.<a href="/auth/login" class="btn sm">Connect your channel</a></div>`;
+  if(DESTS.some(d=>d.needs_reconnect))al+=`<div class="alert bad">${ico('alert')}Your YouTube channel login needs to be renewed.<a href="/auth/login" class="btn sm">Reconnect</a></div>`;
+  (DESTS.filter(d=>d.paused)).forEach(d=>{al+=`<div class="alert bad">${ico('alert')}<span><b>Uploads to ${esc(d.name)} are paused.</b> ${esc(d.paused_reason||'')} Clips stay queued until you resume.</span><button class="btn sm" data-resume="${d.id}">Resume uploads</button></div>`});
+  const hp=OV.helper||{};if(hp.waiting&&!hp.online)al+=`<div class="alert bad">${ico('alert')}<span><b>Helper PC is offline</b> — ${hp.waiting} job${hp.waiting===1?'':'s'} waiting${hp.last_seen?' (last seen '+when(hp.last_seen)+')':''}. Start it, or run <b>worker\\install_autostart.bat</b> once so it always starts by itself.</span></div>`;
+  if(OV.thumbs_pending)al+=`<div class="alert">${ico('image')}<span><b>${OV.thumbs_pending} thumbnail${OV.thumbs_pending===1?' is':'s are'} waiting.</b> YouTube allows custom thumbnails only after the channel's phone number is verified. Verify once — they are sent automatically (checked every 30 minutes).</span><a class="btn sm" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Verify phone</a></div>`;
+  if(OV.alerts_unseen)al+=`<div class="alert bad">${ico('bell')}${OV.alerts_unseen} of your uploaded videos had a problem on YouTube (deleted, copyright or blocked).<button class="btn sm" onclick="go('alerts')">See details</button></div>`;
+  $('#alerts').innerHTML=al;loadHealth();loadSetup();
+  $$('[data-resume]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Resume uploads to this channel? Only do this if the strike/removal is dealt with.')){await api(`/api/destinations/${b.dataset.resume}/resume`,'POST');toast('Uploads resumed');loadDash()}}));
+  const Q=OV.quota;if(Q){const pct=Math.min(100,Math.round(Q.used*100/Q.limit));
+    $('#q-reset').textContent='Resets '+new Date(Q.resets_at).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    $('#d-quota').innerHTML=`<div class="row" style="justify-content:space-between;margin-bottom:8px"><b>${Q.uploads_left} more upload${Q.uploads_left===1?'':'s'} possible today</b><span class="mut sm">${Q.used.toLocaleString()} / ${Q.limit.toLocaleString()} units · max ${Q.capacity} uploads a day for all channels</span></div>
+      <div class="bar" style="height:8px;width:100%;max-width:none"><i style="width:${pct}%;background:${pct>85?'var(--bad)':'var(--brand)'}"></i></div>
+      <div class="row sm mut" style="margin-top:10px;gap:14px">${DESTS.map(d=>`<span>${esc(d.name)}: <b>${(OV.uploads_today||{})[d.id]||0}</b> today${d.paused?' · <span style="color:var(--bad)">paused</span>':''}</span>`).join('')||'No channel connected'}</div>`}
+  $('#d-pipe').innerHTML=`<div class="pipe">${[['Sources',OV.sources],['Cutting',c.draft+c.rendering+(c.fetching||0)],['Review',c.rendered],['Scheduled',c.queued+c.uploading],['Live',c.uploaded]].map(([k,v],i,a)=>`<div class="st"><b>${v}</b><span>${k}</span></div>${i<a.length-1?`<span class="ar">${ico('arrow')}</span>`:''}`).join('')}</div>`;
+  $('#d-review').innerHTML=OV.review.length?OV.review.map(x=>clipMini(x,`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`)).join(''):empty('inbox','Nothing waiting','Sources set to “Review first” appear here.');
+  $('#d-up').innerHTML=OV.upcoming.length?OV.upcoming.map(x=>clipMini(x,`<span class="badge ${x.status}">${LABEL[x.status]}</span>`)).join(''):empty('clock','No uploads scheduled','Approved clips show up here with their publish time.');
+  $('#d-rec').innerHTML=OV.recent.length?OV.recent.map(x=>clipMini(x,x.youtube_id?`<a class="btn outline sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">Open</a>`:'')).join(''):empty('upload','Nothing uploaded yet','Your first upload will appear here.');
+  $('#d-fail').innerHTML=OV.failed.length?OV.failed.map(x=>clipMini(x,`<button class="btn outline sm" data-retry="${x.id}">Fix</button>`)).join(''):empty('check','All good','No failed clips.');
+  ['#d-review','#d-up','#d-rec','#d-fail'].forEach(s=>wireOpen($(s)));
+}
+$('#h-mode').onchange=()=>{$('#h-note').classList.toggle('hide',$('#h-mode').value!=='permission')};
+const isVideo=u=>/(watch\?v=|youtu\.be\/|\/shorts\/|\/live\/)/i.test(u);
+$('#h-go').onclick=()=>once(async()=>{
+  const q=$('#h-q').value.trim();if(!q)throw new Error($('#h-kind').value==='topic'?'Type a topic first, e.g. street food india':'Paste a channel or video link first');
+  if($('#h-kind').value==='topic'){await api('/api/channels','POST',{kind:'topic',query:q,mode:'cc',destination_id:+$('#h-dest').value||null,review_first:$('#h-review').checked,captions:true,tz_offset:new Date().getTimezoneOffset()});
+    $('#h-q').value='';toast('Topic added — the system finds Creative Commons videos for it every few hours');go('sources');return}
+  if(isVideo(q)){await openNew(q,$('#h-mode').value,$('#h-note').value);return}
+  if($('#h-mode').value==='commentary')throw new Error('Commentary needs manual editing — paste a single video link instead.');
+  await api('/api/channels','POST',{query:q,mode:$('#h-mode').value,permission_note:$('#h-note').value,destination_id:+$('#h-dest').value||null,review_first:$('#h-review').checked,captions:true,tz_offset:new Date().getTimezoneOffset()});
+  $('#h-q').value='';toast('Source added — press Run in Sources to start now');go('sources');
+},$('#h-go'));
+
+function openAdd(){$('#m-add').classList.add('on')}
+$('#open-add').onclick=openAdd;$('#m-add-close').onclick=$('#m-add-cancel').onclick=()=>$('#m-add').classList.remove('on');
+$('#h-kind').onchange=()=>{const t=$('#h-kind').value==='topic';$('#h-mode').classList.toggle('hide',t);if(t)$('#h-note').classList.add('hide');
+  $('#h-q').placeholder=t?'Topic, e.g.  street food india  ·  funny cats  ·  cooking hacks':'https://youtube.com/@channel  ·  @handle  ·  video link';
+  $('#h-help').textContent=t?'Give a topic — the system searches YouTube for Creative Commons videos only, clips the best moments and uploads them.':'Channel link, @handle or name. Paste a single video link to clip it yourself.'};
+$('#s-kind').onchange=()=>{const k=$('#s-kind').value,t=k==='topic',r=k==='reel',tr=k==='trending';$('#s-mode').disabled=t||r||tr;if(t||tr)$('#s-mode').value='cc';$('#s-reel').classList.toggle('hide',!r);$('#s-trend').classList.toggle('hide',!tr);$('#s-q').classList.toggle('hide',tr);
+  if(tr)return;
+  if(r){$('#s-q').placeholder='Delhi ki gali mein milta hai sabse kurkura samosa. Ek baar khao, baar baar aao.'+String.fromCharCode(10)+'---'+String.fromCharCode(10)+'Next script...';return}
+  $('#s-q').placeholder=t?'street food india'+String.fromCharCode(10)+'funny cats'+String.fromCharCode(10)+'cooking hacks':'https://youtube.com/@channel'+String.fromCharCode(10)+'@handle'+String.fromCharCode(10)+'Channel name'};
+$('#s-add').onclick=()=>once(async()=>{
+  if($('#s-kind').value==='trending'){await api('/api/channels','POST',{kind:'trending',query:$('#s-tcat').value,mode:'cc',destination_id:+$('#s-dest').value||null,interval_hours:3,
+      videos_per_run:1,clips_per_video:1,clip_len:+$('#s-l').value,aspect:$('#s-a').value,review_first:$('#s-review').checked,captions:true,post_times:'',gap_hours:3,tz_offset:new Date().getTimezoneOffset()});
+    toast('Trending source added — it runs every 3 hours');$('#m-add').classList.remove('on');go('sources');return}
+  if($('#s-kind').value==='reel'){const scripts=splitScripts($('#s-q').value),ai=$('#s-ai').checked;if(!scripts.length&&!ai)throw new Error('Write at least one script, or switch on the local AI');
+    await api('/api/channels','POST',{kind:'reel',query:$('#s-rname').value.trim()||'My reels',scripts,voice:$('#s-voice').value,auto_scripts:ai,language:$('#s-lang').value,destination_id:+$('#s-dest').value||null,
+      videos_per_run:+$('#s-v').value,gap_hours:+$('#s-g').value,review_first:$('#s-review').checked,post_times:$('#s-times').value,tz_offset:new Date().getTimezoneOffset()});
+    $('#s-q').value='';toast(`${scripts.length} script(s) added — reels are made by the helper PC`);$('#m-add').classList.remove('on');go('sources');return}
+  const lines=$('#s-q').value.split(String.fromCharCode(10)).map(x=>x.trim()).filter(Boolean);
+  if(!lines.length)throw new Error('Add at least one channel');
+  const errs=[];
+  for(const q of lines){try{await api('/api/channels','POST',{kind:$('#s-kind').value,query:q,mode:$('#s-kind').value==='topic'?'cc':$('#s-mode').value,permission_note:$('#s-note').value,destination_id:+$('#s-dest').value||null,
+    videos_per_run:+$('#s-v').value,clips_per_video:+$('#s-c').value,clip_len:+$('#s-l').value,gap_hours:+$('#s-g').value,aspect:$('#s-a').value,review_first:$('#s-review').checked,captions:$('#s-caps').checked,post_times:$('#s-times').value,tz_offset:new Date().getTimezoneOffset()})}catch(e){errs.push(q+': '+e.message)}}
+  if(errs.length){toast(errs.join(' | '),true);$('#s-q').value=errs.map(e=>e.split(': ')[0]).join(String.fromCharCode(10))}else{$('#s-q').value='';toast('Sources added');$('#m-add').classList.remove('on')}
+  go('sources');
+},$('#s-add'));
+const splitScripts=t=>t.split(/^\s*---\s*$/m).map(x=>x.trim()).filter(Boolean);
+$('#sc-close').onclick=()=>$('#m-scripts').classList.remove('on');
+$('#se-close').onclick=()=>$('#m-src').classList.remove('on');
+$('#se-save').onclick=()=>once(async()=>{const b={name:$('#se-name').value.trim(),videos_per_run:+$('#se-v').value,post_times:$('#se-t').value,tz_offset:new Date().getTimezoneOffset(),
+    captions:$('#se-cap').checked,review_first:$('#se-rev').checked,aspect:$('#se-a').value,clips_per_video:+$('#se-c').value,clip_len:+$('#se-l').value};
+  if($('#se-dest').value)b.destination_id=+$('#se-dest').value;if($('#se-i').value)b.interval_hours=+$('#se-i').value;
+  await api('/api/channels/'+$('#se-id').value,'PUT',b);$('#m-src').classList.remove('on');toast('Saved — new clips from this source use these settings');loadSources()},$('#se-save'));
+$('#sc-save').onclick=()=>once(async()=>{const scripts=splitScripts($('#sc-text').value);if(!scripts.length)throw new Error('Write at least one script');
+  await api(`/api/channels/${$('#sc-id').value}/scripts`,'POST',{scripts});$('#m-scripts').classList.remove('on');toast(`${scripts.length} script(s) added`);loadSources()},$('#sc-save'));
+async function loadSources(){
+  $('#src-list').innerHTML='<div class="cb">'+skel(3)+'</div>';
+  await loadOverview();const L=await api('/api/channels');
+  $('#src-list').innerHTML=L.length?`<table class="tbl"><thead><tr><th>Source</th><th>Rules</th><th>Uploads to</th><th>Auto upload</th><th>Last run</th><th style="text-align:right">Actions</th></tr></thead><tbody>`+L.map(c=>`<tr>
+    <td><b>${esc(c.name||c.query)}</b><div class="mut sm">${esc(c.query)}</div></td>
+    <td><div class="row" style="gap:6px">${c.kind==='topic'?'<span class="badge queued">Topic</span>':''}${c.kind==='trending'?'<span class="badge queued">Trending</span>':''}${c.auto_scripts?'<span class="badge queued">AI scripts</span>':''}${c.kind==='reel'?`<span class="badge uploaded">Original</span><span class="badge outline">${(c.scripts||[]).filter(x=>!x.used).length} scripts left</span>`:`<span class="badge outline">${c.mode==='cc'?'CC only':c.mode==='own'?'My own videos':'Permission'}</span>`}${c.captions?'<span class="badge outline">Captions</span>':''}${c.post_times?'<span class="badge outline">'+ico('clock')+esc(c.post_times)+'</span>':''}<span class="badge outline">${esc(c.aspect)}</span></div></td>
+    <td>${DESTS.length>1?`<select class="sm" data-sdest="${c.id}" style="width:auto" title="Which channel this source uploads to">${DESTS.map(d=>`<option value="${d.id}" ${d.id===c.destination_id?'selected':''}>${esc(d.name)}</option>`).join('')}</select>`:esc((DESTS.find(d=>d.id===c.destination_id)||{}).name||'—')}</td>
+    <td><label class="switch" title="Off = clips wait for your approval"><input type="checkbox" ${c.review_first?'':'checked'} data-autoup="${c.id}"><i></i></label></td>
+    <td class="mut sm" style="max-width:220px">${esc(c.last_run?when(c.last_run):'Never')}<br>${esc((c.last_status||'').slice(0,90))}</td>
+    <td><div class="row" style="justify-content:flex-end;gap:6px">${c.auto_scripts?`<select class="sm" data-lang="${c.id}" style="width:auto" title="Language of the AI scripts"><option value="en" ${c.permission_note==='en'?'selected':''}>English</option><option value="hi" ${c.permission_note!=='en'?'selected':''}>Hinglish</option></select>`:''}${c.kind==='reel'?`<button class="btn outline sm" data-scripts="${c.id}">${ico('plus')}Scripts</button>`:''}<button class="btn outline sm" data-sedit="${c.id}">Edit</button><button class="btn sm" data-run="${c.id}" title="Run now">${ico('play')}Run</button><button class="btn outline sm icon" data-tog="${c.id}" title="${c.auto?'Pause':'Resume'}">${ico(c.auto?'pause':'refresh')}</button><button class="btn bad sm icon" data-del="${c.id}" title="Remove">${ico('trash')}</button></div></td></tr>`).join('')+'</tbody></table>':'<div class="cb">'+empty('rss','No sources yet','Add a channel and the system takes over.','<button class="btn" onclick="openAdd()">'+ico('plus')+'Add sources</button>')+'</div>';
+  $$('[data-scripts]').forEach(b=>b.onclick=()=>{$('#sc-id').value=b.dataset.scripts;$('#sc-text').value='';$('#m-scripts').classList.add('on');setTimeout(()=>$('#sc-text').focus(),50)});
+  $$('[data-run]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.run}/run`,'POST');toast('Started — clips appear in Clips as they finish')}));
+  $$('[data-tog]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/channels/${b.dataset.tog}/toggle`,'POST');loadSources()}));
+  $$('[data-del]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this source?')){await api(`/api/channels/${b.dataset.del}`,'DELETE');loadSources()}}));
+  $$('[data-sedit]').forEach(b=>b.onclick=()=>{const c=L.find(x=>x.id===+b.dataset.sedit);$('#se-id').value=c.id;$('#se-name').value=c.name||c.query||'';
+    $('#se-dest').innerHTML=DESTS.map(d=>`<option value="${d.id}" ${d.id===c.destination_id?'selected':''}>${esc(d.name)}</option>`).join('');
+    $('#se-a').value=c.aspect||'9:16';$('#se-v').value=c.videos_per_run||1;$('#se-c').value=c.clips_per_video||1;$('#se-l').value=c.clip_len||30;$('#se-i').value=c.interval_hours||'';
+    $('#se-t').value=c.post_times||'';$('#se-cap').checked=!!c.captions;$('#se-rev').checked=!!c.review_first;
+    $$('.se-clip').forEach(e=>e.classList.toggle('hide',c.kind==='reel'));$('#m-src').classList.add('on')});
+  $$('[data-sdest]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.sdest}/destination`,'POST',{destination_id:+b.value});toast('This source now uploads to '+b.options[b.selectedIndex].text+' (its waiting clips moved too)')}));
+  $$('[data-lang]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.lang}/language`,'POST',{language:b.value});toast(b.value==='en'?'AI scripts in English (Indian voice) — the small local AI writes English much better':'AI scripts in Hinglish')}));
+  $$('[data-autoup]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.autoup}/review`,'POST',{review_first:!b.checked});toast(b.checked?'New clips will upload automatically':'New clips will wait for your approval')}));
+}
+
+async function loadDests(){
+  await loadOverview();loadCookies();loadWorkers();
+  const DL=await api('/api/destinations');const mainD=DL.find(d=>d.is_main);
+  const just=window.JUSTCONNECTED&&DL.find(d=>d.id===window.JUSTCONNECTED);
+  const banner=just&&DL.length>1?`<div class="alert" style="margin-bottom:10px"><span><b>${esc(just.name)}</b> is connected. What should it do?</span><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-take="${just.id}">Move everything here (switch channel)</button><button class="btn outline sm" id="dl-keep">Keep both — I choose per source</button></div></div>`:'';
+  $('#dest-list').innerHTML=banner+(DL.length?DL.map(d=>`<div class="item" style="flex-wrap:wrap"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx grow"><b>${esc(d.name)}</b> ${d.is_main?'<span class="badge uploaded">Main</span>':''}<span class="mut sm" style="display:block">${d.sources} source${d.sources===1?'':'s'} · ${d.pending} clip${d.pending===1?'':'s'} waiting · ${d.uploaded} uploaded · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}${d.can_comment===false?' · <a href="/auth/login" title="This channel was connected before comments were added. Connect it once more (same channel) so it can post the first comment under new videos. Uploads are not affected.">reconnect once to allow comments</a>':''}</span></div>
+    ${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}
+    <div class="row" style="flex-basis:100%;flex-wrap:wrap;gap:6px;margin-top:6px">${!d.is_main?`<button class="btn outline sm" data-main="${d.id}">Make main</button>`:''}${DL.length>1?`<button class="btn outline sm" data-take="${d.id}">Move everything here</button>`:''}<label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label><button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div></div>`).join('')
+    +`<details class="sm" style="margin-top:10px"><summary style="cursor:pointer">How do I add or change a channel?</summary><ol class="mut" style="margin:8px 0 0;padding-left:18px;line-height:1.8"><li><b>Add another channel:</b> press “Connect a YouTube channel” and choose the other channel in Google's window. This one stays connected.</li><li><b>Use both:</b> in Sources choose the channel for each source. The <b>Main</b> channel gets everything new.</li><li><b>Switch to the new channel:</b> press “Move everything here” on it — all sources and waiting clips move.</li><li><b>Remove the old channel:</b> press Disconnect on it. Videos already on YouTube are never touched.</li></ol></details>`
+    :empty('youtube','No channel connected','Connect your YouTube channel to enable uploads. Sources and clips that are waiting attach to it by themselves.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>'));
+  if($('#dl-keep'))$('#dl-keep').onclick=()=>{window.JUSTCONNECTED=null;loadDests();toast('Both channels stay. Sources → choose the channel for each source')};
+  $$('[data-main]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/destinations/${b.dataset.main}/main`,'POST');toast('Main channel changed — new sources and uploads go there');loadDests()},b));
+  $$('[data-take]').forEach(b=>b.onclick=()=>once(async()=>{const d=DL.find(x=>x.id===+b.dataset.take),n=DL.filter(x=>x.id!==d.id).reduce((t,x)=>t+x.sources+x.pending,0);
+    if(!confirm(`Move all sources and waiting clips (${n}) to “${d.name}” and make it the main channel?\n\nVideos already on YouTube stay where they are.`))return;
+    const r=await api(`/api/destinations/${d.id}/take-over`,'POST',{});window.JUSTCONNECTED=null;toast(`Moved ${r.sources} source(s) and ${r.clips} clip(s) to ${d.name}`);loadDests()},b));
+  $$('[data-dd]').forEach(b=>b.onclick=()=>once(async()=>{const d=DL.find(x=>x.id===+b.dataset.dd),others=DL.filter(x=>x.id!==d.id),work=d.sources+d.pending;let q='';
+    if(!work){if(!confirm(`Disconnect “${d.name}”? Videos already on YouTube are not touched.`))return}
+    else if(others.length){const t=others.find(x=>x.is_main)||others[0];if(!confirm(`“${d.name}” has ${d.sources} source(s) and ${d.pending} waiting clip(s).\n\nMove them to “${t.name}” and disconnect “${d.name}”?`))return;q='?move_to='+t.id}
+    else{if(!confirm(`“${d.name}” is your only channel.\n\nIts ${d.sources} source(s) and ${d.pending} clip(s) are kept and wait until you connect a channel again — then they carry on by themselves.\n\nDisconnect?`))return;q='?force=true'}
+    const r=await api('/api/destinations/'+d.id+q,'DELETE');toast(r.waiting?'Disconnected — connect a channel and everything carries on':'Disconnected'+(r.sources||r.clips?` — ${r.sources} source(s), ${r.clips} clip(s) moved`:''));loadDests()}));
+  $$('[data-face]').forEach(inp=>inp.onchange=()=>once(async()=>{const f=inp.files[0];if(!f)return;const fd=new FormData();fd.append('file',f);
+    $('#face-note').textContent='Removing the background… (first time can take a minute)';
+    try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
+  $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
+  loadFace();loadFaceSize();loadPhone();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
+}
+function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
+  d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
+  $('.af-del',d).onclick=()=>d.remove();$('#af-list').appendChild(d)}
+async function loadAffiliate(){const r=await api('/api/settings/affiliate');$('#af-list').innerHTML='';(r.rules.length?r.rules:[{}]).forEach(afRow)}
+$('#af-add').onclick=()=>afRow({});
+$('#af-save').onclick=()=>once(async()=>{const rules=$$('#af-list .af').map(d=>({keywords:$('.af-k',d).value,text:$('.af-t',d).value})).filter(r=>r.keywords.trim()&&r.text.trim());
+  await api('/api/settings/affiliate','POST',{rules});toast('Saved — used for new videos');loadAffiliate()},$('#af-save'));
+async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');b.className='badge '+(m.connected&&m.on?'uploaded':m.connected?'queued':'outline');b.textContent=m.connected?(m.on?'On':'Off'):'Not connected';
+  $('#mt-box').innerHTML=m.connected?`<div>Facebook Page: <b>${esc(m.page||'')}</b>${m.instagram?` · Instagram: <b>@${esc(m.instagram)}</b>`:' · <span class="mut">no Instagram linked to this Page</span>'}</div>
+    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="mt-tog">${m.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="mt-del">Disconnect</button></div>`
+    :`<ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Instagram → switch to a <b>Professional</b> account and link it to a <b>Facebook Page</b>.</li><li>Open developers.facebook.com → Graph API Explorer → choose your app → <b>Get User Access Token</b> with: pages_show_list, pages_read_engagement, pages_manage_posts, instagram_basic, instagram_content_publish.</li><li>Paste the token here and press Connect.</li></ol>
+    <div class="row"><input id="mt-token" class="grow" type="password" autocomplete="off" placeholder="Meta access token"><button class="btn" id="mt-save">Connect</button></div>`;
+  if($('#mt-save'))$('#mt-save').onclick=()=>once(async()=>{const r=await api('/api/meta/setup','POST',{token:$('#mt-token').value});toast('Connected: '+(r.page||'')+(r.instagram?' + @'+r.instagram:''));loadMeta()},$('#mt-save'));
+  if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
+  if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
+}
+const BKNAMES={projects:'Videos added (long videos the clips are cut from)',clips:'Clips (short videos made from them)',channels:'Sources (channels clips are taken from)',destinations:'YouTube channels (where clips are uploaded)',workers:'Helper PCs',alerts:'Messages for you (alerts)',settings:'Settings'};
+const bkSize=n=>n>=1048576?(n/1048576).toFixed(1)+' MB':Math.max(1,Math.round(n/1024))+' KB';
+async function loadBackup(){let b;try{b=await api('/api/backup')}catch(e){return}
+  $('#bk-list').innerHTML=b.files.length?'<div class="sm" style="font-weight:500;margin-bottom:4px">Kept on the server</div>'+b.files.map(f=>`<div class="row" style="justify-content:space-between;gap:8px;padding:6px 0;border-top:1px solid var(--border)"><span class="sm">${esc(new Date(f.at).toLocaleString())} · ${f.kind==='safety'?'made before a restore':'daily'} · ${bkSize(f.size)}</span><span class="row" style="gap:6px"><a class="btn ghost sm" href="/api/backup/files/${encodeURIComponent(f.name)}">Download</a><button class="btn outline sm" data-bkr="${esc(f.name)}">Restore</button></span></div>`).join('')
+    :'<span class="mut sm">No backup kept on the server yet — the first one is made by itself today.</span>';
+  $$('[data-bkr]').forEach(x=>x.onclick=()=>once(async()=>{bkPreview(await api('/api/backup/files/'+encodeURIComponent(x.dataset.bkr)+'/check','POST'))},x));
+}
+$('#bk-file').onchange=()=>once(async()=>{const inp=$('#bk-file'),f=inp.files[0];if(!f)return;
+  try{if(f.size>100*1048576)throw new Error('The file is larger than 100 MB. A backup of Raji Studio is normally a few MB — is this the right file?');
+    const fd=new FormData();fd.append('file',f);bkPreview(await api('/api/backup/check','POST',fd))}finally{inp.value=''}});
+function bkPreview(p){
+  const rows=Object.keys(p.counts).map(k=>`<tr><td>${esc(BKNAMES[k]||k)}</td><td style="text-align:right">${p.counts[k]}</td><td style="text-align:right" class="mut">${p.current[k]??0}</td></tr>`).join('');
+  const whose=ME&&ME.viewing?'this customer’s':'your';
+  $('#bk-prev').innerHTML=`<div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:10px">
+    <b>What is in this backup</b><div class="sm mut">Made ${p.made_at?esc(new Date(p.made_at).toLocaleString()):'(date unknown)'}${p.brand?' · '+esc(p.brand):''}</div>
+    ${(p.warnings||[]).map(w=>`<div class="alert bad" style="margin-top:8px">${ico('alert')}<span>${esc(w)}</span></div>`).join('')}
+    <table class="tbl sm" style="margin-top:8px"><thead><tr><th>What</th><th style="text-align:right">In the backup</th><th style="text-align:right">Now</th></tr></thead><tbody>${rows}<tr><td>Face photos</td><td style="text-align:right">${p.faces}</td><td style="text-align:right">${p.faces_now??''}</td></tr></tbody></table>
+    ${(p.notes||[]).map(n=>`<div class="mut sm" style="margin-top:6px">${esc(n)}</div>`).join('')}
+    <div class="sm" style="margin-top:8px">Restoring <b>replaces everything</b> in ${whose} system with this backup. A safety backup of what is there now is made first — it appears in the list below, so you can go back.</div>
+    ${p.same_account&&p.signed?'':`<label class="row sm" style="gap:8px;margin-top:8px"><input type="checkbox" id="bk-other">Yes, put this backup here anyway</label>`}
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><input id="bk-confirm" placeholder="Type RESTORE" maxlength="20" style="width:160px" autocomplete="off"><button class="btn bad" id="bk-go">Restore</button><button class="btn ghost" id="bk-cancel">Cancel</button></div></div>`;
+  $('#bk-cancel').onclick=()=>{$('#bk-prev').innerHTML=''};
+  $('#bk-go').onclick=()=>once(async()=>{const c=$('#bk-confirm').value.trim();if(c!=='RESTORE')throw new Error('Type RESTORE (in capital letters) to confirm.');
+    const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put this backup here anyway” first.');
+    const r=await api('/api/backup/restore','POST',{ref:p.ref,sha:p.sha||'',confirm:c,other_account:!!(o&&o.checked)});const n=r.restored||{};
+    $('#bk-prev').innerHTML='';toast(`Restored: ${n.clips||0} clips, ${n.channels||0} sources, ${n.destinations||0} channels. Reloading…`);setTimeout(()=>location.reload(),1800)},$('#bk-go'));
+}
+async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}const b=$('#ph-badge');b.className='badge '+(p.on?'uploaded':p.set?'queued':'outline');b.textContent=p.on?'On':p.set?'Off':'Not set up';
+  $('#ph-box').innerHTML=!p.set?`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Press <b>Set up</b>. A QR code appears.</li><li>On your phone install <b>ntfy</b> (free, Play Store / App Store).</li><li>Scan the QR code with the phone camera and open the link, then press <b>Subscribe</b> (or in the ntfy app press + and type the topic name).</li></ol><button class="btn" id="ph-setup">Set up</button>`
+    :`<div class="row" style="flex-wrap:wrap;align-items:flex-start;gap:16px">${p.qr?`<img src="${p.qr}" alt="QR code" style="width:150px;height:150px;border-radius:8px;background:#fff">`:''}
+      <div class="sm" style="line-height:1.8"><div>Topic name: <code style="user-select:all">${esc(p.topic)}</code></div><div>Link: <a href="${esc(p.link)}" target="_blank" rel="noopener">${esc(p.link)}</a></div>
+      <ol style="margin:6px 0;padding-left:18px"><li>Install <b>ntfy</b> on your phone.</li><li>Scan this QR code, open the link, press <b>Subscribe</b>.</li><li>Press <b>Send a test</b> below.</li></ol>
+      <div class="mut">Keep the topic name private: anyone who has it can read these messages.</div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" id="ph-test">Send a test</button><button class="btn outline sm" id="ph-tog">${p.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="ph-new">New QR code</button></div></div></div>`;
+  if($('#ph-setup'))$('#ph-setup').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:'setup'});loadPhone()},$('#ph-setup'));
+  if($('#ph-test'))$('#ph-test').onclick=()=>once(async()=>{await api('/api/phone/test','POST');toast('Sent — check your phone')},$('#ph-test'));
+  if($('#ph-tog'))$('#ph-tog').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:p.on?'off':'on'});loadPhone()},$('#ph-tog'));
+  if($('#ph-new'))$('#ph-new').onclick=()=>once(async()=>{if(!confirm('Make a new QR code? The phone that scanned the old one stops getting messages until it scans the new one.'))return;await api('/api/phone','POST',{action:'new'});loadPhone()},$('#ph-new'));
+}
+async function loadFaceSize(){loadReminder();loadComment();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
+  $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
+  $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
+  const b=$('#rm-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off'}
+function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
+$('#rm-preset').onchange=rmShow;
+let FC=null;
+// exactly what the server posts: comments.clean() on the words, then comments.fill()
+const fcClean=t=>String(t||'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0009\u000b-\u001f]/g,'').replace(/\n{3,}/g,'\n\n').trim().slice(0,500).trim();
+const fcFill=(t,title,ch,tags)=>fcClean(t).split('{title}').join(title.trim()).split('{channel}').join(ch.trim()).split('{hashtags}').join(tags.trim())
+  .split('\n').map(x=>x.replace(/[ \t]{2,}/g,' ').trimEnd()).join('\n').replace(/\n{3,}/g,'\n\n').trim().slice(0,1000);
+const fcMsg=on=>on?'Saved — videos uploaded from now on get this comment':'Saved — no comments are posted while this is off';
+function fcBadge(on){const b=$('#fc-badge');b.className='badge '+(on?'uploaded':'outline');b.textContent=on?'On':'Off'}
+async function loadComment(){let r;try{r=await api('/api/settings/comment')}catch(e){return}FC=r;
+  $('#fc-on').checked=!!r.on;$('#fc-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own comment…</option>';
+  $('#fc-preset').value=r.preset;$('#fc-custom').value=r.custom||'';fcShow();
+  fcBadge(r.on);
+  $('#fc-chs').innerHTML=r.channels.map(c=>c.can_comment?`<div>✔ <b>${esc(c.name)}</b> can post comments</div>`
+    :`<div class="alert" style="margin-top:6px">${ico('alert')}<span><b>${esc(c.name)}</b>: reconnect the channel once to allow comments (it was connected before comments were added). Uploads are not affected.</span><a class="btn sm" href="/auth/login">Reconnect</a></div>`).join('')}
+function fcShow(){const own=$('#fc-preset').value==='custom';$('#fc-custom-wrap').classList.toggle('hide',!own);
+  const t=own?$('#fc-custom').value:((FC&&FC.presets.find(p=>p.key===$('#fc-preset').value))||{}).text;
+  $('#fc-prev').textContent=fcFill(t,'Street food in Delhi',(FC&&FC.example_channel)||'My channel','#streetfood #delhi')||'—'}
+$('#fc-preset').onchange=fcShow;$('#fc-custom').oninput=fcShow;
+$('#fc-save').onclick=()=>once(async()=>{await api('/api/settings/comment','POST',{on:$('#fc-on').checked,preset:$('#fc-preset').value,custom:$('#fc-custom').value});toast(fcMsg($('#fc-on').checked));loadComment()},$('#fc-save'));
+// the switch saves by itself (the words keep their last saved choice until Save is pressed)
+$('#fc-on').onchange=async()=>{const el=$('#fc-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
+  LOCK=true;el.disabled=true;try{const r=await api('/api/settings/comment','POST',{on,preset:FC?FC.preset:'ask',custom:FC?FC.custom:''});
+    if(FC){FC.on=r.on}fcBadge(r.on);el.checked=r.on;toast(fcMsg(r.on))}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
+function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
+  $('#e-fc-on').checked=c.comment_on!==false;$('#e-fc-text').value=c.comment_text||'';
+  $('#e-fc-on').disabled=$('#e-fc-text').disabled=done;$('#e-fc-save').classList.toggle('hide',done);
+  let n;
+  if(done)n=`Posted ✔ — <a href="https://youtu.be/${esc(c.youtube_id)}" target="_blank" rel="noopener">open the video</a> and pin it: tap ⋮ next to the comment → Pin. (YouTube does not let apps pin comments.)`;
+  else if(st==='no permission')n='Not posted yet: this channel was connected before comments were added. Reconnect it once (My channels → Connect a YouTube channel → the same channel) — the comment is then posted by itself.';
+  else if(st.startsWith('failed'))n='Not posted: '+esc(st.slice(7).trim())+'. Press Save comment to try once more.';
+  else if(st.startsWith('waiting')&&c.comment_account_on===false)n='Held: first comments are switched off for your account (My channels → First comment). It is posted if you switch them on again within 14 days.';
+  else if(st.startsWith('waiting'))n=st.length>8?'Waiting: '+esc(st.slice(8).trim())+'.':'Waiting — posted within about 10 minutes after the video is public.';
+  else if(st==='posting')n='Posting now…';
+  else if(c.comment_account_on===false)n='No comment: first comments are switched off for your account (My channels → First comment).';
+  else if(c.status==='uploaded'&&!st)n='This video was uploaded before first comments existed. Press Save comment to post one now.';
+  else if(st==='off'&&c.status==='uploaded')n='No comment for this video. Switch it on and press Save comment to post one now.';
+  else if(c.comment_on===false)n='No comment for this video: its switch is off. Switch it on and press Save comment to get one after the upload.';
+  else n=c.comment_preview?'Posted after the upload, as soon as the video is public:':'Posted after the upload, as soon as the video is public.';
+  if(!done&&c.comment_preview&&c.comment_on!==false&&c.comment_account_on!==false)n+=`<div style="color:var(--fg);white-space:pre-wrap;margin-top:4px">“${esc(c.comment_preview)}”</div>`;
+  if(!done&&c.comment_can===false&&st!=='no permission')n+='<div>This channel must be reconnected once to allow comments (My channels).</div>';
+  $('#e-fc-note').innerHTML=n}
+$('#e-fc-save').onclick=()=>once(async()=>{const id=CUR.id;const c=await api(`/api/clips/${id}/comment`,'POST',{on:$('#e-fc-on').checked,text:$('#e-fc-text').value});if(!sameClip(id))return;Object.assign(CUR,c);fcEditor(CUR);toast('Comment saved')},$('#e-fc-save'));
+$('#rm-save').onclick=()=>once(async()=>{await api('/api/settings/reminder','POST',{on:$('#rm-on').checked,preset:$('#rm-preset').value,custom:$('#rm-custom').value});toast('Saved — new clips use it. Clips that are already made: Clips → “Make all waiting clips again”.');loadReminder()},$('#rm-save'));
+$('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
+async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
+  const mi=await api('/api/settings/mail');
+  $('#gm-box').innerHTML=g.email?`<div class="row"><span>Sending as <b>${esc(g.email)}</b></span><button class="btn ghost sm" id="gm-del">Disconnect</button></div>
+    <div class="row" style="margin-top:10px;flex-wrap:wrap"><label class="sm grow">Name at the end of mails<input id="gm-sign" value="${esc(mi.sign)}" maxlength="60"></label>
+    <label class="sm grow">Your channel posts … Shorts<input id="gm-about" value="${esc(mi.about)}" maxlength="40" placeholder="funny"></label><button class="btn sm" id="gm-idsave" style="align-self:flex-end">Save</button></div>
+    <div class="mut sm" style="margin-top:4px">Mails say e.g. “I run a small channel where I post <b>${esc(mi.about)}</b> Shorts … Thanks, <b>${esc(mi.sign)}</b>”. Unsent mails are updated.</div>`
+    :`<a class="btn" href="/auth/gmail">${ico('plus')}Connect Gmail</a><div class="mut sm" style="margin-top:8px">Pick your Google account, then on “unverified app” press Advanced → Go to Raji Studio, tick both Gmail boxes and Allow.</div>`;
+  if($('#gm-idsave'))$('#gm-idsave').onclick=()=>once(async()=>{const r=await api('/api/settings/mail','POST',{sign:$('#gm-sign').value,about:$('#gm-about').value});toast(`Saved — ${r.rewritten} unsent mail(s) updated`);loadGmail()},$('#gm-idsave'));
+  if($('#gm-del'))$('#gm-del').onclick=()=>once(async()=>{if(confirm('Disconnect Gmail?')){await api('/api/gmail','DELETE');loadGmail()}})}
+async function loadPexels(){const r=await api('/api/settings/pexels');const b=$('#px-badge');b.className='badge '+(r.set?'uploaded':'outline');b.textContent=r.set?'Key saved':'Not set'}
+$('#px-save').onclick=()=>once(async()=>{await api('/api/settings/pexels','POST',{key:$('#px-key').value});$('#px-key').value='';toast('Pexels key saved');loadPexels()},$('#px-save'));
+$('#px-del').onclick=()=>once(async()=>{await api('/api/settings/pexels','POST',{key:''});loadPexels()});
+async function loadTelegram(){
+  let t;try{t=await api('/api/telegram')}catch(e){return}
+  const b=$('#tg-badge');b.className='badge '+(t.linked&&t.on?'uploaded':t.configured?'queued':'outline');b.textContent=t.linked?(t.on?'On':'Off'):t.configured?'Waiting for /start':'Not set up';
+  if(!t.configured){$('#tg-box').innerHTML=`<ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>In Telegram open <b>@BotFather</b> → send <b>/newbot</b> → choose a name → copy the token it gives you.</li><li>Paste the token here and press Connect.</li></ol>
+    <div class="row"><input id="tg-token" class="grow" type="password" autocomplete="off" placeholder="Bot token from @BotFather"><button class="btn" id="tg-save">Connect</button></div>`;
+    $('#tg-save').onclick=()=>once(async()=>{const r=await api('/api/telegram/setup','POST',{token:$('#tg-token').value});toast('Bot @'+r.bot+' connected — now send it the code');loadTelegram()},$('#tg-save'));return}
+  if(!t.linked){$('#tg-box').innerHTML=`<div>Open your bot${t.bot?` <a href="https://t.me/${esc(t.bot)}" target="_blank" rel="noopener">@${esc(t.bot)}</a>`:''} in Telegram and send:</div>
+    <div class="row" style="margin:10px 0"><code style="font-size:18px;padding:6px 12px;background:var(--muted);border-radius:8px">/start ${esc(t.code||'')}</code></div>
+    <div class="row"><button class="btn outline sm" id="tg-check">I sent it — check</button><button class="btn ghost sm" id="tg-del">Remove bot</button></div>`;
+    $('#tg-check').onclick=()=>once(async()=>{await new Promise(r=>setTimeout(r,2500));await loadTelegram()},$('#tg-check'))}
+  else $('#tg-box').innerHTML=`<div class="row"><button class="btn sm" id="tg-test">Send test message</button><button class="btn outline sm" id="tg-tog">${t.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="tg-del">Disconnect</button></div>
+    <div class="mut sm" style="margin-top:8px">Daily summary at 9:00 PM. Only your own Telegram chat can control the system.</div>`;
+  if($('#tg-test'))$('#tg-test').onclick=()=>once(async()=>{await api('/api/telegram/test','POST');toast('Sent — check Telegram')},$('#tg-test'));
+  if($('#tg-tog'))$('#tg-tog').onclick=()=>once(async()=>{await api('/api/telegram/toggle','POST');loadTelegram()},$('#tg-tog'));
+  if($('#tg-del'))$('#tg-del').onclick=()=>once(async()=>{if(confirm('Disconnect Telegram?')){await api('/api/telegram','DELETE');loadTelegram()}});
+}
+async function loadFace(){
+  let has=false;try{has=!!(await api('/api/settings/face-size')).has_face}catch(e){}  // the image is asked for only when there is one
+  $('#face-prev').style.backgroundImage=has?`url(/api/faces/0?t=${Date.now()})`:'';$('#face-lbl').textContent=has?'Change face photo':'Upload face photo';$('#face-del').classList.toggle('hide',!has);
+}
+$('#face-del').onclick=()=>once(async()=>{if(confirm('Remove the default face from thumbnails?')){await api('/api/faces/0','DELETE');loadDests()}});
+async function loadWorkers(){
+  try{const L=await api('/api/workers');
+    $('#wk-list').innerHTML=L.length?L.map(w=>`<div class="item"><div class="avatar" style="background:var(--muted);color:var(--fg)">${ico('dashboard')}</div><div class="tx"><b>${esc(w.name)}</b><span class="mut sm">${w.last_seen?'Last seen '+when(w.last_seen):'Never seen'}${w.approved?'':' · registered '+when(w.created_at)+(w.ip?' from '+esc(w.ip):'')}</span></div>
+      ${!w.approved?'<span class="badge queued">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}">Approve</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Start worker\\run_worker.bat on your computer.');
+    $$('[data-wa]').forEach(b=>b.onclick=()=>once(async()=>{const code=prompt('Type the 6-digit pairing code shown in the helper window on your PC (also in worker'+String.fromCharCode(92)+'helper.log):');if(code===null)return;await api(`/api/workers/${b.dataset.wa}/approve`,'POST',{code});toast('Helper approved');loadWorkers()}));
+    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper PC?')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
+  }catch(e){}
+}
+async function loadCookies(){
+  try{const c=await api('/api/settings/cookies');const b=$('#ck-badge');b.className='badge '+(c.saved?'uploaded':'outline');b.textContent=c.saved?c.cookies+' cookies saved':'Not set';$('#ck-del').classList.toggle('hide',!c.saved)}catch(e){}
+}
+$('#ck-save').onclick=()=>once(async()=>{await api('/api/settings/cookies','POST',{text:$('#ck-text').value});$('#ck-text').value='';toast('Cookies saved — try your video again');loadCookies()},$('#ck-save'));
+$('#ck-del').onclick=()=>once(async()=>{await api('/api/settings/cookies','DELETE');toast('Cookies removed');loadCookies()},$('#ck-del'));
+$('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
+
+const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering,fetching','Drafts']];
+async function loadClips(){
+  $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
+  await loadOverview();const c=OV.counts;
+  const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0)};
+  $('#tabs').innerHTML=TABS.map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} <span class="mut">${cnt[k]??0}</span></button>`).join('');
+  $$('#tabs .tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
+  const st=TAB==='queued'?'queued,uploading':TAB;
+  const L=await api('/api/clips?status='+encodeURIComponent(st));
+  $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${x.thumb_path?`/api/clips/${x.id}/thumbnail?v=${encodeURIComponent(x.thumb_note||'')}`:thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
+    <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
+    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
+    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
+    ${x.yt_state&&x.yt_state!=='ok'?`<div class="sm" style="color:var(--bad);margin-top:6px">${ico('alert')} ${esc(ytLabel(x.yt_state))}</div>`:''}</div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
+  wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));
+}
+function ytLabel(st){return st==='removed'?'Deleted on YouTube':st.startsWith('rejected:')?'Removed by YouTube ('+st.slice(9)+')':st.startsWith('blocked')?'Blocked in some countries':st.startsWith('failed')?'YouTube processing failed':st}
+const NO_AGAIN=st=>/^rejected:(copyright|claim|trademark|legal)/.test(st||'')||(st||'').startsWith('blocked');
+async function uploadAgain(id,st){
+  if(NO_AGAIN(st))throw new Error('YouTube removed this for copyright — uploading the same content again can bring another strike, so it is blocked.');
+  const msg=(st==='removed'?'This video is gone from YouTube. If YouTube removed it (not you), check the reason in YouTube Studio first — the same content can bring a strike.'+String.fromCharCode(10)+String.fromCharCode(10):'')
+    +'A new copy of this clip will be made with all your edits, voice, captions, title and thumbnail. You can check it and then Approve. Continue?';
+  if(!confirm(msg))return;
+  const r=await api(`/api/clips/${id}/reupload`,'POST',{confirm:true});toast('Copy made — it is rendering now');openEditor(r.id);
+}
+function wireAgain(root){$$('[data-again]',root).forEach(b=>b.onclick=()=>once(()=>uploadAgain(+b.dataset.again,b.dataset.ys)))}
+async function approve(id){await api(`/api/clips/${id}/approve`,'POST',{});toast('Approved — queued for upload');refreshAfter()}
+function refreshAfter(){const p=$$('main section').find(s=>!s.classList.contains('hide'));if(p)go(p.id.slice(2))}
+
+function openNewModal(){$('#m-new').classList.add('on')}
+$('#new-clip').onclick=openNewModal;$('#m-close').onclick=()=>$('#m-new').classList.remove('on');
+async function openNew(url,mode,note){$('#n-url').value=url||'';$('#n-mode').value=mode||'cc';$('#n-note').value=note||'';$('#n-mode').onchange();$('#n-out').innerHTML='';openNewModal();if(url)await loadHot()}
+$('#n-mode').onchange=()=>{const perm=$('#n-mode').value==='permission';$('#n-note').classList.toggle('hide',!perm);if(perm)setTimeout(()=>$('#n-note').focus(),30)};
+$('#n-load').onclick=()=>once(loadHot,$('#n-load'));
+let NP=null;
+async function loadHot(){
+  const r0=await fetch('/api/projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:$('#n-url').value.trim(),mode:$('#n-mode').value,permission_note:$('#n-note').value})});
+  if(r0.status===401){location.href='/login';return}
+  const j0=await r0.json().catch(()=>({}));
+  if(r0.status===409&&j0.detail&&j0.detail.code==='not_cc'){const x=j0.detail;
+    $('#n-out').innerHTML=`<div class="alert" style="flex-direction:column;align-items:stretch;gap:10px">
+      <div><b>“${esc(x.title)}”</b> by ${esc(x.channel)} is <b>not Creative Commons</b> (${esc(x.license)}). Re-uploading it as it is can bring a copyright strike — your channel already has one.</div>
+      <div class="row" style="gap:8px;flex-wrap:wrap">
+        <button class="btn sm" id="n-to-comm">Make a commentary clip (your voice + text)</button>
+        <button class="btn outline sm" id="n-to-perm">I have the creator's permission</button>
+        <button class="btn ghost sm" id="n-to-topic">Find Creative Commons videos instead</button></div></div>`;
+    $('#n-to-comm').onclick=()=>{$('#n-mode').value='commentary';$('#n-mode').onchange();once(loadHot,$('#n-load'))};
+    $('#n-to-perm').onclick=()=>{$('#n-mode').value='permission';$('#n-mode').onchange();toast('Write who allowed it, how and when, then press Find hot moments')};
+    $('#n-to-topic').onclick=()=>{$('#m-new').classList.remove('on');go('dashboard');$('#h-kind').value='topic';$('#h-kind').onchange();$('#h-q').focus()};
+    return}
+  if(!r0.ok)throw new Error(typeof j0.detail==='string'?j0.detail:'Could not read the video');
+  NP=j0;
+  const head=`<div class="row" style="flex-wrap:nowrap"><img src="${thumb(NP.video_id)}" style="width:120px;border-radius:8px"><div><b>${esc(NP.title)}</b><div class="mut sm">${esc(NP.channel)} · ${T(NP.duration)} · ${esc(NP.license||'Standard YouTube License')}</div></div></div>`;
+  $('#n-out').innerHTML=head+'<div class="mut" style="margin:12px 0">Finding most-replayed &amp; most-commented moments…</div><div class="sk" style="height:46px"></div>';
+  const r=await api(`/api/projects/${NP.id}/analyze`,'POST');
+  const moms=r.moments.length?r.moments.map(m=>`<div class="mom"><b>${T(m.start)}–${T(m.end)}</b><div class="bar"><i style="width:${Math.round(m.score*100)}%"></i></div><span class="mut sm grow">${m.comments} comment mentions</span><button class="btn sm" data-mk="${m.start}-${m.end}">Make clip</button></div>`).join(''):empty('film','No replay/comment signal','Pick a time range manually below.');
+  $('#n-out').innerHTML=head+'<h3 style="margin-top:16px">Hot moments</h3>'+moms+`<div class="row" style="margin-top:14px"><input id="n-s" type="number" placeholder="start s" style="width:110px"><input id="n-e" type="number" placeholder="end s" style="width:110px"><button class="btn outline sm" data-mk="manual">Make clip from range</button></div>`;
+  $$('[data-mk]',$('#n-out')).forEach(b=>b.onclick=()=>once(async()=>{
+    let s,e;if(b.dataset.mk==='manual'){s=+$('#n-s').value;e=+$('#n-e').value}else[s,e]=b.dataset.mk.split('-').map(Number);
+    const c=await api(`/api/projects/${NP.id}/clips`,'POST',{start:s,end:e});$('#m-new').classList.remove('on');openEditor(c.id)}));
+}
+
+$('#scrim').onclick=closeEditor;$('#e-close').onclick=closeEditor;
+function closeEditor(){$('#drawer').classList.remove('on');$('#scrim').classList.remove('on');clearInterval(POLL);$('#e-video').pause();$('#e-frame').src='about:blank';CUR=null}
+function etab(t){$$('#e-tabs .tab').forEach(b=>b.classList.toggle('on',b.dataset.t===t));$$('.panel').forEach(p=>p.classList.toggle('on',p.dataset.t===t))}
+$$('#e-tabs .tab').forEach(b=>b.onclick=()=>etab(b.dataset.t));
+async function openEditor(id){
+  const [c,v]=await Promise.all([api('/api/clips/'+id),api('/api/voices')]).catch(e=>{fail(e);return[]});
+  if(!c)return;VOICES=v;CUR=c;etab(c.status==='uploaded'?'thumb':'trim');
+  $('#e-voice').innerHTML=Object.entries(v).map(([k,n])=>`<option value="${k}">${esc(n)}</option>`).join('');
+  fill(c);$('#drawer').classList.add('on');$('#scrim').classList.add('on');
+  if(['rendering','fetching'].includes(c.status)||c.tts_pending)startPoll(c.id);
+}
+function fill(c){
+  CUR=c;$('#e-title').textContent=c.title||c.source_title||('Clip #'+c.id);
+  $('#e-src').innerHTML=`${esc(c.source_channel||'')} · ${esc(c.mode||'')}`;
+  $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
+  $('#e-rewrite').classList.toggle('hide',!(AISRC.has(c.source_id)&&!['uploaded','uploading'].includes(c.status)));
+  $('#e-refetch').parentElement.classList.toggle('hide',!!c.own_upload);
+  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
+  $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
+  $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
+  $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
+  $('#e-vtext').value=c.voice_text||'';$('#e-vstate').textContent=c.tts_pending?'Helper PC is making the voice…':(c.voice_path?'Voice attached ✔':'');
+  const cs=c.caption_style||{};$('#e-con').checked=!!cs.on;$('#e-clang').value=cs.lang||'auto';$('#e-cpos').value=cs.pos||'bottom';$('#e-csize').value=cs.size||'M';$('#e-ccol').value=cs.color||'#ffffff';
+  $('#e-cues').innerHTML='';(c.captions||[]).forEach(addCue);
+  $('#e-cnote').textContent=cs.source==='whisper'?'These captions were written automatically by the helper PC (offline Whisper) because the video has no subtitles — please check the words.':'';
+  $('#e-credit').checked=c.credit_on!==false;$('#e-reframe').checked=c.reframe!==false;
+  $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'160px':'280px';
+  $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
+  $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
+  $('#e-when').value=c.status==='queued'&&c.publish_at&&new Date(c.publish_at)>new Date()?localInput(new Date(c.publish_at)):'';
+  $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');kwFill(c);fcEditor(c);
+  setStatus(c);
+}
+function setStatus(c){
+  const s=$('#e-status');s.className='badge '+c.status+(['rendering','fetching'].includes(c.status)?' pulse':'');s.textContent=LABEL[c.status]||c.status;
+  const er=$('#e-err');er.style.display=c.error?'':'none';er.innerHTML=c.error?ico('alert')+esc(c.error):'';
+  const has=['rendered','queued','uploading','uploaded'].includes(c.status);
+  VIEW=has?VIEW:'src';
+  $$('#e-seg .tab').forEach(b=>b.classList.toggle('on',b.dataset.v===VIEW));
+  const vid=$('#e-video'),fr=$('#e-frame');
+  if(VIEW==='out'&&has){fr.style.display='none';fr.src='about:blank';vid.style.display='';vid.src=`/api/clips/${c.id}/video?t=${Date.now()}`}
+  else{vid.pause();vid.style.display='none';fr.style.display='';if(c.video_id)fr.src=`https://www.youtube.com/embed/${c.video_id}?start=${Math.floor(c.start)}`}
+  const done=c.status==='uploaded',busy=['rendering','fetching','uploading'].includes(c.status),ok=['rendered','queued','failed'].includes(c.status);
+  const gone=c.status==='uploaded'&&c.yt_state&&c.yt_state!=='ok'&&['removed','deleted','rejected','blocked','private'].includes(String(c.yt_state).split(':')[0]);
+  $('#e-again').classList.toggle('hide',!(c.status==='uploaded'&&c.yt_state&&c.yt_state!=='ok')||!!c.reuploaded_as||!!c.removed_at);
+  $('#e-gone-rm').classList.toggle('hide',!gone||!!c.reuploaded_as||!!c.removed_at);
+  const gd=$('#e-gone-done');gd.classList.toggle('hide',!(c.reuploaded_as||c.removed_at));
+  gd.innerHTML=c.reuploaded_as?`Uploaded again as <a href="#" id="e-gone-new">clip #${+c.reuploaded_as}</a>`:c.removed_at?'Removed from the dashboard — <a href="#" id="e-gone-back">show it again</a>':'';
+  if($('#e-gone-new'))$('#e-gone-new').onclick=ev=>{ev.preventDefault();openEditor(+c.reuploaded_as)};
+  if($('#e-gone-back'))$('#e-gone-back').onclick=ev=>{ev.preventDefault();once(async()=>{await api(`/api/clips/${c.id}/restore`,'POST');fill(await api('/api/clips/'+c.id));toast('It shows in the lists again')})};
+  $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!['rendered','queued'].includes(c.status);
+  $('#e-del').disabled=$('#e-refetch').disabled=done||busy;$('#e-unq').classList.toggle('hide',c.status!=='queued');
+  $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
+}
+$$('#e-seg .tab').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;if(CUR)setStatus(CUR)});
+function addOv(o){
+  o=(o&&o.text!==undefined)?o:{text:'',start:0,end:3,pos:'bottom',size:56,color:'#ffffff',anim:'fade'};
+  const d=document.createElement('div');d.className='ov';
+  d.innerHTML=`<div class="row"><input class="o-text grow" placeholder="Text on screen" value="${esc(o.text)}"><button class="btn bad sm icon o-del" title="Remove">${ico('trash')}</button></div>
+  <div class="row"><label class="f">From (s)<input class="o-s" type="number" step="0.1" value="${esc(o.start)}" style="width:90px"></label><label class="f">To (s)<input class="o-e" type="number" step="0.1" value="${esc(o.end)}" style="width:90px"></label>
+  <label class="f">Position<select class="o-pos"><option>top</option><option>center</option><option>bottom</option></select></label>
+  <label class="f">Animation<select class="o-anim"><option value="fade">Fade</option><option value="slide_up">Slide up</option><option value="none">None</option></select></label>
+  <label class="f">Size<input class="o-size" type="number" value="${esc(o.size)}" style="width:80px"></label><label class="f">Colour<input class="o-color" type="color" value="${esc(o.color||'#ffffff')}" style="width:56px;padding:3px"></label></div>`;
+  $('.o-pos',d).value=o.pos;$('.o-anim',d).value=o.anim;$('.o-del',d).onclick=()=>d.remove();$('#e-ovs').appendChild(d);
+}
+$('#e-addov').onclick=()=>addOv();
+function addCue(c){
+  const d=document.createElement('div');d.className='row cue';d.style.flexWrap='nowrap';
+  d.innerHTML=`<input class="c-s" type="number" step="0.1" value="${esc(c.s)}" style="width:80px"><input class="c-e" type="number" step="0.1" value="${esc(c.e)}" style="width:80px"><input class="c-t grow" value="${esc(c.t)}"><button class="btn bad sm icon c-del">${ico('x')}</button>`;
+  $('.c-del',d).onclick=()=>d.remove();$('#e-cues').appendChild(d);
+}
+$('#e-cgen').onclick=()=>once(async()=>{await save();const c=await api(`/api/clips/${CUR.id}/captions`,'POST',{lang:$('#e-clang').value});fill(await api('/api/clips/'+c.id));etab('caps');toast('Captions added — check the text, then Save & re-render')},$('#e-cgen'));
+async function loadSync(){
+  const box=$('#e-sync');if(!box||!CUR)return;const id=CUR.id;let s;
+  try{s=await api(`/api/clips/${id}/sync`)}catch(e){box.innerHTML='';return}
+  if(!sameClip(id))return;
+  if(!s.has_voice){box.innerHTML='<b>Sound sync</b><div class="mut sm">Generate a voice or upload your audio — then one press makes the sound and the video end together.</div>';return}
+  const st=s.in_sync?`<span style="color:var(--ok)">✔ In sync — the voice and the clip end together${s.voice_fit==='speed'?' (voice speed ×'+s.speed+')':''}.</span>`
+    :s.gap>0?`<span style="color:var(--warn,#b45309)">The clip runs <b>${s.gap.toFixed(1)} s</b> longer than the voice (no voice at the end).</span>`
+    :`<span style="color:var(--bad)">The voice is <b>${(-s.gap).toFixed(1)} s</b> longer than the clip — its end is cut off.</span>`;
+  box.innerHTML=`<b>Sound sync</b><div class="sm" style="margin:4px 0 8px">Voice <b>${s.voice.toFixed(1)} s</b> · Clip <b>${s.clip.toFixed(1)} s</b>${s.offset?` · starts after ${s.offset} s`:''}<br>${st}</div>
+    <div class="row" style="flex-wrap:wrap">${s.can_match_clip?'<button class="btn sm" data-sync="clip">Make the clip as long as the voice</button>':''}
+    ${s.speed_ok?`<button class="btn outline sm" data-sync="speed">Fit the voice's speed to the clip (×${s.speed})</button>`:'<span class="mut sm">The lengths are too different to fix with speed — change the clip length or the script.</span>'}
+    ${s.voice_fit==='speed'?'<button class="btn ghost sm" data-sync="none">Normal voice speed</button>':''}
+    <button class="btn ghost sm" id="e-mute">${+$('#e-vol').value===0?'Original sound is off':'Turn the original sound off (voice only)'}</button></div>
+    <div class="mut sm" style="margin-top:6px">With both sounds on, the original goes quieter by itself while the voice speaks.</div>`;
+  $$('[data-sync]',box).forEach(b=>b.onclick=()=>once(async()=>{await save();await api(`/api/clips/${id}/sync`,'POST',{mode:b.dataset.sync});const c2=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c2);etab('voice');toast('Done — press Save & re-render to make the new video')},b));
+  $('#e-mute').onclick=()=>{$('#e-vol').value=0;toast('Original sound off — press Save & re-render');loadSync()};
+}
+function collect(){
+  return{start:+$('#e-s').value,end:+$('#e-e').value,aspect:$('#e-asp').value,orig_volume:+$('#e-vol').value,voice_offset:+$('#e-voff').value,
+    effects:$$('#e-fx input:checked').map(x=>x.value),
+    overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
+    title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
+    captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
+    comment_on:$('#e-fc-on').checked,comment_text:$('#e-fc-text').value,
+    caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
+}
+async function save(){if(!can('clips.edit'))return CUR;const c=await api('/api/clips/'+CUR.id,'PUT',collect());Object.assign(CUR,c);fill(CUR);return c}
+function startPoll(id){clearInterval(POLL);let errs=0;POLL=setInterval(async()=>{let x;
+  try{x=await api('/api/clips/'+id);errs=0}catch(e){if(++errs>5){clearInterval(POLL);fail(e)}return}
+  if(!CUR||CUR.id!==id)return clearInterval(POLL);
+  const finished=!['rendering','fetching'].includes(x.status)&&!x.tts_pending;
+  if(finished){fill(x);clearInterval(POLL);toast(x.status==='failed'?'Something failed — see the message':'Done',x.status==='failed')}
+  else if(x.status!==CUR.status||!!x.tts_pending!==!!CUR.tts_pending){Object.assign(CUR,{status:x.status,tts_pending:x.tts_pending,error:x.error});setStatus(CUR)}
+},2500)}
+async function saveKeep(){const was=CUR.status;await save();if(was!=='draft'&&CUR.status==='draft')throw new Error('Your changes need a new video — press Save & re-render first.')}
+const sameClip=id=>CUR&&CUR.id===id;
+$('#e-render').onclick=()=>once(async()=>{const id=CUR.id;await save();await api(`/api/clips/${id}/render`,'POST');const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);startPoll(c.id);toast('Rendering… if YouTube blocks the server, your helper PC fetches the video')},$('#e-render'));
+$('#e-again').onclick=()=>once(()=>uploadAgain(CUR.id,CUR.yt_state),$('#e-again'));
+async function removeGone(id){if(!confirm('Remove this video from the dashboard?\n\nIt is no longer on YouTube. Its history stays in Alerts, and you can show it again later.'))return;
+  await api(`/api/clips/${id}/remove`,'POST');toast('Removed from the dashboard');}
+$('#e-gone-rm').onclick=()=>once(async()=>{const id=CUR.id;await removeGone(id);if(sameClip(id))fill(await api('/api/clips/'+id));refreshAfter()},$('#e-gone-rm'));
+$('#e-approve').onclick=()=>once(async()=>{const id=CUR.id;const at=$('#e-when').value?new Date($('#e-when').value):null;
+  if(at&&at<Date.now()+15*60e3)throw new Error('That time is in the past or less than 15 minutes away — the video would go public immediately. Pick a later time, or clear the field for the next free slot.');
+  await saveKeep();const c=await api(`/api/clips/${id}/approve`,'POST',{publish_at:at?at.toISOString():null,destination_id:+$('#e-dest').value||null});if(sameClip(id))fill(await api('/api/clips/'+id));toast('Queued for '+when(c.publish_at))},$('#e-approve'));
+$('#e-now').onclick=()=>once(async()=>{const id=CUR.id;if(!confirm('Upload now and make it PUBLIC right away?'))return;await saveKeep();await api(`/api/clips/${id}/schedule`,'POST',{publish_at:null,destination_id:+$('#e-dest').value||null});if(sameClip(id))fill(await api('/api/clips/'+id));toast('Uploading within a minute')},$('#e-now'));
+$('#e-unq').onclick=()=>once(async()=>{const id=CUR.id;await api(`/api/clips/${id}/unschedule`,'POST');if(sameClip(id))fill(await api('/api/clips/'+id));toast('Taken out of the queue — it waits for your approval')},$('#e-unq'));
+$('#e-refetch').onclick=()=>once(async()=>{const id=CUR.id;await save();await api(`/api/clips/${id}/refetch`,'POST');const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);startPoll(c.id);toast('Fetching the video again…')},$('#e-refetch'));
+$('#e-rewrite').onclick=()=>once(async()=>{if(!confirm('Throw this reel away and let the local AI write a new one on another topic?'))return;
+  const r=await api(`/api/clips/${CUR.id}/rewrite`,'POST');closeEditor();toast('Discarded — a new reel about “'+r.topic+'” is being written (it appears in Clips in a few minutes)');refreshAfter()},$('#e-rewrite'));
+$('#e-del').onclick=()=>once(async()=>{if(!confirm('Discard this clip?'))return;await api('/api/clips/'+CUR.id,'DELETE');closeEditor();toast('Discarded');refreshAfter()});
+$('#e-tts').onclick=()=>once(async()=>{const id=CUR.id;await save();await api(`/api/clips/${id}/tts`,'POST',{text:$('#e-vtext').value,voice:$('#e-voice').value});const c2=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c2);etab('voice');if(c2.tts_pending){startPoll(c2.id);toast('Your helper PC is making the voice…')}else toast('Voice generated — press Save & re-render')},$('#e-tts'));
+$('#e-vfile').onchange=()=>once(async()=>{const f=$('#e-vfile').files[0];if(!f)return;await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/voice-upload`,'POST',fd);$('#e-vfile').value='';fill(await api('/api/clips/'+CUR.id));etab('voice');toast('Voice uploaded — press Save & re-render')});
+// ---------- keyword helper (editor -> Details) ----------
+const KSRC={typed:['t','typed by people in YouTube search'],video:['v','from the original video'],trending:['h','trending now'],extra:['x','added by you']};
+const tagList=()=>$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean);
+const tagChars=t=>t.reduce((n,x)=>n+[...x].length+(x.includes(' ')?2:0),0)+Math.max(0,t.length-1);/* the way YouTube counts its 500 limit: commas count, a tag with a space counts 2 more */
+function kwCount(){const t=tagList(),n=tagChars(t),tl=[...$('#e-mt').value].length,hs=(($('#e-mt').value+' '+$('#e-md').value).match(/#[\p{L}\p{N}]/gu)||[]).length;
+  $('#e-mgn').textContent=`· ${n} of 500 characters, ${t.length} tags`+(n>500?' — too many: YouTube refuses the upload, take some out':'')+(hs>15?` · ${hs} hashtags in the title and description: with more than 15 YouTube ignores them all`:'');
+  $('#e-mgn').style.color=n>500||hs>15?'var(--bad)':'';
+  $('#e-mtn').textContent=`· ${tl} of 100 characters`+(tl>100?' — too long: YouTube cuts the end off':tl>60?' — search results show about the first 60':'');$('#e-mtn').style.color=tl>100?'var(--bad)':'';
+  const on=new Set(t.map(x=>x.toLowerCase()));$$('#e-chips span[data-k]').forEach(s=>s.classList.toggle('on',on.has(s.dataset.k.toLowerCase())))}
+function kwChips(items){
+  $('#e-chips').innerHTML=(items||[]).map(i=>{const s=(i.src||[]).filter(x=>KSRC[x]);if(i.hot&&!s.includes('trending'))s.push('trending');
+    return `<span data-k="${esc(i.k)}" title="${esc(s.map(x=>KSRC[x][1]).join(' · '))}">${s.map(x=>`<i class="kd ${KSRC[x][0]}"></i>`).join('')}${esc(i.k)}</span>`}).join('');
+  $('#e-klegend').classList.toggle('hide',!(items&&items.length));kwCount()}
+function kwFill(c){const k=c.kw||{},locked=['uploaded','uploading'].includes(c.status);
+  $('#e-kq').value=k.hint||'';$('#e-kprev').classList.add('hide');$('#e-meta').classList.add('hide');$('#e-krow').classList.toggle('hide',locked);
+  kwChips(k.items);
+  $('#e-knote').textContent=!k.items?(locked?'No keyword research was saved for this video.':'No keyword research is saved for this clip yet. Press “Find better keywords” to see what people search for.')
+    :(k.note||'')+(k.at?' Looked up '+when(k.at)+'.':'')+(locked?'':c.meta_edited?' You changed the title, description or tags yourself, so the system will not rewrite them. To let it write them again, press “Find better keywords” and then “Use these”.':' If this clip waits more than a day, the system looks again by itself before the upload.')}
+$('#e-kw').onclick=()=>once(async()=>{const id=CUR.id;const r=await api(`/api/keywords/clip/${id}`,'POST',{topic:$('#e-kq').value.trim()});if(!sameClip(id))return;
+  kwChips(r.kw.items);$('#e-knote').textContent=r.kw.note;
+  $('#e-kprev').innerHTML=`<b>Nothing is changed yet.</b> New title: “${esc(r.title)}”. Press “Use these” to write the title, description and tags from these keywords — or click single keywords to put them in your own tags.`;
+  $('#e-kprev').classList.remove('hide');$('#e-meta').classList.remove('hide')},$('#e-kw'));
+$('#e-chips').onclick=e=>{const el=e.target.closest('span[data-k]');if(!el)return;const k=el.dataset.k,t=tagList(),i=t.findIndex(x=>x.toLowerCase()===k.toLowerCase());if(i>=0)t.splice(i,1);else t.push(k);$('#e-mg').value=t.join(', ');kwCount()};
+$('#e-mt').oninput=$('#e-mg').oninput=$('#e-md').oninput=kwCount;
+$('#e-meta').onclick=()=>once(async()=>{const id=CUR.id,topic=$('#e-kq').value.trim();await save();await api(`/api/clips/${id}/metadata`,'POST',{topic});const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);etab('meta');toast('Title, description and tags are written from the keywords')},$('#e-meta'));
+
+
+/* ---------- thumbnail ---------- */
+$('#e-tgen').onclick=()=>once(async()=>{if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value,face:$('#e-tface').checked});fill(await api('/api/clips/'+c.id));etab('thumb');
+  if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
+$('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('thumb');toast('Your thumbnail will be used')});
+$('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));
+
+/* ---------- quick upload ---------- */
+let QF='shorts',QL='auto',QMODE='cc',QPID=null,QPOLL=null;
+const pad=n=>String(n).padStart(2,'0');
+function localInput(d){return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`}
+function qSet(group,v){$$('#'+group+' .opt').forEach(b=>b.classList.toggle('on',b.dataset.v===v))}
+function openQuick(){
+  QF='shorts';QL='auto';QMODE='cc';QPID=null;clearInterval(QPOLL);
+  qSet('q-fmt','shorts');qSet('q-len','auto');$('#q-len .opt[data-v=whole]').disabled=true;
+  const t=new Date();t.setDate(t.getDate()+1);t.setHours(10,0,0,0);$('#q-when').value=localInput(t);$('#q-asap').checked=false;$('#q-when').disabled=false;
+  $('#q-url').value='';$('#q-caps').checked=true;$('#q-perm').classList.add('hide');$('#q-note').value='';
+  $('#q-form').classList.remove('hide');$('#q-prog').classList.add('hide');$('#m-quick').classList.add('on');setTimeout(()=>$('#q-url').focus(),50);
+}
+$$('#q-fmt .opt').forEach(b=>b.onclick=()=>{QF=b.dataset.v;qSet('q-fmt',QF);const w=$('#q-len .opt[data-v=whole]');w.disabled=QF!=='video';if(QF!=='video'){QL='auto';qSet('q-len','auto')}});
+$$('#q-len .opt').forEach(b=>b.onclick=()=>{if(b.disabled)return;QL=b.dataset.v;qSet('q-len',QL)});
+$('#q-asap').onchange=()=>{$('#q-when').disabled=$('#q-asap').checked};
+$('#re-all').onclick=()=>once(async()=>{
+  if(!confirm('Make every clip that is waiting (Ready to review and Queued) again with the current settings?\n\nUpload times stay the same. It takes a few minutes per clip.'))return;
+  const whole=confirm('Also set Shorts to “Whole video — nothing cut”?\n\nOK = yes, show the whole picture\nCancel = keep each clip\'s own picture setting');
+  const r=await api('/api/fix/rerender-waiting','POST',whole?{fit:'full'}:{});toast(`${r.started} clip(s) are being made again`+(r.skipped?` (${r.skipped} skipped)`:''));loadClips()},$('#re-all'));
+$('#up-video').onclick=()=>$('#up-file').click();
+$('#up-file').onchange=()=>{const f=$('#up-file').files[0];$('#up-file').value='';if(!f)return;
+  if(f.size>300*1024*1024){toast('This video is larger than 300 MB — make it smaller first',true);return}
+  const fd=new FormData();fd.append('file',f);fd.append('title',f.name.replace(/\.[^.]+$/,''));
+  const x=new XMLHttpRequest(),b=$('#up-video'),old=b.innerHTML;b.disabled=true;
+  x.upload.onprogress=e=>{if(e.lengthComputable)b.textContent='Uploading '+Math.round(e.loaded*100/e.total)+'%'};
+  x.onload=()=>{b.disabled=false;b.innerHTML=old;let j={};try{j=JSON.parse(x.responseText)}catch(e){}
+    if(x.status===200){toast(`Video added (${j.seconds} s, ${j.aspect==='16:9'?'full video':'Short'}) — it is being prepared; open it in Clips to add sound, text and captions`);go('clips')}
+    else toast(typeof j.detail==='string'?j.detail:'The upload did not work — try again',true)};
+  x.onerror=()=>{b.disabled=false;b.innerHTML=old;toast('Network problem during the upload — try again',true)};
+  x.open('POST','/api/upload-video');if(ME.tenant)x.setRequestHeader('X-Copy',String(ME.tenant));x.send(fd)};
+$('#nav-quick').onclick=openQuick;$('#top-quick').onclick=openQuick;
+$('#q-close').onclick=$('#q-cancel').onclick=$('#q-done').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);refreshAfter()};
+async function qStart(){
+  const url=$('#q-url').value.trim();if(!url)throw new Error('Paste a video link first');
+  let at=null;if(!$('#q-asap').checked){if(!$('#q-when').value)throw new Error('Pick when it should go live');const d=new Date($('#q-when').value);if(d<new Date())throw new Error('That time is in the past — pick a future time or tick “As soon as it\'s ready”');at=d.toISOString()}
+  const body={url,format:QF,length:QL,publish_at:at,captions:$('#q-caps').checked,mode:QMODE,permission_note:$('#q-note').value,destination_id:+$('#q-dest').value||null,count:QL==='whole'?1:+$('#q-count').value};
+  const r=await fetch('/api/quick',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(r.status===401){location.href='/login';return}
+  const j=await r.json().catch(()=>({}));
+  if(r.status===409&&j.detail&&j.detail.code==='not_cc'){
+    $('#q-perm-msg').innerHTML=`<b>“${esc(j.detail.title)}”</b> by ${esc(j.detail.channel)} is not Creative Commons (${esc(j.detail.license)}). Uploading it without the creator's permission can get your channel a copyright strike — credit alone does not prevent that.`;
+    $('#q-perm').classList.remove('hide');return}
+  if(!r.ok)throw new Error(typeof j.detail==='string'?j.detail:'Could not start');
+  QPID=j.project_id;$('#q-form').classList.add('hide');$('#q-prog').classList.remove('hide');qPoll();clearInterval(QPOLL);QPOLL=setInterval(qPoll,3000);
+}
+$('#q-go').onclick=()=>once(async()=>{QMODE='cc';await qStart()},$('#q-go'));
+$('#q-perm-go').onclick=()=>once(async()=>{if(!$('#q-note').value.trim())throw new Error('Write how you got permission');QMODE='permission';await qStart()},$('#q-perm-go'));
+$('#q-editor').onclick=()=>{const u=$('#q-url').value.trim();$('#m-quick').classList.remove('on');openNew(u,'commentary','')};
+const QSTEPS=[['read','Read the video','title, licence, tags, description'],['moment','Find the best moment','most replayed + most talked-about'],['fetch','Get the video','downloaded in full quality'],['render','Cut, captions & credit','rendered for your format'],['thumb','Thumbnail','made automatically'],['sched','Schedule upload','goes live at your time']];
+async function qPoll(){
+  let d;try{d=await api('/api/quick/'+QPID)}catch(e){return}
+  $('#q-thumb').src=thumb(d.video_id);$('#q-title').textContent=d.title||'';$('#q-sub').textContent=`${d.channel||''} · ${d.format==='video'?'Video (16:9)':'Shorts (9:16)'}${d.length==='whole'?' · whole video':''}${d.clip_count>1?' · '+d.clip_count+' clips':''}${d.dest_name?' → '+d.dest_name:''}`;
+  const c=d.clip,st=c?c.status:null;
+  const doneIdx=d.state==='failed'?-1:!c?(d.state==='starting'?0:1):({fetching:2,draft:2,rendering:2,rendered:4,queued:5,uploading:5,uploaded:6,failed:2}[st]??2);
+  const thumbDone=c&&c.thumb;const failed=d.state==='failed'||st==='failed';
+  $('#q-steps').innerHTML=QSTEPS.map(([k,l,sub],i)=>{let cls=i<doneIdx||(k==='thumb'&&thumbDone)?'done':i===doneIdx?'now':'';if(failed&&i===doneIdx)cls='bad';
+    let extra=sub;if(k==='moment'&&c)extra=`${T(c.start)}–${T(c.end)}`;if(k==='fetch'&&st==='fetching')extra='your helper PC is downloading it…';if(k==='moment'&&d.state==='analyzing')extra=d.step||extra;
+    if(k==='sched'&&c&&['queued','uploading','uploaded'].includes(st))extra=st==='uploaded'?(c.youtube_id?'uploaded to YouTube ✓':'uploaded'):`goes live ${when(c.publish_at)}`;
+    if(k==='thumb'&&c&&c.thumb_note)extra=c.thumb_note;
+    return `<div class="step ${cls}"><span class="dot">${cls==='done'?ico('check'):cls==='now'?'<span class="spin"></span>':cls==='bad'?ico('x'):i+1}</span><div><b>${l}</b><div class="mut">${esc(extra)}</div></div></div>`}).join('');
+  const er=$('#q-err');const msg=d.state==='failed'?d.step:(st==='failed'?c.error:'');er.classList.toggle('hide',!msg);er.innerHTML=msg?ico('alert')+esc(msg):'';
+  $('#q-open').classList.toggle('hide',!c);$('#q-open').onclick=()=>{$('#m-quick').classList.remove('on');clearInterval(QPOLL);openEditor(c.id)};
+  if(failed||['queued','uploaded'].includes(st)){clearInterval(QPOLL);if(!failed)toast(st==='uploaded'?'Uploaded to YouTube':'All set — it will upload by itself')}
+  else if(st==='rendered'&&!can('uploads.auto')){clearInterval(QPOLL);toast('The clip is ready. Open Clips → Ready to review and approve it — automatic upload is switched off for your account.')}
+}
+
+['m-add','m-new'].forEach(id=>$('#'+id).addEventListener('mousedown',e=>{if(e.target.id===id)$('#'+id).classList.remove('on')}));
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){['m-add','m-new','m-quick'].forEach(id=>$('#'+id).classList.remove('on'));clearInterval(QPOLL);if(CUR)closeEditor()}});
+
+async function loadGuide(){
+  const g=await api('/api/guide'),d=g.setup;
+  const b=$('#gd-badge');b.className='badge '+(d.done===d.total?'uploaded':'queued');b.textContent=`${d.done} / ${d.total} done`;
+  $('#gd-sub').textContent=d.done===d.total?'Every needed step is done. The optional ones add extras.':'Do the steps with ⏳ or ⚠️ — the rest is already working.';
+  const step=(it,n)=>{const open=window.GUIDEOPEN===it.key||(!it.done&&!it.optional);
+    return `<details id="gd-${it.key}" ${open?'open':''} style="border-bottom:1px solid var(--border);padding:10px 0"><summary style="cursor:pointer;list-style:none"><div class="item" style="border:0;padding:0"><span style="font-size:18px">${it.done?'✅':it.blocked?'⚠️':it.optional?'➕':'⏳'}</span><div class="tx grow"><b>${n}. ${esc(it.title)}</b>${it.optional?' <span class="badge outline">optional</span>':''}<span class="mut sm" style="display:block">${esc(it.blocked||it.why)}</span></div>${suBtn(it)}</div></summary>
+      ${(it.how||[]).length?`<ol class="sm" style="margin:8px 0 4px 34px;padding-left:18px;line-height:1.75">${it.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>`:''}</details>`};
+  const must=d.items.filter(i=>!i.optional),opt=d.items.filter(i=>i.optional);
+  $('#gd-steps').innerHTML=must.map((it,i)=>step(it,i+1)).join('')+'<div class="mut sm" style="margin:14px 0 2px">Optional extras</div>'+opt.map((it,i)=>step(it,must.length+i+1)).join('');
+  wireSu(d,$('#gd-steps'),loadGuide);
+  if(window.GUIDEOPEN){const el=$('#gd-'+window.GUIDEOPEN);if(el)el.scrollIntoView({block:'center'});window.GUIDEOPEN=null}
+  loadHealth(g.problems,'#gd-problems');
+  $('#gd-help').innerHTML=g.help.map(h=>`<details style="border-bottom:1px solid var(--border);padding:8px 0"><summary style="cursor:pointer"><b>${esc(h.q)}</b></summary><div class="sm" style="margin:6px 0 2px 16px;line-height:1.7"><div><span class="mut">The system:</span> ${esc(h.auto)}</div><div><span class="mut">You:</span> ${esc(h.do)}</div></div></details>`).join('');
+  window.GDERR=g;
+  $('#gd-errors').innerHTML=g.errors.length?g.errors.slice(0,12).map(e=>`<div class="item"><div class="tx grow"><b>${esc(e.type)}</b>${e.count>1?' <span class="badge outline">×'+e.count+'</span>':''} <span class="mut sm">${new Date(e.at).toLocaleString()} · ${esc(e.where)}${e.line?' · '+esc(e.line):''}</span><span class="mut sm" style="display:block">${esc(e.text)}</span></div></div>`).join('')
+    :'<span class="mut sm">No unexpected problems recorded. Version '+esc(g.version||'local')+'.</span>';
+}
+$('#e-asp').addEventListener('change',()=>$('#e-fit-wrap').classList.toggle('hide',$('#e-asp').value==='16:9'));
+$('#gd-refresh').onclick=()=>once(async()=>{await loadGuide();toast('Checked')},$('#gd-refresh'));
+$('#gd-copy').onclick=async()=>{const g=window.GDERR||{errors:[],setup:{items:[]},problems:{items:[]}};
+  const t=['Raji Studio — details for support','Version: '+(g.version||'?'),'Time: '+new Date().toString(),'','Steps not done:',...g.setup.items.filter(i=>!i.done&&!i.optional).map(i=>'- '+i.title+': '+(i.blocked||i.why)),'','Problems:',...g.problems.items.map(i=>'- ['+i.level+'] '+i.text),'','Recent server problems:',...g.errors.slice(0,15).map(e=>`- ${e.at} ${e.type} @ ${e.where} ${e.line}: ${e.text}`)].join('\n');
+  try{await navigator.clipboard.writeText(t);toast('Copied — paste it into a message')}catch(e){prompt('Copy this text:',t)}};
+$('#gd-clear').onclick=()=>once(async()=>{await api('/api/guide/errors/clear','POST');loadGuide()});
+
+var ME={role:'super'};
+async function loadMe(){
+  try{ME=await api('/api/me')}catch(e){return}
+  const brand=ME.brand||'Raji Studio';
+  $('#brand-name').textContent=brand;$('#brand-crumb').textContent=brand;document.title=brand;
+  $('#brand-sub').textContent=ME.role==='super'&&!ME.viewing?'Super Admin':'Creator workspace';
+  $('#un').textContent=ME.viewing?ME.viewing.name:(ME.name||'admin');$('#uf').textContent=ME.viewing?'viewed by Super Admin':ME.role==='super'?'Super Admin':(ME.plan||'Customer');
+  $('#av').textContent=($('#un').textContent||'A')[0].toUpperCase();
+  $('#nav-users').classList.toggle('hide',ME.role!=='super');
+  const ob=ME.onboarding;window.OBLOCK=!!(ob&&ob.active);$('#nav-start').classList.toggle('hide',!window.OBLOCK);
+  if(ob){$('#b-start').textContent=ob.done+'/'+ob.total}
+  $$('.nav[data-p]').forEach(n=>{if(n.dataset.p!=='start'){n.style.opacity=window.OBLOCK?.45:'';n.title=window.OBLOCK?'Opens when “Get started” is finished':''}});
+  ['top-quick','top-new','nav-quick'].forEach(id=>{const e=$('#'+id);if(e)e.classList.toggle('hide',window.OBLOCK)});
+  $('#top-add').classList.toggle('hide',window.OBLOCK);
+  if(window.OBLOCK&&$('#p-start').classList.contains('hide'))go('start');
+  if($('#pw-hint')&&ME.role==='user')$('#pw-hint').textContent='Forgot it? Ask the person who gave you access — they can give you a temporary password.';
+  let bar=$('#view-bar');if(ME.viewing){if(!bar){bar=document.createElement('div');bar.id='view-bar';bar.style.cssText='position:sticky;top:0;z-index:40;background:#f59e0b;color:#111;padding:8px 16px;display:flex;gap:12px;align-items:center;justify-content:center;font-weight:500';document.body.prepend(bar)}
+    bar.innerHTML=`You are looking at <b>${esc(ME.viewing.name)}</b>'s dashboard (${esc(ME.viewing.email)}). What you change here changes THEIR system. <button class="btn sm" id="view-exit">Back to my own dashboard</button>`;
+    $('#view-exit').onclick=()=>once(async()=>{await api('/api/admin/view/exit','POST');location.href='/'})}else if(bar)bar.remove();
+  if(ME.role==='super'&&!ME.viewing){try{const u=await api('/api/admin/users');const n=u.users.filter(x=>x.status==='pending'||x.upgrade).length;const b=$('#b-users');b.style.display=n?'':'none';b.textContent=n}catch(e){}}
+  applyAccess();
+  renderPlan();
+}
+/* ---------- access control (customers): what the administrator switched off is hidden. The server refuses it anyway. ---------- */
+function can(k){return !(ME&&ME.access&&ME.access.perms&&ME.access.perms[k]===false)}
+const NAVPAGES=['dashboard','clips','sources','analytics','viral','ideas','alerts','settings','guide'];
+function pageOn(p){return !NAVPAGES.includes(p)||can('page.'+p)}
+function firstPage(){return NAVPAGES.find(pageOn)||'none'}
+const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
+  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc]',
+  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
+  'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
+  'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
+  'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
+  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
+  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
+  'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
+  'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
+  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
+const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
+function applyAccess(){
+  let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}
+  const a=ME.access,off=a?Object.keys(a.perms).filter(k=>a.perms[k]===false):[];
+  st.textContent=off.map(k=>(PERM_HIDE[k]?PERM_HIDE[k]+'{display:none!important}':'')+(PERM_LOCK[k]?PERM_LOCK[k]+'{pointer-events:none;opacity:.5}':'')).join('');
+  $$('.nav[data-p]').forEach(n=>{if(NAVPAGES.includes(n.dataset.p))n.classList.toggle('hide',!pageOn(n.dataset.p))});
+  [['topic','source.topic'],['channel','source.channel'],['trending','source.trending'],['reel','source.reel']].forEach(([v,k])=>['#s-kind','#h-kind'].forEach(sel=>{const o=$(sel+' option[value="'+v+'"]');if(o)o.disabled=o.hidden=!can(k)}));
+  ['#s-kind','#h-kind'].forEach(sel=>{const el=$(sel),cur=el.selectedOptions[0];if(cur&&cur.disabled){const f=[...el.options].find(o=>!o.disabled);if(f){el.value=f.value;if(el.onchange)el.onchange()}}});
+  let note=$('#acl-note');const c=(a&&a.controls)||{},msgs=[];
+  if(c.uploads_paused)msgs.push('Uploads are paused by the administrator. Your clips stay queued; nothing is lost.');else if(!can('uploads.youtube'))msgs.push('Uploading to YouTube is switched off for your account.');
+  if(c.sources_stopped)msgs.push('All sources are stopped by the administrator. No new clips are made until they are started again.');
+  if(msgs.length){if(!note){note=document.createElement('div');note.id='acl-note';note.className='alert bad';$('main').prepend(note)}note.innerHTML=ico('alert')+'<span>'+msgs.map(esc).join(' ')+' Ask the person who gave you access.</span>'}else if(note)note.remove();
+  const cur=$$('main section').find(s=>!s.classList.contains('hide'));if(cur&&!pageOn(cur.id.slice(2)))go(firstPage());
+}
+function renderPlan(){
+  const card=$('#plan-card');if(!card)return;const isUser=ME.role==='user'||ME.viewing;card.classList.toggle('hide',!isUser);
+  const claim=$('#wk-claim');if(claim)claim.classList.add('hide');
+  if(!isUser)return;
+  const lim=ME.channel_limit||1,pay=ME.pay||{},up=ME.upgrade;
+  $('#plan-badge').className='badge '+(ME.channels>=lim?'queued':'uploaded');$('#plan-badge').textContent=`${ME.channels} of ${lim} channel${lim===1?'':'s'} used`;
+  $('#plan-sub').textContent=`Your plan allows ${lim} YouTube channel${lim===1?'':'s'}. More channels are switched on after payment.`;
+  $('#plan-box').innerHTML=(up?`<div class="alert" style="margin-bottom:10px"><span>${up.plan?`You said you have paid <b>${esc(inr(up.price))}</b> for the plan <b>${esc(up.plan)}</b>`:`Your request for <b>${up.channels} channels</b> was sent`} on ${new Date(up.at).toLocaleDateString()}. It is switched on as soon as the payment has been checked.</span></div>`:'')+'<div id="pp-box"></div>'
+    +`<details id="up-box" ${new URLSearchParams(location.search).has('limit')||window.PLANOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">More channels</summary>
+      <ol class="sm" style="margin:8px 0;padding-left:18px;line-height:1.8"><li>${pay.price?'Price: <b>'+esc(pay.price)+'</b>.':'Ask for the price.'}</li><li>${pay.upi?'Pay to <b>'+esc(pay.upi)+'</b>.':'Payment details will be sent to you.'} ${esc(pay.text||'')}</li><li>Write how many channels you want and the payment reference, then press Send.</li><li>When the payment has been checked, the extra channels are switched on and you can connect them here.</li></ol>
+      <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f">Channels wanted<input id="up-n" type="number" min="${lim+1}" max="50" value="${lim+1}" style="width:120px"></label><label class="f grow">Payment reference / message<input id="up-msg" maxlength="500" placeholder="UPI reference number"></label><button class="btn" id="up-send" style="align-self:flex-end">Send request</button></div></details>
+    <details style="margin-top:10px" id="gk-box" ${window.KEYSOPEN?'open':''}><summary style="cursor:pointer;font-weight:500">Google project keys</summary><div id="gk-body" class="sm" style="margin-top:8px">…</div></details>
+    <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Name of your system</summary><div class="row" style="margin-top:8px"><input id="br-name" class="grow" maxlength="60" value="${esc(ME.brand||'')}"><button class="btn outline" id="br-save">Rename</button></div></details>`;
+  $('#up-send').onclick=()=>once(async()=>{const n=+$('#up-n').value;if(!Number.isInteger(n)||n<=lim||n>50){toast(lim>=50?'Your plan already allows 50 channels, the most there is.':`Write how many channels you want: a number from ${lim+1} to 50.`,true);return}
+    await api('/api/account/upgrade','POST',{channels:n,message:$('#up-msg').value});toast('Request sent — you get the extra channels after the payment is checked');await loadMe()},$('#up-send'));
+  $('#br-save').onclick=()=>once(async()=>{await api('/api/account/brand','POST',{brand:$('#br-name').value});toast('Renamed');await loadMe()},$('#br-save'));
+  keysForm($('#gk-body'),()=>{toast('Keys saved. If a channel now shows “Reconnect needed”, connect it again.');loadDests()});
+  loadOffers().catch(()=>{});
+  api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
+    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
+    $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
+}
+const PERIODS={monthly:'per month',yearly:'per year',once:'one-time'};
+const limTxt=(v,one,many)=>v==null?'No limit on '+many:v+' '+(v===1?one:many);
+async function loadOffers(){
+  const el=$('#pp-box');if(!el)return;const d=await api('/api/plans');const ends=d.expires?new Date(d.expires):null;
+  if(d.current)$('#plan-sub').textContent=`Your plan: ${d.current}`+(ends?` — active until ${ends.toLocaleDateString([], {dateStyle:'medium'})}`:'')+`. It allows ${d.channel_limit||1} YouTube channel${(d.channel_limit||1)===1?'':'s'}.`;
+  const upBox=$('#up-box');if(upBox)upBox.style.display=d.plans.length?'none':'';/* plans for sale: the plan tiles are the way to pay (style, not .hide: that one belongs to the switches) */
+  if(!d.plans.length){el.innerHTML='';return}
+  const isCust=ME.role==='user',canPay=d.online&&isCust,manual=!d.online&&isCust&&can('account.upgrade'),pay=ME.pay||{},lim=d.channel_limit||1;
+  const chTxt=c=>c==null?`${lim} YouTube channel${lim===1?'':'s'}, the same as you have now`:limTxt(c,'YouTube channel','YouTube channels');/* a plan without a channel number leaves the account's own number (acl.apply_plan) */
+  el.innerHTML=`<div class="row" style="justify-content:space-between;margin-bottom:6px"><b>Plans</b>${d.online&&d.mode==='test'?'<span class="badge queued">Test mode — no real money</span>':''}</div>
+    ${manual?`<div class="card" style="padding:12px;margin-bottom:10px"><b>How to pay</b><ol class="sm" style="margin:6px 0;padding-left:18px;line-height:1.8"><li>${pay.upi?'Pay the price of the plan you want to <b>'+esc(pay.upi)+'</b> (UPI).':'Ask for the payment details.'} ${esc(pay.text||'')}</li><li>Write the UPI reference number below.</li><li>Press <b>I have paid</b> on that plan. It is switched on as soon as the payment has been checked.</li></ol>
+      <label class="f" style="max-width:360px">UPI reference number<input id="pp-ref" maxlength="500" placeholder="e.g. 412345678901"></label></div>`:''}
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px">${d.plans.map(p=>{const i=p.includes,cur=d.current&&d.current.toLowerCase()===p.name.toLowerCase(),st=i.storage_mb==null?'No storage limit':(i.storage_mb>=1024?(i.storage_mb/1024).toFixed(i.storage_mb%1024?1:0)+' GB':i.storage_mb+' MB')+' storage';
+      return `<div class="card" style="padding:12px;${cur?'border-color:var(--brand)':''}"><div class="row" style="justify-content:space-between"><b>${esc(p.name)}</b>${cur?'<span class="badge uploaded">Your plan</span>':''}</div>
+        <div style="font-size:20px;font-weight:600;margin:4px 0">${esc(inr(p.price))} <span class="mut sm" style="font-weight:400">${esc(p.period_text)}</span></div>
+        ${p.description?`<div class="mut sm" style="margin-bottom:6px">${esc(p.description)}</div>`:''}
+        <ul class="sm" style="margin:0 0 8px;padding-left:18px;line-height:1.7"><li>${esc(chTxt(i.channels))}</li><li>${esc(limTxt(i.clips_per_day,'clip a day','clips a day'))}</li><li>${esc(limTxt(i.uploads_per_day,'upload a day','uploads a day'))}</li><li>${esc(st)}</li></ul>
+        ${cur&&p.period==='once'?'<span class="mut sm">Paid once — it never ends.</span>':canPay?`<button class="btn ${cur?'outline':''} sm" data-pay="${esc(p.name)}" style="width:100%">${cur&&p.period!=='once'?'Renew — ':''}Pay ${esc(inr(p.price))}</button>`
+          :manual?`<button class="btn ${cur?'outline':''} sm" data-paid="${esc(p.name)}" data-price="${p.price}" style="width:100%">I have paid ${esc(inr(p.price))}</button>`:''}</div>`}).join('')}</div>
+    ${d.online?(isCust?'<div class="mut sm" style="margin-bottom:10px">Pay with UPI, card or net banking. The plan is switched on as soon as the payment goes through. Renewing adds to the days you have left.</div>':'<div class="mut sm" style="margin-bottom:10px">Only the customer can pay (not in “View as”).</div>'):isCust?'':'<div class="mut sm" style="margin-bottom:10px">Only the customer can say they have paid (not in “View as”).</div>'}`;
+  $$('[data-pay]',el).forEach(b=>b.onclick=()=>once(()=>payPlan(b.dataset.pay),b));
+  $$('[data-paid]',el).forEach(b=>b.onclick=()=>once(async()=>{const ref=$('#pp-ref').value.trim();
+    if(!ref&&!confirm(`Send “I have paid ${inr(+b.dataset.price)}” for the plan ${b.dataset.paid} without a UPI reference number? Checking the payment is quicker with it.`))return;
+    await api('/api/account/upgrade','POST',{plan:b.dataset.paid,message:ref});toast(`Sent — the plan “${b.dataset.paid}” is switched on as soon as the payment has been checked`);await loadMe()},b));
+}
+function rzScript(){return window.Razorpay?Promise.resolve():new Promise((ok,no)=>{const s=document.createElement('script');s.src='https://checkout.razorpay.com/v1/checkout.js';s.onload=ok;s.onerror=()=>no(new Error('The payment window could not be loaded. Check your internet connection and try again.'));document.head.appendChild(s)})}
+async function payPlan(name){
+  const o=await api('/api/pay/order','POST',{plan:name});await rzScript();
+  const rz=new Razorpay({key:o.key_id,amount:o.amount,currency:o.currency,order_id:o.order_id,name:o.name,description:o.description,prefill:o.prefill,notes:{plan:o.plan},
+    handler:r=>once(async()=>{const v=await api('/api/pay/verify','POST',{razorpay_order_id:r.razorpay_order_id,razorpay_payment_id:r.razorpay_payment_id,razorpay_signature:r.razorpay_signature});
+      toast(v.pending?v.message:'Payment received — your plan “'+(v.plan||o.plan)+'” is active');await loadMe();if(v.pending)setTimeout(()=>loadMe().catch(()=>{}),60000)}),
+    modal:{ondismiss:()=>toast('The payment window was closed. If money was taken, the plan is switched on by itself within a few minutes.')}});
+  rz.on('payment.failed',r=>toast('The payment did not go through: '+((r&&r.error&&r.error.description)||'try again'),true));
+  rz.open();
+}
+async function keysForm(el,done){
+  if(!el)return;let o;try{o=await api('/api/onboarding')}catch(e){el.textContent='';return}const g=o.google||{};
+  el.innerHTML=`<div style="margin-bottom:6px">${g.own?'Your system uses <b>your own</b> Google project.':g.shared?'Your system uses the <b>provider\'s</b> Google project for now. Save your own keys to get your own upload allowance.':'<b style="color:var(--bad)">No keys saved.</b> Uploads and Google sign-ins cannot work until you save them.'}</div>
+    <div class="row" style="margin:6px 0;flex-wrap:wrap"><span>Authorized redirect URI:</span> <code style="user-select:all">${esc(g.redirect_uri||'')}</code></div>
+    <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input class="gk-cid" autocomplete="off" value="${esc(g.client_id||'')}" placeholder="….apps.googleusercontent.com"></label><label class="f grow">Client secret<input class="gk-sec" type="password" autocomplete="new-password" placeholder="${g.own?'saved — type a new one to change it':'GOCSPX-…'}"></label><button class="btn gk-save" style="align-self:flex-end">Save</button></div>
+    <div class="mut" style="margin-top:6px">The keys are checked with Google before they are saved. How to get them: Setup guide, or “Get started” step 1.</div>`;
+  $('.gk-save',el).onclick=()=>once(async()=>{await api('/api/onboarding/google','POST',{client_id:$('.gk-cid',el).value,client_secret:$('.gk-sec',el).value});window.KEYSOPEN=false;if(done)done()},$('.gk-save',el));
+}
+async function loadStart(){
+  const o=await api('/api/onboarding');
+  if(!o.active){window.OBLOCK=false;await loadMe();if(o.total){toast('Setup finished — your system is running');go('dashboard')}return}
+  const b=$('#ob-badge');b.className='badge queued';b.textContent=`Step ${Math.min(o.done+1,o.total)} of ${o.total}`;
+  const g=o.google||{};
+  const body={
+    google:()=>`<div class="row" style="margin:8px 0"><span class="sm">Authorized redirect URI:</span> <code style="user-select:all">${esc(g.redirect_uri)}</code><button class="btn ghost sm" id="ob-copy">Copy</button><a class="btn outline sm" href="https://console.cloud.google.com/" target="_blank" rel="noopener">Open Google Cloud</a></div>
+      <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input id="ob-cid" autocomplete="off" placeholder="1234567890-abc….apps.googleusercontent.com" value="${esc(g.client_id||'')}"></label><label class="f grow">Client secret<input id="ob-sec" type="password" autocomplete="new-password" placeholder="GOCSPX-…"></label><button class="btn" id="ob-keys" style="align-self:flex-end">Save</button></div>`,
+    channel:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/login">Connect YouTube channel</a></div>`,
+    verify:()=>`<div class="row" style="margin-top:8px"><a class="btn outline" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Open youtube.com/verify</a><button class="btn" data-oback="verify">I have verified it</button></div>`,
+    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a><span class="mut sm">${o.helper_waiting?'A helper is waiting — type its pairing code:':'After starting it, type the pairing code it shows:'}</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn" id="ob-approve">Approve</button></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">${o.helper_waiting?'':'Waiting for your helper to start… this page checks every 10 seconds.'}</div>`,
+    face:()=>`<div class="row" style="margin-top:8px"><label class="btn">Upload my photo<input type="file" accept="image/jpeg,image/png,image/webp" id="ob-face" hidden></label><button class="btn ghost" data-oback="face">Skip for now</button><span class="mut sm" id="ob-facenote"></span></div>`,
+    gmail:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/gmail">Connect Gmail</a><button class="btn ghost" data-oback="gmail">Skip for now</button></div>`,
+    source:()=>`<div class="row" style="margin-top:8px"><button class="btn" id="ob-src">Add my first source</button></div>`};
+  $('#ob-steps').innerHTML=o.steps.map((st,i)=>{const cur=st.key===o.current;return `<div class="card" style="margin-bottom:12px;${st.locked?'opacity:.5':''}"><div class="ch"><div><h3>${st.done?'✅':st.locked?'🔒':'👉'} ${i+1}. ${esc(st.title)}${st.skipped?' <span class="badge outline">skipped</span>':''}</h3><p>${esc(st.why)}</p></div>${st.done?'<span class="badge uploaded">Done</span>':st.locked?'<span class="badge outline">Opens after step '+i+'</span>':'<span class="badge queued">Do this now</span>'}</div>
+    ${cur?`<div class="cb"><ol class="sm" style="margin:0 0 6px;padding-left:18px;line-height:1.8">${st.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>${body[st.key]()}</div>`:''}
+    ${st.key==='google'&&st.done&&!g.shared?'<div class="cb"><details><summary class="sm" style="cursor:pointer">Wrong keys? Change them</summary><div id="ob-rekeys" class="sm" style="margin-top:8px"></div></details></div>':''}</div>`}).join('');
+  keysForm($('#ob-rekeys'),async()=>{toast('Keys saved');await loadMe();await loadStart()});
+  const after=async()=>{await loadMe();await loadStart()};
+  if($('#ob-copy'))$('#ob-copy').onclick=async()=>{try{await navigator.clipboard.writeText(g.redirect_uri);toast('Copied — paste it into Google')}catch(e){prompt('Copy this address:',g.redirect_uri)}};
+  if($('#ob-keys'))$('#ob-keys').onclick=()=>once(async()=>{await api('/api/onboarding/google','POST',{client_id:$('#ob-cid').value,client_secret:$('#ob-sec').value});toast('Saved — now connect your channel');await after()},$('#ob-keys'));
+  $$('[data-oback]').forEach(x=>x.onclick=()=>once(async()=>{await api('/api/onboarding/ack','POST',{key:x.dataset.oback});await after()},x));
+  if($('#ob-approve'))$('#ob-approve').onclick=()=>once(async()=>{const ws=await api('/api/workers');const w=ws.find(x=>!x.approved);if(!w)throw new Error('No helper has started yet. Double-click “Start helper” on your PC and wait until it shows a pairing code.');
+    await api(`/api/workers/${w.id}/approve`,'POST',{code:$('#ob-pair').value});toast('Helper approved');await after()},$('#ob-approve'));
+  if($('#ob-face'))$('#ob-face').onchange=()=>once(async()=>{const f=$('#ob-face').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);$('#ob-facenote').textContent='Removing the background… (can take a minute)';try{await api('/api/faces/0','POST',fd)}finally{$('#ob-facenote').textContent=''}toast('Photo saved');await after()});
+  if($('#ob-src'))$('#ob-src').onclick=()=>{window.OBSRC=true;openAdd()};
+  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName));
+    if($('#p-start').classList.contains('hide')||$('#m-add').classList.contains('on'))return;
+    if(typing){window._obT=setTimeout(again,10000);return}loadStart().catch(()=>{})},10000);
+}
+/* ---------- Super Admin: access control (switches, limits, plans, direct controls, activity log) ---------- */
+let ACL=null,LGLAST=null;const UOPEN=new Set();
+async function loadAcl(){ACL=await api('/api/admin/acl');renderPlans();return ACL}
+const aclLine=a=>`${a.plan?'Plan: <b>'+esc(a.plan)+'</b>':'No plan (default switches)'} · ${a.off?a.off+' switched off':'everything switched on'}${a.controls.uploads_paused?' · <b style="color:var(--bad)">uploads paused</b>':''}${a.controls.sources_stopped?' · <b style="color:var(--bad)">sources stopped</b>':''}`;
+const swRow=(attr,key,on,label,mark)=>`<label class="row sm" style="gap:8px;padding:5px 0;flex-wrap:nowrap" ${mark?'title="Set for this customer only"':''}><span class="switch"><input type="checkbox" ${on?'checked':''} ${attr}="${esc(key)}"><i></i></span><span>${esc(label)}${mark?' <span class="mut">•</span>':''}</span></label>`;
+function permGrid(perms,attr,own){return ACL.catalog.groups.map(g=>`<div style="margin-top:14px"><b>${esc(g.title)}</b><div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:0 18px;margin-top:4px">${ACL.catalog.perms.filter(p=>p.group===g.id).map(p=>swRow(attr,p.key,perms[p.key]!==false,p.label,own&&(p.key in own))).join('')}</div></div>`).join('')}
+function limitRow(limits,attr,usage,channels){return `<div class="row" style="flex-wrap:wrap;gap:12px;align-items:flex-start">${ACL.catalog.limits.filter(l=>channels||l.key!=='channels').map(l=>`<label class="f sm" title="${esc(l.hint)}">${esc(l.label)}<input type="number" min="0" ${attr}="${l.key}" value="${limits[l.key]??''}" placeholder="${l.key==='channels'?'not changed':'no limit'}" style="width:140px">${usage&&usage[l.key]!=null?`<span class="mut" style="font-weight:400">used now: ${esc(usage[l.key])}</span>`:''}</label>`).join('')}</div>`}
+const actRow=(r,name)=>`<div class="item"><span class="badge ${r.actor==='super'?'queued':r.actor==='user'?'uploaded':'outline'}">${r.actor==='super'?'Super Admin':r.actor==='user'?'Customer':'System'}</span><div class="tx grow"><span>${esc(r.detail)}</span><span class="mut sm" style="display:block">${name&&r.name?esc(r.name)+' · ':''}${r.at?new Date(r.at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}):''}</span></div></div>`;
+async function openAccess(id,fresh){
+  const box=$('#ua-'+id);if(!box)return;if(!ACL)await loadAcl();
+  const d=await api(`/api/admin/users/${id}/access`+(fresh?'?fresh=1':'')),u=d.usage||{},c=d.controls||{},a=d.account;
+  UOPEN.add(id);box.classList.remove('hide');
+  box.innerHTML=`<div style="border:1px solid var(--border);border-radius:10px;padding:14px;margin-top:10px;background:var(--muted)">
+    <div class="row" style="justify-content:space-between"><b>Access of ${esc(a.name)}</b><button class="btn ghost sm" data-aclose>Close</button></div>
+    <div class="mut sm">Every change applies at once — the customer does not have to sign in again. What is switched off is hidden in their dashboard and refused by the server.</div>
+    <div style="margin-top:14px"><b>Plan</b><div class="row" style="margin-top:4px"><select data-aplan style="width:auto"><option value="">No plan (default switches)</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${p.name===d.plan?'selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="btn outline sm" data-aplango>Put on this plan</button><span class="mut sm">This replaces the switches and limits set only for this customer (marked •).</span></div></div>
+    <div style="margin-top:14px"><b>Do now</b><div class="row" style="margin-top:4px;flex-wrap:wrap">
+      <button class="btn ${c.uploads_paused?'ok':'bad'} sm" data-actl="${c.uploads_paused?'resume_uploads':'pause_uploads'}">${c.uploads_paused?'Resume uploads':'Pause all uploads now'}</button>
+      <button class="btn ${c.sources_stopped?'ok':'bad'} sm" data-actl="${c.sources_stopped?'start_sources':'stop_sources'}">${c.sources_stopped?'Start sources again':'Stop all sources now'}</button>
+      <button class="btn outline sm" data-actl="sign_out">Sign out now</button>
+      ${(u.channel_list||[]).map(ch=>`<button class="btn outline sm" data-adisc="${ch.id}" data-n="${esc(ch.name)}">Disconnect channel “${esc(ch.name)}”</button>`).join('')}</div>
+      ${c.uploads_paused||c.sources_stopped?`<div class="sm" style="color:var(--bad);margin-top:6px">${c.uploads_paused?'Uploads are paused. ':''}${c.sources_stopped?'Sources are stopped. ':''}The customer sees this on their dashboard.</div>`:''}</div>
+    <div style="margin-top:14px"><b>Limits</b> <span class="mut sm">(empty = no limit; the day restarts with YouTube's, about 1:30 PM India time)</span><div style="margin-top:4px">${limitRow(d.limits,'data-alim',u,true)}</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-alimsave>Save limits</button><button class="btn ghost sm" data-afresh>Measure storage again</button></div>${u.error?`<div class="sm" style="color:var(--bad)">${esc(u.error)}</div>`:''}</div>
+    ${permGrid(d.perms,'data-ap',d.own_perms)}
+    <div style="margin-top:14px"><b>Recent activity</b><div style="margin-top:6px;max-height:260px;overflow:auto">${(d.activity||[]).length?d.activity.map(r=>actRow(r)).join(''):'<span class="mut sm">Nothing yet.</span>'}</div></div>
+    <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px"><b style="color:var(--bad)">Delete everything</b><div class="row" style="margin-top:4px"><button class="btn bad sm" data-awipe>Delete all data of this account…</button><span class="mut sm">Removes their channels' connections, sources, clips, files and settings for good. Videos already on YouTube are not touched. The login stays, blocked.</span></div></div></div>`;
+  $('[data-aclose]',box).onclick=()=>{UOPEN.delete(id);box.classList.add('hide');box.innerHTML=''};
+  $$('[data-ap]',box).forEach(i=>i.onchange=async()=>{i.disabled=true;try{const r=await api(`/api/admin/users/${id}/access`,'POST',{perms:{[i.dataset.ap]:i.checked}});toast((r.changed||[]).join(' · ')||'Saved');
+      const l=$('#ual-'+id);if(l)l.innerHTML=aclLine({plan:r.plan,controls:r.controls,off:Object.values(r.perms).filter(v=>!v).length})}catch(e){i.checked=!i.checked;fail(e)}finally{i.disabled=false}});
+  $('[data-alimsave]',box).onclick=e=>once(async()=>{const limits={};$$('[data-alim]',box).forEach(i=>{const k=i.dataset.alim;if(String(d.limits[k]??'')===i.value)return;  // only what was changed becomes this customer's own
+      if(k==='channels'){if(i.value!=='')limits.channels=+i.value}else limits[k]=i.value===''?null:+i.value});
+    const r=await api(`/api/admin/users/${id}/access`,'POST',{limits});toast((r.changed||[]).join(' · ')||'No change');await loadUsers()},e.target);
+  $('[data-afresh]',box).onclick=e=>once(()=>openAccess(id,true),e.target);
+  $('[data-aplango]',box).onclick=e=>once(async()=>{const p=$('[data-aplan]',box).value;if(!confirm(p?`Put ${a.name} on the plan “${p}”? The switches and limits set only for this customer are replaced by the plan's.`:`Take ${a.name} off every plan? The default switches then apply.`))return;
+    await api(`/api/admin/users/${id}/plan`,'POST',{plan:p});toast(p?'Now on the plan “'+p+'”':'No plan — default switches');await loadUsers()},e.target);
+  $$('[data-actl]',box).forEach(b=>b.onclick=()=>once(async()=>{const act=b.dataset.actl;if(act==='sign_out'&&!confirm(`Sign ${a.name} out of every browser now? They can sign in again with their password.`))return;
+    await api(`/api/admin/users/${id}/control`,'POST',{action:act});toast({pause_uploads:'Uploads paused — nothing of theirs goes to YouTube',resume_uploads:'Uploads resumed',stop_sources:'Sources stopped — no new clips are made',start_sources:'Sources started again',sign_out:'Signed out'}[act]);await loadUsers()},b));
+  $$('[data-adisc]',box).forEach(b=>b.onclick=()=>once(async()=>{if(!confirm(`Disconnect the YouTube channel “${b.dataset.n}” from ${a.name}'s system? Their sources and waiting clips are kept; videos already on YouTube are not touched.`))return;
+    await api(`/api/admin/users/${id}/channels/${b.dataset.adisc}`,'DELETE');toast('Channel disconnected');await loadUsers()},b));
+  $('[data-awipe]',box).onclick=e=>once(async()=>{if(!confirm(`Delete ALL data of ${a.name}?\n\nTheir channels' connections, sources, clips, files and settings are removed for good. This cannot be undone. The account is blocked and signed out first.`))return;
+    const t=prompt('To confirm, type the e-mail address of this account:');if(t===null)return;
+    const r=await api(`/api/admin/users/${id}/delete-data`,'POST',{email:t});toast(r.deleted?'All data of this account was deleted':'Deleted, but: '+r.problems.join('; '),!r.deleted);UOPEN.delete(id);await loadUsers()},e.target);
+}
+function renderPlans(){
+  const el=$('#pl-list');if(!el||!ACL)return;
+  const sum=s=>{const off=Object.values(s.perms||{}).filter(v=>v===false).length,lim=ACL.catalog.limits.filter(l=>(s.limits||{})[l.key]).map(l=>l.label+': '+s.limits[l.key]).join(' · ');return (off?off+' switched off':'everything switched on')+' · '+(lim||'no limits')};
+  el.innerHTML=`<div class="item"><div class="tx grow"><b>Default</b> <span class="badge outline">${ACL.no_plan_users} without a plan</span><span class="mut sm" style="display:block">${esc(sum(ACL.default))}</span></div><button class="btn outline sm" data-pledit="">Edit</button></div>`
+    +ACL.plans.map(p=>`<div class="item"><div class="tx grow"><b>${esc(p.name)}</b> <span class="badge ${p.users?'uploaded':'outline'}">${p.users} customer${p.users===1?'':'s'}</span> ${p.price?`<span class="badge rendered">${esc(inr(p.price.price))} ${esc(PERIOD[p.price.period]||'')}</span>`:'<span class="badge outline">not for sale</span>'}${ACL.new_plan===p.name?' <span class="badge queued">new accounts start here</span>':''}<span class="mut sm" style="display:block">${esc(sum(p)+((p.limits||{}).channels?'':' · YouTube channels: not changed (each account keeps its own number)'))}</span></div><button class="btn outline sm" data-pledit="${esc(p.name)}">Edit</button><button class="btn bad sm" data-pldel="${esc(p.name)}">Delete</button></div>`).join('')
+    +`<div class="row sm" style="margin-top:12px;gap:8px"><span>A new account starts on</span><select id="pl-start" style="width:auto"><option value="">the default switches</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${ACL.new_plan===p.name?'selected':''}>the plan “${esc(p.name)}”</option>`).join('')}</select></div>`;
+  $$('[data-pledit]',el).forEach(b=>b.onclick=()=>openPlan(b.dataset.pledit));
+  $$('[data-pldel]',el).forEach(b=>b.onclick=()=>once(async()=>{const p=ACL.plans.find(x=>x.name===b.dataset.pldel);if(!confirm(`Delete the plan “${p.name}”?`+(p.users?`\n\nThe ${p.users} customer(s) on it keep exactly the switches and limits they have now.`:'')))return;
+    await api('/api/admin/plans/'+encodeURIComponent(p.name),'DELETE');toast('Plan deleted');await loadUsers()},b));
+  $('#pl-start').onchange=()=>once(async()=>{await api('/api/admin/acl/default','POST',{perms:ACL.default.perms||{},limits:ACL.default.limits||{},new_plan:$('#pl-start').value,apply:true});toast('Saved — used for accounts that register from now on');await loadAcl()});
+}
+function openPlan(name){
+  const isNew=name===null,isDef=name==='',p=isNew?{perms:{},limits:{},users:0}:isDef?{...ACL.default,users:ACL.no_plan_users}:ACL.plans.find(x=>x.name===name);if(!p)return;
+  $('#pe-title').textContent=isNew?'New plan':isDef?'Default switches':'Plan “'+name+'”';
+  $('#pe-sub').textContent=isDef?'What customers without a plan may use. A customer\'s own switches (set in their Access panel) still win.':'A ready set of switches and limits. Put customers on it in their Access panel.';
+  $('#pe-name-wrap').classList.toggle('hide',!isNew);$('#pe-name').value='';
+  const pr=p.price||{};
+  $('#pe-body').innerHTML=(isDef?'':`<b>Price</b> <span class="mut sm">(empty = not for sale: customers do not see this plan)</span><div class="row" style="flex-wrap:wrap;gap:12px;margin:4px 0 12px"><label class="f sm">Price in ₹<input id="pe-price" type="number" min="0" max="1000000" value="${pr.price??''}" placeholder="not for sale" style="width:140px"></label><label class="f sm">Billing<select id="pe-period" style="width:auto"><option value="monthly">Every month (30 days)</option><option value="yearly">Every year (365 days)</option><option value="once">One-time (never ends)</option></select></label><label class="f sm grow">Short description customers see<input id="pe-desc" maxlength="200" value="${esc(pr.description||'')}" placeholder="Best for one growing channel"></label></div>`)
+    +`<b>Limits</b> <span class="mut sm">(empty = no limit${isDef?'':'; YouTube channels empty = every customer keeps the number they have'})</span><div style="margin-top:4px">${limitRow(p.limits||{},'data-pl',null,!isDef)}</div>${permGrid(p.perms||{},'data-pp')}`;
+  if(!isDef)$('#pe-period').value=pr.period||'monthly';
+  const body=apply=>({perms:Object.fromEntries($$('#pe-body [data-pp]').map(i=>[i.dataset.pp,i.checked])),
+    limits:Object.fromEntries($$('#pe-body [data-pl]').map(i=>[i.dataset.pl,i.value===''?(isDef||i.dataset.pl==='channels'?null:0):+i.value])),apply,
+    ...(isDef?{}:{price:$('#pe-price').value===''?0:+$('#pe-price').value,period:$('#pe-period').value,description:$('#pe-desc').value})});
+  const send=async apply=>{if(isDef)await api('/api/admin/acl/default','POST',{...body(apply),new_plan:ACL.new_plan||''});
+    else{const nm=isNew?$('#pe-name').value.trim():name;if(!nm)throw new Error('Give the plan a name, for example Starter');await api('/api/admin/plans','POST',{...body(apply),name:nm})}
+    $('#m-plan').classList.remove('on');toast(apply&&p.users?'Saved and applied':'Saved');await loadUsers()};
+  const n=p.users||0;
+  $('#pe-btns').innerHTML=!isNew&&n?`<span class="mut sm grow">${n} customer${n===1?' uses':'s use'} ${isDef?'the default':'this plan'}.</span><button class="btn outline" id="pe-keep">Save — ${n===1?'that customer keeps':'those customers keep'} what they have now</button><button class="btn brand" id="pe-apply">Save and apply to ${n===1?'that customer':'those '+n+' customers'}</button>`:'<button class="btn brand" id="pe-apply">Save</button>';
+  $('#pe-apply').onclick=()=>once(()=>send(true),$('#pe-apply'));if($('#pe-keep'))$('#pe-keep').onclick=()=>once(()=>send(false),$('#pe-keep'));
+  $('#m-plan').classList.add('on');
+}
+$('#pl-new').onclick=()=>once(async()=>{if(!ACL)await loadAcl();openPlan(null)});
+$('#pe-close').onclick=()=>$('#m-plan').classList.remove('on');
+async function loadLog(more){
+  const p=new URLSearchParams({limit:'60'});if($('#lg-acc').value)p.set('account_id',$('#lg-acc').value);if($('#lg-who').value)p.set('actor',$('#lg-who').value);if($('#lg-q').value.trim())p.set('q',$('#lg-q').value.trim());if(more&&LGLAST)p.set('before',LGLAST);
+  const rows=(await api('/api/admin/activity?'+p)).rows,html=rows.map(r=>actRow(r,true)).join('');
+  if(more)$('#lg-list').insertAdjacentHTML('beforeend',html);else $('#lg-list').innerHTML=html||'<span class="mut sm">Nothing here yet.</span>';
+  if(rows.length)LGLAST=rows[rows.length-1].id;$('#lg-more').classList.toggle('hide',rows.length<60);
+}
+$('#lg-go').onclick=()=>once(()=>loadLog(false),$('#lg-go'));$('#lg-more').onclick=()=>once(()=>loadLog(true),$('#lg-more'));
+$('#lg-acc').onchange=$('#lg-who').onchange=()=>loadLog(false).catch(fail);$('#lg-q').onkeydown=e=>{if(e.key==='Enter')loadLog(false).catch(fail)};
+async function loadUsers(){
+  const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
+  $('#pay-upi').value=pay.upi||'';$('#pay-price').value=pay.price||'';$('#pay-text').value=pay.text||'';
+  const pend=U.filter(u=>u.status==='pending').length,req=U.filter(u=>u.upgrade).length;
+  {const bu=$('#b-users');if(bu){bu.style.display=pend+req?'':'none';bu.textContent=pend+req}}  // the sidebar number follows this list
+  $('#us-sub').textContent=`${U.length} account${U.length===1?'':'s'} · ${pend} waiting for approval · ${req} asking for more channels. Your own system: ${d.owner.channels} channel(s), ${d.owner.clips} clips.`;
+  const lab={pending:['Waiting for approval','queued'],active:['Active','uploaded'],blocked:['Blocked','failed']};
+  $('#us-list').innerHTML=U.length?U.map(u=>{const g=u.usage||{};return `<div class="item" style="flex-wrap:wrap;align-items:flex-start"><div class="avatar">${esc((u.name||'?')[0].toUpperCase())}</div>
+    <div class="tx grow"><b>${esc(u.name)}</b> <span class="badge ${lab[u.status][1]}">${lab[u.status][0]}</span> <span class="mut sm">${esc(u.email)}</span>
+      <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
+      ${u.usage&&!g.error?`<span class="sm" style="display:block">Setup: ${g.setup_done?'finished':esc(g.setup||'')+' steps done'} · Google project: ${g.own_google?'their own':g.shared_google?'<b>yours (shared uploads)</b>':'none yet'}</span>`:''}
+      ${u.usage?`<span class="sm" style="display:block">${g.error?esc(g.error):`${g.channels} of ${u.channel_limit} channel(s) · ${g.sources} sources · ${g.clips} clips · ${g.uploaded} uploaded · helper ${g.helper?'online':'offline'}`}</span>`:''}
+      ${u.acl?`<span class="sm" style="display:block" id="ual-${u.id}">${aclLine(u.acl)}</span>`:''}
+      ${u.upgrade?(u.upgrade.plan?`<div class="alert" style="margin-top:6px"><span>Says they have paid <b>${esc(inr(u.upgrade.price))}</b> ${esc(PERIOD[u.upgrade.period]||'')} for the plan <b>${esc(u.upgrade.plan)}</b> (${new Date(u.upgrade.at).toLocaleDateString()}) · UPI reference: ${esc(u.upgrade.message||'none given')}</span><div class="row" style="margin-top:6px;flex-wrap:wrap"><button class="btn sm" data-uplan="${u.id}" data-plan="${esc(u.upgrade.plan)}">Paid — allow the plan ${esc(u.upgrade.plan)}</button><button class="btn ghost sm" data-uclose="${u.id}">Not paid — close request</button></div></div>`
+        :`<div class="alert" style="margin-top:6px"><span>Asks for <b>${u.upgrade.channels} channels</b> (${new Date(u.upgrade.at).toLocaleDateString()}): ${esc(u.upgrade.message||'no message')}</span><div class="row" style="margin-top:6px"><button class="btn sm" data-uallow="${u.id}" data-n="${u.upgrade.channels}">Paid — allow ${u.upgrade.channels} channels</button><button class="btn ghost sm" data-uclose="${u.id}">Not paid — close request</button></div></div>`):''}
+      ${u.note?`<span class="mut sm" style="display:block">Note: ${esc(u.note)}</span>`:''}</div>
+    <div class="row" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">${u.status==='pending'?`<button class="btn sm" data-uok="${u.id}">Approve</button><button class="btn bad sm" data-udel="${u.id}">Reject</button>`:''}
+      ${u.status!=='pending'&&u.tenant_id?`<button class="btn sm" data-uacc="${u.id}" title="Every switch, limit and control for this customer">Access</button>`:''}
+      ${u.status==='active'?`<label class="row sm" style="gap:6px">Channels<input type="number" min="1" max="50" value="${u.channel_limit}" data-ulim="${u.id}" style="width:70px"></label><button class="btn outline sm" data-uview="${u.id}">View as</button><button class="btn outline sm" data-unote="${u.id}">Note</button>${g.own_google?'':`<button class="btn outline sm" data-ushare="${u.id}" data-on="${g.shared_google?0:1}" title="Lets this customer skip step 1 and upload through YOUR Google project — they then use up your daily uploads">${g.shared_google?'Stop sharing my Google project':'Share my Google project'}</button>`}<button class="btn outline sm" data-upw="${u.id}">Reset password</button><button class="btn bad sm" data-ublock="${u.id}">Block</button>`:''}
+      ${u.status==='blocked'?`<button class="btn outline sm" data-uunblock="${u.id}">Unblock</button><button class="btn bad sm" data-udel="${u.id}">Delete login</button>`:''}</div>
+    <div id="ua-${u.id}" class="hide" style="flex-basis:100%;min-width:0"></div></div>`}).join('')
+    :'<span class="mut sm">No accounts yet. People create one on the sign-up page; you approve them here.</span>';
+  const act=(sel,fn)=>$$(sel).forEach(b=>b.onclick=()=>once(()=>fn(b),b));const by=id=>U.find(u=>u.id===+id);
+  const edit=(id,body)=>api('/api/admin/users/'+id,'POST',body);
+  act('[data-uok]',async b=>{await api(`/api/admin/users/${b.dataset.uok}/approve`,'POST');toast('Approved — they can sign in now');loadUsers();loadMe()});
+  act('[data-uallow]',async b=>{await edit(b.dataset.uallow,{channel_limit:+b.dataset.n});toast('Allowed');loadUsers();loadMe()});
+  act('[data-uplan]',async b=>{const r=await api(`/api/admin/users/${b.dataset.uplan}/allow-plan`,'POST',{plan:b.dataset.plan});toast(`The plan “${b.dataset.plan}” is on`+(r.expires?' until '+new Date(r.expires).toLocaleDateString([], {dateStyle:'medium'}):''));loadUsers();loadMe()});
+  act('[data-uclose]',async b=>{await edit(b.dataset.uclose,{close_request:true});loadUsers();loadMe()});
+  act('[data-ublock]',async b=>{if(!confirm(`Block ${by(b.dataset.ublock).name}? They are signed out at once and their uploads stop. Their data is kept.`))return;await edit(b.dataset.ublock,{status:'blocked'});loadUsers()});
+  act('[data-uunblock]',async b=>{await edit(b.dataset.uunblock,{status:'active'});loadUsers()});
+  act('[data-udel]',async b=>{if(!confirm(`Remove the login of ${by(b.dataset.udel).name}? This cannot be undone.`))return;await api('/api/admin/users/'+b.dataset.udel,'DELETE');loadUsers();loadMe()});
+  act('[data-unote]',async b=>{const u=by(b.dataset.unote),t=prompt('Your note about this customer (payment, phone, …):',u.note||'');if(t===null)return;await edit(u.id,{note:t});loadUsers()});
+  act('[data-upw]',async b=>{const u=by(b.dataset.upw);if(!confirm(`Give ${u.name} a new temporary password? Their current password stops working.`))return;const r=await api(`/api/admin/users/${u.id}/reset-password`,'POST');prompt('Send this temporary password to the customer (shown only once). They change it after signing in:',r.password)});
+  act('[data-ushare]',async b=>{const on=b.dataset.on==='1';if(on&&!confirm('Let this customer upload through YOUR Google project?\n\nTheir uploads then count against your own daily allowance (about 6 a day in total). Use this only for testing or while they set up their own project.'))return;await api(`/api/admin/users/${b.dataset.ushare}/shared-google`,'POST',{on});loadUsers()});
+  act('[data-uview]',async b=>{await api(`/api/admin/users/${b.dataset.uview}/view`,'POST');location.href='/'});
+  $$('[data-ulim]').forEach(inp=>inp.onchange=()=>once(async()=>{await edit(inp.dataset.ulim,{channel_limit:+inp.value});toast('Channel limit saved');loadUsers()}));
+  $$('[data-uacc]').forEach(b=>b.onclick=()=>{const id=+b.dataset.uacc;if(UOPEN.has(id)){UOPEN.delete(id);$('#ua-'+id).classList.add('hide');$('#ua-'+id).innerHTML='';return}once(()=>openAccess(id),b)});
+  const pick=$('#lg-acc'),was=pick.value;pick.innerHTML='<option value="">All customers</option>'+U.map(u=>`<option value="${u.id}">${esc(u.name)} (${esc(u.email)})</option>`).join('');if(U.some(u=>String(u.id)===was))pick.value=was;
+  try{await loadAcl()}catch(e){fail(e)}
+  loadRazorpay().catch(fail);
+  [...UOPEN].forEach(id=>{if($('#ua-'+id))openAccess(id).catch(fail);else UOPEN.delete(id)});
+  loadLog(false).catch(()=>{});
+}
+const PERIOD={monthly:'per month',yearly:'per year',once:'one-time'};
+function rzPaint(k){
+  $('#rz-badge').className='badge '+(k.enabled?(k.mode==='live'?'uploaded':'queued'):'outline');
+  $('#rz-badge').textContent=k.enabled?(k.mode==='live'?'Live — real money':'Test mode — no real money'):'Not set up';
+  $('#rz-state').innerHTML=`Key ID: ${k.key_set?'saved ✓ (ends in <b>'+esc(k.key_end)+'</b>)':'<b>not saved</b>'} · Key Secret: ${k.secret_set?'saved ✓':'<b>not saved</b>'} · Webhook secret: ${k.webhook_set?'saved ✓':'<b>not saved</b> (needed so a payment is applied even when the customer closes the page)'}`;
+  $('#rz-url').textContent=k.webhook_url||'';$('#rz-id').value='';$('#rz-secret').value='';$('#rz-wh').value='';
+}
+async function loadRazorpay(){
+  rzPaint(await api('/api/admin/razorpay'));
+  const rows=(await api('/api/admin/payments')).payments,st={paid:['Paid','uploaded'],created:['Started','queued'],failed:['Failed','failed'],refused:['Test payment — not applied','failed']};
+  $('#rz-pays').innerHTML=rows.length?`<div class="tw"><table><thead><tr><th>Date</th><th>Customer</th><th>Plan</th><th>Amount</th><th>Status</th></tr></thead><tbody>${rows.map(r=>`<tr><td>${esc(new Date(r.paid_at||r.created_at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}))}</td><td><b>${esc(r.brand||r.name)}</b> <span class="mut sm">${esc(r.email)}</span></td><td>${esc(r.plan)}</td><td>${esc(inr(r.amount))}${r.mode==='test'?' <span class="badge queued" title="Made with test keys — no real money">TEST</span>':''}${r.via==='manual'?' <span class="badge outline" title="Paid by UPI, checked and allowed by you">UPI</span>':''}</td><td><span class="badge ${(st[r.status]||['',''])[1]}">${esc((st[r.status]||[r.status])[0])}</span>${r.note?`<span class="mut sm" style="display:block">${esc(r.note)}</span>`:''}${r.payment_id?`<span class="mut sm" style="display:block">${esc(r.payment_id)}</span>`:''}</td></tr>`).join('')}</tbody></table></div>`
+    :'<span class="mut sm">No payments yet.</span>';
+}
+$('#rz-save').onclick=()=>once(async()=>{const b={key_id:$('#rz-id').value.trim(),key_secret:$('#rz-secret').value.trim(),webhook_secret:$('#rz-wh').value.trim()};
+  if(!b.key_id&&!b.key_secret&&!b.webhook_secret)throw new Error('Paste at least one key first');rzPaint(await api('/api/admin/razorpay','POST',b));toast('Saved — press Check keys');await loadAcl()},$('#rz-save'));
+$('#rz-check').onclick=()=>once(async()=>{const r=await api('/api/admin/razorpay/check','POST');toast(r.message,!r.ok)},$('#rz-check'));
+$('#rz-clear').onclick=()=>once(async()=>{if(!confirm('Remove the Razorpay keys? Customers then see only the UPI steps. Payments already made stay in the list.'))return;rzPaint(await api('/api/admin/razorpay','POST',{clear:true}));toast('Keys removed');await loadAcl()},$('#rz-clear'));
+$('#rz-copy').onclick=async()=>{const u=$('#rz-url').textContent;try{await navigator.clipboard.writeText(u);toast('Copied')}catch(e){prompt('Copy this address:',u)}};
+$('#rz-reload').onclick=()=>once(loadRazorpay,$('#rz-reload'));
+$('#pay-save').onclick=()=>once(async()=>{await api('/api/admin/pay','POST',{upi:$('#pay-upi').value,price:$('#pay-price').value,text:$('#pay-text').value});toast('Saved — customers see this when they ask for more channels')},$('#pay-save'));
+$('#us-test').onclick=()=>once(async()=>{const r=await api('/api/admin/selftest');alert(r.ok?'OK — a customer\'s copy is separate from yours on this database ('+r.database+').\n\nA test record written in a customer copy was not visible in your own copy.':'PROBLEM — the copies are not separate. Do not approve customers; send these details for support:\n'+JSON.stringify(r))},$('#us-test'));
+
+paintIcons();
+loadMe();
+(()=>{const q=new URLSearchParams(location.search);if(q.has('limit')){history.replaceState(null,'',location.pathname);window.PLANOPEN=true;go('settings');setTimeout(()=>toast(q.get('limit'),true),500);return}
+  if(!q.has('connected')&&!q.has('connect_error')&&!q.has('gmail')&&!q.has('gmail_error'))return go('dashboard');
+  history.replaceState(null,'',location.pathname);
+  if(q.has('connect_error')){const msg=q.get('connect_error');loadMe().then(()=>{if(window.OBLOCK){go('start');toast('The channel was not connected: '+msg+' — read the steps on this page again',true)}
+      else{window.GUIDEOPEN='youtube';go('guide');toast('The channel was not connected: '+msg+' — see step “YouTube channel connected” for what to do',true)}});return}
+  if(q.has('gmail_error')){window.GUIDEOPEN='gmail';go('guide');setTimeout(()=>toast('Gmail was not connected: '+q.get('gmail_error')+' — see step “Gmail connected”',true),400);return}
+  if(q.has('gmail')){go('settings');setTimeout(()=>toast('Gmail connected'),400);return}
+  window.JUSTCONNECTED=q.get('new')==='1'?+q.get('connected'):null;go('settings');
+  setTimeout(()=>toast(q.get('new')==='1'?'Channel connected':'Channel reconnected — its login is fresh again'),400)})();
+setInterval(()=>{if(!$('#p-dashboard').classList.contains('hide')&&!CUR)loadDash().catch(()=>{})},30000);
