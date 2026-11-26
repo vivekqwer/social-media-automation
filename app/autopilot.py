@@ -16,9 +16,15 @@ from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
 from .render import run_render
 
+SLOT_LOCK = __import__("threading").RLock()  # one hand-out of publish slots at a time (PC folder, un-parking)
 MAX_QUEUED_PER_DEST = 30  # don't pile up an unbounded backlog (the usual number; see queue_cap)
 QUEUE_CAP_RANGE = (10, 300)
 MIN_FREE_GB = 0.7  # the sources wait while the server's disk has less free space than this
+# customers' sources wait earlier, so a filling disk stops them before the owner's (the disk is shared)
+CUSTOMER_MIN_FREE_GB = float(os.getenv("CUSTOMER_MIN_FREE_GB") or "1.5")
+# clips waiting for approval are not in the upload queue (queue_cap) and the disk clean-up keeps them:
+# a source that makes review clips pauses while this many are waiting in its account
+REVIEW_CAP = int(os.getenv("REVIEW_CAP") or "40")
 OLDER_DEPTH = 300  # a channel source with nothing new goes back through this many of the channel's uploads
 
 
@@ -43,6 +49,27 @@ def disk_free_gb() -> float | None:
         return shutil.disk_usage(BASE_DATA_DIR).free / 1e9
     except OSError:
         return None
+
+
+def min_free_gb() -> float:
+    from . import tenant
+
+    return MIN_FREE_GB if tenant.current() == tenant.OWNER else max(MIN_FREE_GB, CUSTOMER_MIN_FREE_GB)
+
+
+def review_waiting(s) -> int:
+    """Clips of this account waiting for approval: rendered and not queued, or still being made for review."""
+    return s.query(Clip).filter((Clip.status == "rendered")
+                                | (Clip.status.in_(["fetching", "rendering"]) & Clip.autoqueue.isnot(True))).count()
+
+
+def review_full(s) -> str:
+    """'' or the plain status line when too many clips wait for review."""
+    n = review_waiting(s)
+    return (f"paused: {n} clips are waiting for your review (Clips → Review). New clips are made again when you "
+            "approve or discard some.") if n >= REVIEW_CAP else ""
+
+
 # clips that already own a publish time (incl. ones still waiting for the helper PC or rendering)
 HOLDS_SLOT = ["fetching", "rendering", "draft", "rendered", "queued", "uploading", "uploaded"]
 
@@ -216,7 +243,7 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
                  destination_id=ch.destination_id, credit_on=ch.mode != "own")
         s.add(c)
         s.commit()
-        if ch.captions:
+        if ch.captions and acl.feature("clips.captions"):  # "Captions from YouTube" switched off: none are added
             try:
                 c.captions = parse_json3(p.caption_track, c.start, c.end) if p.caption_track else \
                     fetch_cues(p.video_id, c.start, c.end)
@@ -278,6 +305,12 @@ def run_channel(channel_id: int):
                 ch.last_run = utcnow()
                 s.commit()
                 return
+            makes_review = bool(ch.review_first) or not acl.auto_upload()
+            full = review_full(s) if makes_review else ""
+            if full:  # unreviewed clips must not grow without end on the shared disk
+                ch.last_status, ch.last_run = full, utcnow()
+                s.commit()
+                return
             if ch.kind == "reel":
                 if ch.auto_scripts and not any(not x.get("used") for x in (ch.scripts or [])) and not ch.script_wanted:
                     topic = trending_phrase(ch)  # ask the helper's local AI for a script on today's trend
@@ -323,7 +356,7 @@ def run_channel(channel_id: int):
                 s.commit()
                 return
             free = disk_free_gb()
-            if free is not None and free < MIN_FREE_GB:  # a large waiting list must never fill the disk
+            if free is not None and free < min_free_gb():  # a large waiting list must never fill the disk (customers first)
                 ch.last_status = f"paused: the server's disk is almost full ({free:.1f} GB free) - new clips wait until uploads free some space"
                 ch.last_run = utcnow()
                 s.commit()
@@ -333,10 +366,11 @@ def run_channel(channel_id: int):
             used = {v for (v,) in s.query(Project.video_id).filter(Project.video_id.isnot(None))}
             seen |= used
             if topic:  # Creative Commons videos only, found by YouTube search
+                youtube.SEARCH_NOTE.set("")
                 ids = youtube.api_search_cc(search_q, seen, ch.videos_per_run * 3)
                 if not ids:
-                    log.append("no new Creative Commons videos found for this topic" if quota.can_search()
-                               else "search skipped: today's YouTube quota is kept for uploads")
+                    why = youtube.SEARCH_NOTE.get()
+                    log.append(f"search skipped: {why}" if why else "no new Creative Commons videos found for this topic")
             else:
                 ids = [i for i in list_video_ids(ch.resolved_url, ch.videos_per_run * 4) if i not in seen]
                 if not ids:  # the newest videos are all used: go back through the channel's older uploads
@@ -351,6 +385,10 @@ def run_channel(channel_id: int):
                                                Clip.status.in_(["queued", "fetching", "rendering"])).count()
                 if waiting >= queue_cap():  # several sources run at once: stop as soon as the list is full
                     log.append(f"paused: {waiting} clips already queued")
+                    break
+                full = review_full(s) if makes_review else ""
+                if full:
+                    log.append(full)
                     break
                 seen.add(vid)  # mark first, so a failing video is never retried forever or duplicated
                 ch.seen = list(seen)
@@ -520,3 +558,69 @@ def resume_after_analysis(pid: int):
         quick_run(pid)
     else:
         make_clips_for_project(pid)
+
+
+# ---------------------------------------------------------------- parked clips back into the line, a few a day
+PARKED = "Parked:%"  # waiting to go back into the line ("Parked, not used: ..." = a repeat, stays out)
+LIVE_STATES = ("fetching", "rendering", "rendered", "queued", "uploading", "uploaded")
+UNPARK_MIN_FREE_GB = 1.5
+
+
+def same_moment(s, c):
+    """Another clip of the same source video that covers (part of) the same moment and is made, waiting or on
+    YouTube -> it would look like the same video twice on the channel. None when the moment is new."""
+    return s.query(Clip).filter(Clip.project_id == c.project_id, Clip.id != c.id, Clip.status.in_(LIVE_STATES),
+                                Clip.removed_at.is_(None), Clip.start < c.end, Clip.end > c.start).first()
+
+
+def unpark_due(force: int | None = None) -> dict:
+    """Once a day: up to `unpark_per_day` parked drafts (the oldest first) are made again and queued on the next free
+    daily slot. A parked clip that repeats a moment already made or on YouTube is never used (its note says why).
+    Waits while the server's disk is low, so the line grows only as fast as uploads free space."""
+    from .db import get_setting, set_setting
+
+    try:
+        per_day = int(force if force is not None else (get_setting("unpark_per_day") or 0))
+    except (TypeError, ValueError):
+        per_day = 0
+    out = {"started": 0, "duplicates": 0, "left": 0, "waiting": ""}
+    if per_day <= 0:
+        return out
+    day = utcnow().strftime("%Y-%m-%d")
+    if force is None and get_setting("unpark_day") == day:
+        return out
+    free = disk_free_gb()
+    from .pcfolder import claimed_clips
+
+    with SLOT_LOCK, SessionLocal() as s:
+        rows = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).order_by(Clip.id).all()
+        mine = claimed_clips(s)  # made on the PC and waiting in Clips -> From my PC: not made again here
+        for c in rows:
+            if out["started"] >= per_day:
+                break
+            if c.id in mine:
+                continue
+            other = same_moment(s, c)
+            if other is not None:
+                c.error = (f"Parked, not used: it repeats the moment of clip #{other.id} (same video, same part), "
+                           "so it would look like a duplicate on the channel.")
+                out["duplicates"] += 1
+                continue
+            if free is not None and free < UNPARK_MIN_FREE_GB:
+                out["waiting"] = f"the server's disk is low ({free:.1f} GB free)"
+                break
+            p = s.get(Project, c.project_id)
+            ch = s.get(Channel, p.channel_ref) if p and p.channel_ref else None
+            if ch is not None:
+                slot = _next_slot(s, ch.gap_hours, c.destination_id or ch.destination_id, ch.post_times, ch.tz_offset or 0)
+            else:
+                slot = _next_slot(s, 24, c.destination_id, "18:00", -330)
+            c.status, c.error, c.autoqueue, c.publish_at = "fetching", None, True, slot
+            c.job_lease, c.fetch_tries, c.fetch_since = None, 0, utcnow()
+            s.commit()
+            out["started"] += 1
+        s.commit()
+        out["left"] = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).count()
+    if force is None and not out["waiting"]:
+        set_setting("unpark_day", day)
+    return out

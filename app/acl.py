@@ -67,6 +67,7 @@ PERMS = [
     ("source.trending", "sources", "Source type: trending topics", True),
     ("source.reel", "sources", "Source type: original reels from scripts", True),
     ("source.viral", "sources", "Viral picks (5 a day)", True),
+    ("ideas.autotune", "sources", "Auto-tune: sources make more of what works (Ideas → What works)", True),
 
     ("clips.create", "clips", "Make a clip from a video link", True),
     ("clips.own_video", "clips", "Upload their own video file", True),
@@ -79,6 +80,8 @@ PERMS = [
     ("clips.face", "clips", "Face photo for thumbnails", True),
     ("clips.captions", "clips", "Captions from YouTube", True),
     ("clips.voice", "clips", "Voice-over (make or upload)", True),
+    ("clips.reminder", "clips", "Like, share & subscribe reminder on their videos", True),
+    ("clips.pc_folder", "clips", "Videos from a folder on their PC (Clips → From my PC)", True),
 
     ("uploads.youtube", "uploads", "Upload to YouTube at all", True),
     ("uploads.auto", "uploads", "Automatic upload without review", True),
@@ -87,12 +90,19 @@ PERMS = [
     ("gmail.connect", "extras", "Connect / disconnect Gmail", True),
     ("gmail.send", "extras", "Permission mails to creators (send, and read their replies)", True),
     ("permissions.manage", "extras", "Permission inbox (find creators, record yes / no)", True),
+    ("permissions.auto", "extras", "Permission mails sent by themselves (the account still switches it on)", True),
     ("ideas.competitors", "extras", "Competitor tracker", True),
     ("meta.use", "extras", "Instagram + Facebook", True),
     ("telegram.use", "extras", "Telegram", True),
+    ("phone.use", "extras", "Phone notifications (ntfy app) and news alerts (video live, views, subscribers)", True),
+    ("keywords.use", "extras", "Keyword helper (research, better keywords, keywords refreshed before upload)", True),
+    ("backup.use", "extras", "Backup & restore (download, check and restore a backup; daily backups always run)", True),
+    ("strikes.reply", "extras", "Strike responder: the request to the creator to take a complaint back", True),
+    ("whatsapp.use", "extras", "WhatsApp alerts", True),
+    ("watchdog.repair", "extras", "Self-repair (the system fixes known problems by itself)", True),
     ("pexels.use", "extras", "Pexels stock photos", True),
     ("ai.reels", "extras", "AI reels (local AI on the helper PC)", True),
-    ("helper.manage", "extras", "Helper PC (download, approve, remove)", True),
+    ("helper.manage", "extras", "Helper PC (download, helper key, approve, remove)", True),
     ("google.keys", "extras", "Change their own Google project keys", True),
     ("cookies.manage", "extras", "YouTube cookies for the server", True),
     ("affiliate.use", "extras", "Affiliate links", True),
@@ -155,6 +165,7 @@ ROUTES = [
     ("GET", "/healthz", ANYONE, None),
     ("GET", "/helper/phone.py", ANYONE, None),  # the Android phone helper: a public file of the repository, no secrets
     ("GET", "/helper/setup.sh", ANYONE, None),
+    ("GET", "/helper/install.ps1", ANYONE, None),  # the Windows helper's one-time setup: a public file, the key comes on the command line
     ("GET", "/media/{cid}/{exp}/{sig}.mp4", ANYONE, None),  # signed, short-lived link for Instagram / Facebook
     ("POST", "/api/pay/razorpay/webhook", ANYONE, None),  # Razorpay's own call, proven by its signature (app/payments.py)
     # --- the account itself
@@ -228,18 +239,19 @@ ROUTES = [
     ("GET", "/api/strikes", "page.alerts", None),
     ("GET", "/api/settings/strike-reply", SIGNED, None),
     ("POST", "/api/settings/strike-reply", "page.alerts", "Changed automatic sending of the request after a strike"),  # ON also needs gmail.send (inside)
-    ("POST", "/api/strikes/{sid}/send", "gmail.send", "Sent a request to a creator to retract a complaint"),
+    ("POST", "/api/strikes/{sid}/send", "strikes.reply", "Sent a request to a creator to retract a complaint"),  # gmail.send inside
     ("POST", "/api/strikes/{sid}/solved", "page.alerts", "Marked a strike case as solved"),
     ("POST", "/api/strikes/{sid}/release", "sources.edit", "Allowed a creator again after a strike"),
     ("POST", "/api/strikes/{sid}/block", "sources.edit", "Stopped using a creator after a strike"),
     ("POST", "/api/strikes/{sid}/hide-public", "channels.pause", "Set a struck creator's other videos to private"),
     ("GET", "/api/destinations", "page.settings", None),
     ("GET", "/api/backup", "page.settings", None),  # Backup & restore (My channels): only ever this account's own copy
-    ("GET", "/api/backup/download", "page.settings", "Downloaded a backup"),
-    ("GET", "/api/backup/files/{name}", "page.settings", None),
-    ("POST", "/api/backup/check", "page.settings", None),  # reads the file and shows what is in it; nothing changes
-    ("POST", "/api/backup/files/{name}/check", "page.settings", None),
-    ("POST", "/api/backup/restore", "page.settings", "Restored a backup (all data of this copy replaced)"),
+    # the backup itself (download, check, restore) has its own switch; "My channels page" is checked inside as well
+    ("GET", "/api/backup/download", "backup.use", "Downloaded a backup"),
+    ("GET", "/api/backup/files/{name}", "backup.use", None),
+    ("POST", "/api/backup/check", "backup.use", None),  # reads the file and shows what is in it; nothing changes
+    ("POST", "/api/backup/files/{name}/check", "backup.use", None),
+    ("POST", "/api/backup/restore", "backup.use", "Restored a backup (all data of this copy replaced)"),
     ("GET", "/api/guide", "page.guide", None),
     ("POST", "/api/guide/errors/clear", "page.guide", None),
     ("POST", "/api/quick", "page.quick", "Started a quick upload"),
@@ -263,7 +275,11 @@ ROUTES = [
     ("POST", "/api/channels/{chid}/destination", "sources.edit", "Changed which channel a source uploads to"),
     ("POST", "/api/channels/{chid}/run", "sources.run", "Ran a source"),
     ("DELETE", "/api/channels/{chid}", "sources.delete", "Deleted a source"),
-    ("POST", "/api/insights/autotune", "sources.edit", "Switched auto-tune on / off"),  # auto-tune changes sources
+    # "What is your channel about?" (Get started and Sources): niches -> topic sources (topic switch, source limit inside)
+    ("GET", "/api/niches", SIGNED, None),
+    ("POST", "/api/niches", "sources.add", "Picked niches (topic sources made for them)"),
+    ("POST", "/api/niches/remove", "sources.edit", "Removed a niche (its sources switched off)"),
+    ("POST", "/api/insights/autotune", "ideas.autotune", "Switched auto-tune on / off"),  # sources.edit inside (it changes sources)
     ("POST", "/api/insights/undo", "sources.edit", "Undid auto-tune (sources back to their own settings)"),
     ("POST", "/api/viral/pick", "source.viral", "Picked a viral video"),
     # --- clips
@@ -275,13 +291,21 @@ ROUTES = [
     ("POST", "/api/clips/{cid}/reupload", "clips.create", "Made a new copy of an uploaded clip"),
     ("POST", "/api/clips/{cid}/get-back", "clips.create", "Asked the helper PC to send a saved video back"),
     ("POST", "/api/upload-video", "clips.own_video", "Uploaded their own video file"),
+    # videos in the folder on the PC (Clips -> From my PC, app/pcfolder.py)
+    ("GET", "/api/pc-items", "clips.pc_folder", None),  # page.clips inside; the other pc-items routes check clips.pc_folder inside
+    ("GET", "/api/pc-items/{iid}/thumb", "clips.pc_folder", None),
+    ("POST", "/api/pc-items/{iid}/approve", "clips.approve", "Approved a video from the PC folder"),
+    ("POST", "/api/pc-items/approve-all", "clips.approve", "Approved every waiting video from the PC folder"),
+    ("POST", "/api/pc-items/{iid}/skip", "clips.discard", "Skipped a video from the PC folder"),
+    ("POST", "/api/pc-items/{iid}/unskip", "clips.discard", None),
+    ("POST", "/api/pc-items/auto", "uploads.auto", "Switched PC-folder videos going up by themselves on / off"),
     ("GET", "/api/clips/{cid}", SIGNED, None),
     ("GET", "/api/clips/{cid}/sync", SIGNED, None),
     ("GET", "/api/clips/{cid}/video", SIGNED, None),
     ("GET", "/api/clips/{cid}/thumbnail", SIGNED, None),
     ("GET", "/api/queue", SIGNED, None),
     ("GET", "/api/keywords", "page.ideas", None),
-    ("POST", "/api/keywords/clip/{cid}", "clips.edit", None),  # a preview only: nothing is saved
+    ("POST", "/api/keywords/clip/{cid}", "keywords.use", None),  # a preview only: nothing is saved (clips.edit inside)
     ("POST", "/api/clips/{cid}/remove", "clips.discard", "Removed a deleted video from the dashboard"),
     ("POST", "/api/clips/{cid}/restore", "clips.discard", "Showed a removed video again"),
     ("GET", "/api/voices", SIGNED, None),
@@ -309,12 +333,20 @@ ROUTES = [
     ("GET", "/api/settings/upload-lead", SIGNED, None),
     ("POST", "/api/admin/upload-lead", SUPER, "Changed how early clips are sent to YouTube"),
     ("POST", "/api/admin/park-waiting", SUPER, "Parked clips that were waiting to be made"),
+    ("POST", "/api/admin/unpark", SUPER, "Parked clips go back into the line a few a day"),
     ("POST", "/api/admin/queue-cap", SUPER, "Changed how many clips may wait before the sources pause"),
     ("GET", "/api/settings/reminder", SIGNED, None),
     ("GET", "/api/phone", SIGNED, None),
-    ("POST", "/api/phone", "telegram.use", "Changed phone notifications"),
-    ("POST", "/api/phone/test", "telegram.use", None),
-    ("POST", "/api/settings/reminder", "clips.edit", "Changed the like & subscribe reminder"),
+    ("POST", "/api/phone", "phone.use", "Changed phone notifications"),
+    ("POST", "/api/phone/test", "phone.use", None),
+    ("GET", "/api/whatsapp", SIGNED, None),
+    ("POST", "/api/whatsapp", "whatsapp.use", "Changed WhatsApp alerts"),  # never the number or the key in the log
+    ("POST", "/api/whatsapp/test", "whatsapp.use", None),
+    ("DELETE", "/api/whatsapp", "whatsapp.use", "Removed WhatsApp alerts"),
+    ("GET", "/api/watchdog", "page.alerts", None),
+    ("POST", "/api/watchdog/check", "watchdog.repair", None),
+    ("POST", "/api/admin/watchdog", SUPER, "Changed self-repair"),
+    ("POST", "/api/settings/reminder", "clips.reminder", "Changed the like & subscribe reminder"),  # clips.edit inside
     ("GET", "/api/settings/comment", SIGNED, None),
     ("POST", "/api/settings/comment", "uploads.comment", "Changed the first comment"),
     ("POST", "/api/clips/{cid}/comment", "uploads.comment", None),
@@ -341,7 +373,7 @@ ROUTES = [
     ("GET", "/api/settings/mail", SIGNED, None),
     ("POST", "/api/settings/mail", "permissions.manage", None),
     ("GET", "/api/settings/perm-auto", "page.ideas", None),
-    ("POST", "/api/settings/perm-auto", "permissions.manage", "Changed: send permission mails by themselves"),  # ON also needs gmail.send (inside)
+    ("POST", "/api/settings/perm-auto", inside("permissions.auto"), "Changed: send permission mails by themselves"),  # OFF always possible; ON needs permissions.auto + gmail.send
     ("POST", "/api/ideas/competitors", "ideas.competitors", "Added a channel to the competitor tracker"),
     ("DELETE", "/api/ideas/competitors", "ideas.competitors", None),
     ("POST", "/api/ideas/scan", "ideas.competitors", None),
@@ -368,7 +400,14 @@ ROUTES = [
     ("GET", "/api/workers", SIGNED, None),
     ("POST", "/api/workers/{wid}/approve", "helper.manage", "Approved a helper PC"),
     ("DELETE", "/api/workers/{wid}", "helper.manage", "Removed a helper PC"),
+    ("POST", "/api/workers/{wid}/pc-folder", "helper.manage", "Changed the folder of videos a helper PC watches"),
+    # helper key (app/enroll.py): helpers that carry it join by themselves; only the account's admin sees it
+    ("GET", "/api/helper/key", "helper.manage", None),
+    ("POST", "/api/helper/key/show", "helper.manage", "Looked at the helper key (install commands)"),
+    ("POST", "/api/helper/key/rotate", "helper.manage", "Made a new helper key (the old one stopped)"),
+    ("POST", "/api/helper/key/revoke", "helper.manage", "Switched the helper key off"),
     ("POST", "/api/worker/register", HELPER, None),
+    ("GET", "/api/worker/package", HELPER, None),  # the helper program for the install command (needs the helper key)
     ("GET", "/api/worker/jobs", HELPER, None),
     ("GET", "/api/worker/backup", HELPER, None),
     ("GET", "/api/worker/update", HELPER, None),
@@ -380,6 +419,9 @@ ROUTES = [
     ("POST", "/api/worker/archived/{cid}", HELPER, None),
     ("POST", "/api/worker/restore/{cid}/{name}", HELPER, None),
     ("POST", "/api/worker/archive-inventory", HELPER, None),
+    ("POST", "/api/worker/pc-items", HELPER, None),  # the folder of videos on the PC: details only, never the video
+    ("POST", "/api/worker/pc-thumb/{iid}", HELPER, None),
+    ("POST", "/api/worker/pc-file/{iid}", HELPER, None),  # the video itself, only when the server asked for it
     ("POST", "/api/worker/fail/{cid}", HELPER, None),
     ("POST", "/api/worker/analysis/{pid}", HELPER, None),
 ]

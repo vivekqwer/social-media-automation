@@ -256,7 +256,8 @@ def inventory(s, wid: int, names) -> dict:
     server -> saved again; on the PC only -> marked missing (a Problems line). Nothing is deleted because of this."""
     have = {str(x) for x in names}
     now, gone, resave, found = utcnow(), 0, 0, 0
-    for c in s.query(Clip).filter(Clip.archived_at.isnot(None), Clip.archived_by == wid):
+    for c in s.query(Clip).filter(Clip.archived_at.isnot(None), Clip.archived_by == wid, Clip.pc_item_id.is_(None)):
+        # (a video from the PC folder is not in the archive folder: the folder scan says when it is missing)
         need = [("video", c.archived_sha)] + ([("source", c.archived_src_sha)] if c.archived_src_sha else [])
         missing = [n for n, sha in need if not (saved_names(c.id, n, sha) & have)]
         if not missing:

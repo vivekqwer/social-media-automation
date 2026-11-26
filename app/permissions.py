@@ -543,14 +543,15 @@ def auto_public() -> dict:
     """What the dashboard's switch row shows."""
     from . import acl, gmail
 
-    allowed = acl.allowed("gmail.send")
+    off = next((k for k in ("permissions.auto", "gmail.send") if not acl.allowed(k)), None)
+    allowed = off is None
     last = _ts(get_setting(LAST_KEY))
     p = paused()
     return {"auto": auto_on(), "gmail": gmail.connected_email() or "", "allowed": allowed, "per_day": gmail.MAX_PER_DAY,
             "sent_today": gmail._sent_today(), "spread_hours": int(SPREAD.total_seconds() // 3600),
             "next_at": ((last + SPREAD).isoformat() + "Z") if last and last + SPREAD > utcnow() else None,
             "since": get_setting(SINCE_KEY) or None, "paused": p["why"] if p else "",
-            "note": "" if allowed else acl.message("gmail.send")}
+            "note": "" if allowed else acl.message(off)}
 
 
 def migrate_auto_send() -> str:
@@ -624,6 +625,7 @@ def auto_send_due() -> str | None:
         return None
     try:
         if not auto_on() or paused() or not acl.allowed("gmail.send") or not acl.allowed("permissions.manage") \
+                or not acl.allowed("permissions.auto") \
                 or not gmail.connected_email():
             return None
         if gmail._sent_today() >= gmail.MAX_PER_DAY:

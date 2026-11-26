@@ -16,3 +16,7 @@ backups/
 worker/helper_code.txt
 archive/
 worker/archive/
+worker/enroll_key.txt
+worker/enroll_key.tmp
+worker/helper_id.txt
+worker/enroll_key.refused

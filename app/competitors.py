@@ -73,8 +73,8 @@ def scan() -> dict:
     d = _load()
     found = []
     for c in d["channels"]:
-        if quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST:
-            break  # never use the upload budget
+        if quota.DAILY_UNITS - quota.used() < 2 * quota.UPLOAD_COST or not quota.shared_room(5 * quota.COST["read"]):
+            break  # never use the upload budget (nor, on the owner's project, the owner's uploads)
         try:
             found += _scan_channel(c)
         except Exception as e:  # noqa: BLE001

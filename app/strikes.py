@@ -176,10 +176,11 @@ def settings_public() -> dict:
     """What the dashboard's switch row shows."""
     from . import acl, gmail
 
-    allowed = acl.allowed("gmail.send")
+    off = next((k for k in ("strikes.reply", "gmail.send") if not acl.allowed(k)), None)
+    allowed = off is None
     return {**settings(), "gmail": gmail.connected_email() or "", "allowed": allowed, "per_day": AUTO_PER_DAY,
             "sent_today": _sent_today(),
-            "note": "" if allowed else acl.message("gmail.send")}
+            "note": "" if allowed else acl.message(off)}
 
 
 # ---------------------------------------------------------------- the never-use list
@@ -1176,8 +1177,9 @@ def send_request(case_id: int, to: str | None = None, by: str = "hand") -> dict:
     Raises ValueError with words for the owner."""
     from . import acl, gmail
 
-    if not acl.allowed("gmail.send"):
-        raise ValueError(acl.message("gmail.send"))
+    for key in ("strikes.reply", "gmail.send"):  # the Super Admin's switches (also for the automatic round)
+        if not acl.allowed(key):
+            raise ValueError(acl.message(key))
     if not gmail.connected_email():
         raise ValueError("Gmail is not connected. Connect it in My channels → Gmail, then press Send again.")
     cap = AUTO_PER_DAY if by == "auto" else HAND_PER_DAY
@@ -1262,7 +1264,7 @@ def send_due() -> int:
     confirmed the strike, and the address came from YouTube's notice naming the creator — at most 3 a day."""
     from . import acl, gmail
 
-    if not settings()["auto"] or not acl.feature("gmail.send") or not gmail.connected_email():
+    if not settings()["auto"] or not acl.feature("gmail.send") or not acl.feature("strikes.reply") or not gmail.connected_email():
         return 0
     with SessionLocal() as s:
         ids = [c.id for c in s.query(StrikeCase).filter(StrikeCase.kind == "copyright", StrikeCase.status == "open",

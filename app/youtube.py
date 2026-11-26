@@ -390,25 +390,52 @@ RISKY = re.compile(r"\b(official (music )?video|lyrics?|full (movie|film|episode
                    r"ft|feat|album|movie|episode|serial|t-series|zee|sony|star plus|colors tv|netflix|ipl|wwe)\b", re.I)
 
 
+from contextvars import ContextVar
+
+SEARCH_NOTE: ContextVar[str] = ContextVar("search_note", default="")  # why the last topic search did not ask YouTube
+
+
 def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
     """Creative Commons videos (4-20 min, so we clip a moment instead of re-posting a whole Short) that match the
-    topic best, skipping ids already used and risky titles."""
-    yt, out, token = client(), [], None
-    for _ in range(pages):
-        if not quota.can_search():
+    topic best, skipping ids already used and risky titles.
+
+    Results of the last 24 hours are shared by every account (app/search_cache.py): YouTube is only asked when the
+    saved list holds nothing new for this account, and then only for the next page, when it is this account's turn
+    (quota.search_block: uploads first, then a fair share per account)."""
+    from . import search_cache
+
+    SEARCH_NOTE.set("")
+    out = []
+
+    def take(items):
+        for vid, title in items:
+            if vid and vid not in skip and vid not in out and not RISKY.search(title or ""):
+                out.append(vid)
+
+    q = search_cache.norm(topic)  # the words the cache is kept under are exactly the words searched
+    entry = search_cache.get(q)
+    take(entry["items"] if entry else [])
+    project = search_cache.project_key(google_client()[0])  # page tokens are only reused by the project that got them
+    yt, asked = None, 0
+    while not out and asked < pages and not search_cache.exhausted(entry):  # only when no unused video is left
+        why = quota.search_block()
+        if why:
+            quota.note_turn(False)
+            SEARCH_NOTE.set(why)
             break
-        r = yt.search().list(part="snippet", q=topic, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
-                             safeSearch="moderate", maxResults=50, pageToken=token,
+        yt = yt or client()
+        r = yt.search().list(part="snippet", q=q, type="video", videoLicense="creativeCommon", order="relevance", videoDuration="medium",
+                             safeSearch="moderate", maxResults=50, pageToken=search_cache.next_token(entry, project),
                              regionCode="IN", relevanceLanguage="hi").execute()  # Indian / Hindi videos first
         quota.spend("search")
         quota.note_search()
-        for it in r.get("items", []):
-            vid = it["id"].get("videoId")
-            if vid and vid not in skip and vid not in out and not RISKY.search(it["snippet"].get("title", "")):
-                out.append(vid)
-        token = r.get("nextPageToken")
-        if len(out) >= n or not token:
-            break
+        quota.note_turn(True)
+        asked += 1
+        page = [((it.get("id") or {}).get("videoId"), (it.get("snippet") or {}).get("title", "")) for it in r.get("items", [])]
+        entry = search_cache.add_page(q, page, r.get("nextPageToken"), project)
+        take(page)
+    if not out and not SEARCH_NOTE.get() and entry and not asked:
+        SEARCH_NOTE.set("every video found for this topic today is used already (searched again tomorrow)")
     return out[:n]
 
 

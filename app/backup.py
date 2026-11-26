@@ -53,10 +53,12 @@ FACE_RE = re.compile(r"^[A-Za-z0-9_.-]{1,80}\.png$")
 # (passwords and sign-ins, Super Admin decisions, daily allowance counters)
 PROTECTED = {"admin_pw", "admin_emails", "session_gen", "reset_state", "oauth_state", "self_test", "shared_google",
              "onboarding", "acl_plans", "pay_info", "razorpay", "plan_prices",
-             "strike_blocked", "strike_watch_init",
+             "strike_blocked", "strike_watch_init",  # the never-use list after a strike: an older backup must not bring a struck creator back
+             "helper_enroll", "helper_removed",  # helper key: an old backup must not bring back a key made new or switched off
+             "watchdog_cfg", "watchdog_state",  # self-repair: the Super Admin's switch, and the counters that bound the repairs
              # sending permission mails by itself: an older backup must never switch it back on, move its start or lift a pause
-             "perm_auto_send", "perm_auto_since", "perm_auto_paused", "perm_mail_last"}  # the never-use list after a strike: an older backup must not bring a struck creator back
-PROTECTED_PREFIX = ("quota", "gmail_sent:", "gmail_owner:", "strike_sent:")
+             "perm_auto_send", "perm_auto_since", "perm_auto_paused", "perm_mail_last"}
+PROTECTED_PREFIX = ("quota", "gmail_sent:", "gmail_owner:", "gmail_owner_wd:", "strike_sent:", "wa_sent:")
 
 
 class BackupError(Exception):

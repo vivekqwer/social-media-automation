@@ -77,9 +77,14 @@ def find(topic: str) -> dict:
         source, why = "saved", "YouTube's search is not set up for this account"
     elif not quota.can_search():
         source, why = "saved", "today's YouTube search budget is used (it resets at 1:30 PM IST)"
+    elif quota.on_shared_budget() and quota.search_block():  # on the owner's Google project: a fair, capped turn only
+        quota.note_turn(False)
+        source, why = "saved", quota.search_block()
     else:
         try:
             videos = _search_live(topic)
+            if quota.on_shared_budget():
+                quota.note_turn(True)
             set_setting(_ckey(topic), json.dumps({"at": utcnow().isoformat() + "Z", "videos": videos[:25]}))
         except Exception as e:  # noqa: BLE001  (a failed search never stops the upload)
             log.warning("own video topic search: %s", str(e)[:200])

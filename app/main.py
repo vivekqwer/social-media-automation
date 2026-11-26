@@ -10,7 +10,7 @@ from datetime import timedelta, timezone
 from datetime import datetime
 from pathlib import Path
 
-from typing import Literal
+from typing import Annotated, Literal
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
@@ -20,13 +20,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import func, update
 
-from . import accounts, acl, archive, auth, payments, quota, scheduler, tenant, workers, youtube
+from . import accounts, acl, archive, auth, enroll, payments, pcfolder, quota, scheduler, tenant, workers, youtube
 from .autopilot import _next_slot, resume_after_analysis, run_channel
 from .captions import fetch_cues
 from .crypto import TokenError, decrypt, encrypt, encrypt_existing
 from .config import APP_PASSWORD, APP_USER, BASE_URL, COOKIES_PATH, DATA_DIR, IS_LOCAL
 from .monitor import check_uploads
-from .db import (Alert, Base, Channel, Clip, Destination, Project, SessionLocal, Worker, engine, get_setting, migrate,
+from .db import (Alert, Base, Channel, Clip, Destination, PcItem, Project, SessionLocal, Worker, engine, get_setting, migrate,
                  Setting, adopt_orphans, main_destination, set_setting, to_dict, utcnow)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import fetch_info, friendly_error, is_cc, video_id_from_url
@@ -51,7 +51,9 @@ PUBLIC_PATHS = {
     "/auth/reset/start", "/auth/callback",
     "/api/pay/razorpay/webhook",  # Razorpay's own call: checked with the webhook secret inside the route
     "/helper/phone.py", "/helper/setup.sh",  # the Android phone helper, fetched with curl (public files of this repository)
+    "/helper/install.ps1",  # the Windows helper's one-time setup (a public file; the key is given to it on the command line)
 }
+ENROL_PATHS = {"/api/worker/register", "/api/worker/package"}  # a helper without a token yet: key or helper code
 SERVER_VERSION = os.getenv("RAILWAY_GIT_COMMIT_SHA") or ""  # the helper PC updates itself to match
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 YT_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
@@ -122,6 +124,26 @@ class ChangePwIn(BaseModel):
     new_password: str = Field(max_length=200)
 
 
+# Dashboard reads of clips (GET /api/clips...) at most this many at once: a burst of them (many tabs, a fast scroll)
+# must never take every database connection from the uploads and the other background work (24 Nov: QueuePool
+# timeout). A threading semaphore polled without blocking works with any event loop and never ties up a thread.
+READ_SLOTS = int(os.getenv("CLIP_READ_SLOTS") or "6")
+READ_WAIT = 15.0  # seconds a read waits for a slot before "busy, try again"
+_READ_GATE = __import__("threading").BoundedSemaphore(READ_SLOTS)
+
+
+async def _read_slot() -> bool:
+    import asyncio
+    import time as _time
+
+    until = _time.monotonic() + READ_WAIT
+    while not _READ_GATE.acquire(blocking=False):
+        if _time.monotonic() > until:
+            return False
+        await asyncio.sleep(0.05)
+    return True
+
+
 @app.middleware("http")
 async def auth_gate(request: Request, call_next):
     path = request.url.path
@@ -138,26 +160,33 @@ async def auth_gate(request: Request, call_next):
     except ValueError:
         size = 0
     if path.startswith("/api/worker/"):
-        cap = 900 * 1024 * 1024 if path.startswith(("/api/worker/source/", "/api/worker/restore/")) else 30 * 1024 * 1024 \
-            if path.startswith(("/api/worker/voice/", "/api/worker/analysis/", "/api/worker/archive-inventory")) else 64 * 1024
+        cap = 900 * 1024 * 1024 if path.startswith(("/api/worker/source/", "/api/worker/restore/", "/api/worker/pc-file/")) \
+            else 30 * 1024 * 1024 if path.startswith(("/api/worker/voice/", "/api/worker/analysis/", "/api/worker/archive-inventory")) \
+            else 4 * 1024 * 1024 if path.startswith(("/api/worker/pc-items", "/api/worker/pc-thumb/")) else 64 * 1024
         if size > cap:
             return JSONResponse({"detail": "Too large"}, status_code=413)
         tok = request.headers.get("x-worker-token", "")
-        if path == "/api/worker/register":
-            claim = request.headers.get("x-helper-claim", "")
+        if path in ENROL_PATHS:  # no token yet: the copy comes from the helper key, else from the helper code
+            claim, key = request.headers.get("x-helper-claim", ""), request.headers.get("x-helper-key", "").strip()
             tid = workers.tenant_from_claim(claim) if claim else tenant.OWNER
+            if key:  # the key itself is checked inside its own copy (in the route); here only which copy it names
+                ktid = enroll.tenant_of_key(key)
+                tid = ktid if ktid is not None and (not claim or ktid == tid) else None
+            elif path != "/api/worker/register":
+                tid = None  # the helper package is only given for a key
             if tid is not None and tid != tenant.OWNER and tid not in accounts.active_tenants():
                 tid = None  # the account is blocked or gone
             if tid is None:
-                return JSONResponse({"detail": "This helper code is not valid. Copy it again from My channels → Helper PC."}, status_code=403)
+                return JSONResponse({"detail": enroll.INVALID if key else
+                                     "This helper code is not valid. Copy it again from My channels → Helper PC."}, status_code=403)
         else:
             tid = workers.tenant_of(tok)
             if tid != tenant.OWNER and tid not in accounts.active_tenants():
                 return JSONResponse({"detail": "Unknown helper"}, status_code=401)
-        if tid in RESTORING and path != "/api/worker/register":  # the copy is being restored from a backup: come back later
+        if tid in RESTORING and path not in ENROL_PATHS:  # the copy is being restored from a backup: come back later
             return JSONResponse({"detail": "A backup is being restored. Try again in a minute."}, status_code=503)
         with tenant.use(tid):  # the helper sees and serves only its own customer's copy
-            if path != "/api/worker/register":  # only approved helpers may send anything (checked before the body is read)
+            if path not in ENROL_PATHS:  # only approved helpers may send anything (checked before the body is read)
                 found = workers.authenticate(tok)
                 if not found:
                     return JSONResponse({"detail": "Unknown helper"}, status_code=401)
@@ -218,12 +247,20 @@ async def auth_gate(request: Request, call_next):
         denied = acl.check_request(request.method, real, who)  # what the Super Admin switched off for this account
         if denied:
             return JSONResponse({"detail": denied}, status_code=403)
-        with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
-            if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
-                with acl.as_super():
+        gated = request.method == "GET" and path.startswith("/api/clips")
+        if gated and not await _read_slot():
+            return JSONResponse({"detail": "The server is busy right now. Try again in a moment."}, status_code=503)
+        try:
+            with tenant.use(who["tenant"]):  # database and files of this person's private copy, for the whole request
+                if who["role"] == "super":  # the Super Admin is never restricted, also while viewing a customer
+                    with acl.as_super():
+                        resp = await call_next(request)
+                else:
                     resp = await call_next(request)
-            else:
-                resp = await call_next(request)
+        finally:
+            if gated:
+                _READ_GATE.release()
+        with tenant.use(who["tenant"]):
             acl.log_request(who, request.method, real, resp.status_code)
             if request.method != "GET":  # something changed: the Alerts number is counted afresh on the next poll
                 _badge_cache.pop(who["tenant"], None)
@@ -1435,6 +1472,8 @@ def render(cid: int):
     with SessionLocal() as s:
         c = _get(s, Clip, cid)
         _not_held(c)
+        if c.pc_item_id:
+            raise HTTPException(409, pcfolder.NO_RENDER)
         if c.status in ("rendering", "uploading", "uploaded"):
             raise HTTPException(409, f"Clip is {c.status}.")
         p = _get(s, Project, c.project_id)
@@ -1530,6 +1569,7 @@ def _keyword_clip(cid: int):
 @app.post("/api/clips/{cid}/metadata")
 def clip_metadata(cid: int, body: ClipKeywordsIn):
     """'Use these': research the keywords, write title, description and tags from them and save."""
+    acl.need("keywords.use")  # the keyword helper may be switched off for this account (the address needs clips.edit)
     _keyword_clip(cid)
     return auto_metadata(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic)
 
@@ -1537,6 +1577,7 @@ def clip_metadata(cid: int, body: ClipKeywordsIn):
 @app.post("/api/keywords/clip/{cid}")
 def clip_keywords_preview(cid: int, body: ClipKeywordsIn):
     """'Find better keywords': research now and show what would be written. Nothing is saved."""
+    acl.need("clips.edit")  # the address needs the keyword helper; the clip is one of theirs to edit
     _keyword_clip(cid)
     return propose_meta(cid, [k.strip()[:100] for k in body.extra_keywords if k.strip()], hint=body.topic, fresh=True)
 
@@ -1562,6 +1603,7 @@ def keywords(q: str = Query("", max_length=200)):
     Free (YouTube's own search suggestions, saved for a day); no search-volume numbers exist, so none are shown."""
     from .keywords import research
 
+    acl.need("keywords.use")  # Ideas -> Keyword research (the address needs the Ideas page)
     q = " ".join(q.split())
     if len(q) < 2:
         raise HTTPException(400, "Type a topic first, for example: street food india")
@@ -1687,6 +1729,9 @@ def _clip_card(c: Clip, projects: dict, full: bool = False) -> dict:
     if c.status == "uploaded":  # "Video saved on your PC" / "Video still on the server"
         d["on_server"] = archive.on_server(c)
         d["on_pc"] = archive.complete(c)
+    if c.pc_item_id:  # from the folder on the PC: the file comes shortly before its upload
+        d["from_pc"] = True
+        d["pc_on_server"] = pcfolder.on_server(c)
     return d
 
 
@@ -2107,6 +2152,49 @@ TREND_CATS = {"": "all", "26": "food & how-to", "22": "people & blogs", "24": "e
               "20": "gaming", "17": "sports", "28": "science & tech"}
 
 
+# ---------- "What is your channel about?": pick niches -> topic sources made for you (app/niche_sources.py) ----------
+class NicheIn(BaseModel):
+    keys: list[Annotated[str, Field(max_length=40)]] = Field(default_factory=list, max_length=20)
+    topic: str = Field("", max_length=60)
+    review_first: bool = True
+    tz_offset: int | None = Field(None, ge=-900, le=900)
+
+
+class NicheOffIn(BaseModel):
+    key: str = Field(min_length=1, max_length=40)
+
+
+@app.get("/api/niches")
+def niches_state(topic: str = Query("", max_length=60)):
+    from . import niche_sources
+
+    out = niche_sources.state()
+    if topic.strip():  # what people also search comes from the keyword helper: only with the Ideas page allowed
+        out["preview"] = niche_sources.preview(topic, suggest=acl.allowed("page.ideas"))
+    return out
+
+
+@app.post("/api/niches")
+def niches_choose(body: NicheIn):
+    from . import niche_sources
+
+    _need_step("source")  # it is the "first source" step of Get started
+    try:
+        return niche_sources.choose(body.keys, body.topic, body.review_first, body.tz_offset)
+    except niche_sources.NicheError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/niches/remove")
+def niches_remove(body: NicheOffIn):
+    from . import niche_sources
+
+    try:
+        return niche_sources.remove(body.key)
+    except niche_sources.NicheError as e:
+        raise HTTPException(404, str(e))
+
+
 class ScriptsIn(BaseModel):
     scripts: list[str] = Field(max_length=500)
 
@@ -2209,6 +2297,7 @@ def insights():
 def insights_autotune(body: AutotuneIn):
     from . import learn
 
+    acl.need("sources.edit")  # auto-tune changes sources (the address needs the auto-tune switch)
     return {**learn.switch(body.on), "card": learn.insights()}
 
 
@@ -2295,6 +2384,7 @@ def backup_download():
     from . import backup
     from .alerts import note
 
+    acl.need("page.settings")  # the address carries "Backup & restore"; the card lives on My channels
     try:
         data = backup.make()
         blob = backup.pack(data)
@@ -2309,6 +2399,7 @@ def backup_download():
 def backup_file(name: str):
     from . import backup
 
+    acl.need("page.settings")
     try:
         p = backup.path_of(name)
     except backup.BackupError as e:
@@ -2323,6 +2414,7 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 
     from . import backup
 
+    acl.need("page.settings")
     sup = _is_super(request)
     _backup_rate("check", sup)
     blob = file.file.read((backup.MAX_UPLOAD if sup else backup.MAX_UPLOAD_USER) + 1)
@@ -2342,6 +2434,7 @@ def backup_check(request: Request, file: UploadFile = File(...)):
 def backup_check_kept(name: str, request: Request):
     from . import backup
 
+    acl.need("page.settings")
     sup = _is_super(request)
     _backup_rate("check", sup)
     try:
@@ -2360,6 +2453,7 @@ def backup_restore(body: RestoreIn, request: Request):
     from . import backup
     from .alerts import note
 
+    acl.need("page.settings")
     if body.confirm.strip() != "RESTORE":
         raise HTTPException(400, "Type RESTORE (in capital letters) to confirm.")
     sup = _is_super(request)
@@ -2477,6 +2571,24 @@ def park_waiting(body: ParkIn):
     return {"parked": n, "kept": min(len(rows), body.keep)}
 
 
+class UnparkIn(BaseModel):
+    per_day: int = Field(ge=0, le=50)  # parked clips made again each day (0 = off)
+    now: bool = False  # also start today's share right away
+
+
+@app.post("/api/admin/unpark")
+def unpark(body: UnparkIn):
+    """Parked clips go back into the line a few a day (never one that repeats a moment already made or on YouTube)."""
+    from . import autopilot
+
+    set_setting("unpark_per_day", str(body.per_day) if body.per_day else "")
+    out = autopilot.unpark_due(body.per_day) if (body.now and body.per_day) else {}
+    if body.now and body.per_day:
+        set_setting("unpark_day", utcnow().strftime("%Y-%m-%d"))
+    acl.record_here("admin.park", f"Parked clips: {body.per_day} a day go back into the line")
+    return {"per_day": body.per_day, **out}
+
+
 @app.post("/api/admin/queue-cap")
 def queue_cap_set(body: QueueCapIn):
     """How many clips may wait for one YouTube channel before the sources pause (usually 30). Raising it makes a large
@@ -2526,6 +2638,7 @@ def reminder_get():
 def reminder_set(body: ReminderIn):
     from . import reminder
 
+    acl.need("clips.edit")  # the address needs the reminder switch
     if body.preset != "custom" and body.preset not in dict(reminder.PRESETS):
         raise HTTPException(400, "Choose one of the wordings in the list.")
     custom = reminder.clean(body.custom)
@@ -2617,7 +2730,8 @@ def strike_reply_set(body: StrikeReplyIn):
     from . import strikes
 
     if body.auto:
-        acl.need("gmail.send")  # switching it OFF is always possible
+        acl.need("strikes.reply")  # switching it OFF is always possible
+        acl.need("gmail.send")
     strikes.save_settings(body.auto)
     return strikes.settings_public()
 
@@ -2627,6 +2741,7 @@ def strike_send(sid: int, body: StrikeSendIn | None = None):
     """Send the ready request to the creator now, from the owner's Gmail (once per struck video)."""
     from . import strikes
 
+    acl.need("gmail.send")  # the address needs "Strike responder"; the mail itself needs "Permission mails to creators"
     return _strike_call(strikes.send_request, sid, (body.to if body else None), "hand")
 
 
@@ -2713,6 +2828,87 @@ def phone_test():
     if not phone.push("If you can read this on your phone, notifications work.", title="Raji Studio test", tags="white_check_mark"):
         raise HTTPException(502, "The notification service could not be reached. Try again in a minute.")
     return {"ok": True}
+
+
+class WhatsAppIn(BaseModel):
+    action: Literal["save", "on", "off"] = "save"
+    phone: str = Field("", max_length=32)
+    apikey: str = Field("", max_length=64)
+
+
+@app.get("/api/whatsapp")
+def whatsapp_get():
+    from . import whatsapp
+
+    return whatsapp.status()  # only the last 3 digits of the number, never the key
+
+
+@app.post("/api/whatsapp")
+def whatsapp_set(body: WhatsAppIn):
+    from . import whatsapp
+
+    if body.action in ("on", "off"):
+        if not whatsapp.configured():
+            raise HTTPException(400, "Save your WhatsApp number and API key first.")
+        return whatsapp.toggle(body.action == "on")
+    try:
+        return whatsapp.save(body.phone, body.apikey)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/whatsapp/test")
+def whatsapp_test():
+    from . import whatsapp
+
+    if not whatsapp.configured():
+        raise HTTPException(400, "Save your WhatsApp number and API key first.")
+    if whatsapp.sent_today() >= whatsapp.PER_DAY:
+        raise HTTPException(429, f"Today's {whatsapp.PER_DAY} WhatsApp messages are used. Try again tomorrow.")
+    if not whatsapp.send("Raji Studio test: WhatsApp alerts work. Only problems that need you come here.", test=True):
+        raise HTTPException(502, "WhatsApp did not take the message. Check the number and the API key (or the free "
+                                 "service is busy — try again later).")
+    return {"ok": True}
+
+
+@app.delete("/api/whatsapp")
+def whatsapp_remove():
+    from . import whatsapp
+
+    return whatsapp.remove()
+
+
+# ---------- self-repair (app/watchdog.py) ----------
+@app.get("/api/watchdog")
+def watchdog_get():
+    from . import watchdog
+
+    return watchdog.public()
+
+
+@app.post("/api/watchdog/check")
+def watchdog_check():
+    """Run the self-repair round for this copy now (it also runs by itself every 10 minutes)."""
+    from . import watchdog
+
+    if not watchdog.enabled():
+        raise HTTPException(409, "Self-repair is switched off for this account.")
+    out = watchdog.run()
+    return {"ok": True, "busy": bool(out.get("busy")), **watchdog.public()}
+
+
+class WatchdogIn(BaseModel):
+    on: bool = True
+    off: list[Literal["stuck", "retry", "late", "disk", "login", "helper", "errors", "scheduler"]] = Field(default_factory=list, max_length=8)
+
+
+@app.post("/api/admin/watchdog")
+def watchdog_set(body: WatchdogIn):
+    """Super Admin: Self-repair on/off for the copy being viewed, and remedies switched off one by one."""
+    from . import watchdog
+
+    watchdog.save_config(body.on, list(body.off))
+    return watchdog.public()
 
 
 @app.get("/api/settings/pexels")
@@ -2960,8 +3156,9 @@ def perm_auto_set(body: PermAutoIn):
     """The account's own choice: permission mails go out by themselves (off unless switched on here)."""
     from . import permissions
 
-    if body.auto:
-        acl.need("gmail.send")  # switching it OFF is always possible
+    if body.auto:  # switching it OFF is always possible
+        acl.need("permissions.auto")
+        acl.need("gmail.send")
     return permissions.save_auto(body.auto)
 
 
@@ -3262,6 +3459,15 @@ def guide_errors_clear():
 def health():
     items, now = [], utcnow()
     items += acl.health_items()  # what the administrator paused, switched off or limited for this account
+    try:  # on the owner's Google project the owner's uploads come first (quota.shared_room): say why uploads wait
+        if quota.on_shared_budget() and not quota.shared_room(quota.UPLOAD_COST):
+            items.append({"level": "info", "key": "shared_budget", "fix": None,
+                          "text": "Your uploads wait for now: this account uses the server's Google project, and today's YouTube "
+                                  "budget of that project is kept for the owner's uploads. Nothing is lost; they go up when there "
+                                  "is room. Save your own Google project keys (My channels → Google project keys) to upload on "
+                                  "your own daily budget."})
+    except Exception:  # noqa: BLE001
+        pass
     if tenant.current() == tenant.OWNER and payments.enabled() and payments.mode() == "test":
         items.append({"level": "warn", "key": "pay_test_mode", "fix": None,
                       "text": "Online payment is in TEST mode — customers can get plans with test cards. Save your live keys "
@@ -3295,9 +3501,19 @@ def health():
         elif not hp["approved"] and not hp["central"]:
             items.append({"level": "warn", "text": "No helper PC is set up yet — YouTube blocks downloads from the server.",
                           "fix": "helper", "key": "no_helper"})
-        failed = s.query(Clip).filter(Clip.status == "failed").count()
+        failed_ids = {cid for (cid,) in s.query(Clip.id).filter(Clip.status == "failed")}
+        try:  # failed clips the self-repair tries again by itself (app/watchdog.py) are not a problem for the owner yet
+            from . import watchdog
+
+            again = set(watchdog.pending_retries()) & failed_ids
+        except Exception:  # noqa: BLE001
+            again = set()
+        failed = len(failed_ids - again)
         if failed:
             items.append({"level": "warn", "text": f"{failed} clip(s) failed.", "fix": "retry_failed", "key": "failed"})
+        if again:
+            items.append({"level": "info", "text": f"{len(again)} failed clip(s) are tried again by themselves (a passing "
+                                                  "problem). Nothing to do.", "fix": None, "key": "self_repair"})
         thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
         if thumbs_wait:
             items.append({"level": "warn", "text": f"{thumbs_wait} thumbnail(s) were refused by YouTube. Verify the channel's phone "
@@ -3317,6 +3533,10 @@ def health():
                                                   "longer on the server either). Nothing was deleted — if you moved or renamed the "
                                                   "folder, put it back; the helper checks again every day.",
                           "fix": "helper", "key": "archive_missing"})
+        try:  # videos from the folder on the PC (moved to a new day, missing, waiting for the PC)
+            items += pcfolder.problems(s, now)
+        except Exception:  # noqa: BLE001
+            pass
         if dests and not s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count():
             items.append({"level": "info", "text": "No source yet — add one and the system starts making clips.", "fix": "add_source", "key": "no_source"})
         for ch in s.query(Channel).filter(Channel.kind == "reel", Channel.auto.is_(True)).all():
@@ -3334,7 +3554,15 @@ def health():
             pass
         from .guide import recent_errors
 
-        fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()]
+        try:  # errors the self-repair already took care of (a passing cause) are left out
+            from . import watchdog
+
+            done, ek = watchdog.handled_keys(), watchdog.err_key
+            settled = set().union(*watchdog.settled())
+        except Exception:  # noqa: BLE001
+            done, ek, settled = set(), None, set()
+        fresh = [e for e in recent_errors() if e["at"] > (now - timedelta(hours=6)).isoformat()
+                 and not (done and ek(e) in done) and not (settled and (ek(e), str(e.get("at"))) in settled)]
         n_err = sum(int(e.get("count") or 1) for e in fresh)
         if n_err >= 3:
             items.append({"level": "warn", "text": f"{n_err} unexpected server problems in the last 6 hours "
@@ -3342,8 +3570,16 @@ def health():
         if quota.summary()["uploads_left"] == 0 and s.query(Clip).filter(Clip.status == "queued").count():
             items.append({"level": "info", "text": "Today's upload budget is used; queued clips go up after the daily "
                                                   "reset (1:30 PM IST). Nothing to do.", "fix": None, "key": "quota"})
-        due = now - timedelta(hours=8)
+        from .autopilot import REVIEW_CAP, review_waiting
+
+        n_rev = review_waiting(s)
+        if n_rev >= REVIEW_CAP and s.query(Channel).filter(Channel.auto.is_(True)).count():
+            items.append({"level": "warn", "text": f"{n_rev} clips are waiting for your review. Sources that need your approval "
+                                                  "are paused until you approve or discard some (Clips → Review).",
+                          "fix": "review", "key": "review_full"})
         for ch in s.query(Channel).filter(Channel.auto.is_(True)).all():
+            # a source that runs only every 2 days (niche sources) is not "late" after 8 hours
+            due = now - max(timedelta(hours=8), timedelta(hours=(ch.interval_hours or 0) + 2))
             if ch.last_status and ch.last_status.startswith("error"):
                 items.append({"level": "warn", "text": f"Source “{ch.name or ch.query}” failed last time: "
                                                       f"{friendly_error(ch.last_status[7:])[:160]}", "fix": "run_source", "id": ch.id, "key": "source_failed"})
@@ -3435,7 +3671,7 @@ def rerender_waiting(body: RerenderIn):
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status.in_(["rendered", "queued"])).order_by(Clip.publish_at, Clip.id).all():
             p = s.get(Project, c.project_id)
-            if p is None or check_edit(p, c):
+            if p is None or check_edit(p, c) or c.pc_item_id:  # a video from the PC folder goes up as it is
                 skipped += 1
                 continue
             keep_queue = c.status == "queued"
@@ -3563,7 +3799,7 @@ def _need_step(step: str):
 
 
 HELPER_APP_FILES = ("config.py", "tenant.py", "crypto.py", "ingest.py", "tts.py", "captions.py", "hot.py")
-HELPER_WORKER_FILES = ("clipstudio_worker.py", "transcribe.py", "run_worker.bat", "run_hidden.bat", "install_autostart.bat",
+HELPER_WORKER_FILES = ("clipstudio_worker.py", "pc_folder.py", "transcribe.py", "run_worker.bat", "run_hidden.bat", "install_autostart.bat",
                        "uninstall_autostart.bat")
 
 def _helper_zip(tid: int, with_code: bool = True) -> bytes:
@@ -3585,6 +3821,9 @@ def _helper_zip(tid: int, with_code: bool = True) -> bytes:
         z.writestr("helper_version.txt", SERVER_VERSION or "dev")  # written last on the PC: marks a complete update
         if with_code and tid != tenant.OWNER:
             z.writestr("worker/helper_code.txt", workers.claim_code(tid))
+        key = enroll.current_key() if with_code else None
+        if key:  # the helper joins by itself: nothing to approve (only in the account admin's own download)
+            z.writestr("worker/enroll_key.txt", key)
     return buf.getvalue()
 
 
@@ -3737,7 +3976,29 @@ def worker_register(body: WorkerRegIn, request: Request):
     ip = _client_ip(request)
     if auth.rate_limited(ip, "helper"):
         raise HTTPException(429, "Too many attempts")
-    auth.note_fail(ip, "helper")  # helper registrations have their own counter
+    name = (body.name.strip() or "helper")[:60]
+    key = request.headers.get("x-helper-key", "").strip()
+    iid = request.headers.get("x-helper-id", "").strip().lower()
+    iid = iid if enroll.ID_RE.match(iid) else None  # the helper's install id (a file on the PC / phone)
+    if key:  # the account's helper key: approved at once, no pairing code, no button
+        try:
+            kid = enroll.check(key, iid or "", request.headers.get("x-old-helper", "")[:64])
+        except enroll.EnrollError as e:
+            auth.note_fail(ip, "helper")  # only refused key joins count against the shared limit
+            raise HTTPException(e.status, str(e))
+        tok = secrets.token_urlsafe(32)
+        if tenant.current() != tenant.OWNER:
+            tok = f"t{tenant.current()}.{tok}"
+        with SessionLocal() as s:
+            w = Worker(name=name, token_hash=workers.token_hash(tok), approved=True, enrolled=kid, install_id=iid,
+                       last_seen=utcnow(), ip=ip[:60])
+            s.add(w)
+            s.commit()
+            wid = w.id
+        enroll.note_use(kid)
+        enroll.log_join(name, ip)
+        return {"worker_id": wid, "token": tok, "approved": True}
+    auth.note_fail(ip, "helper")  # helper registrations without a key have their own counter
     with SessionLocal() as s:
         s.query(Worker).filter(Worker.approved.is_(False), Worker.created_at < utcnow() - timedelta(minutes=30)).delete()
         s.commit()
@@ -3746,15 +4007,29 @@ def worker_register(body: WorkerRegIn, request: Request):
         tok = secrets.token_urlsafe(32)
         if tenant.current() != tenant.OWNER:
             tok = f"t{tenant.current()}.{tok}"  # tells the server which customer this helper belongs to
-        w = Worker(name=(body.name.strip() or "helper")[:60], token_hash=workers.token_hash(tok), approved=False,
+        w = Worker(name=name, token_hash=workers.token_hash(tok), approved=False, install_id=iid,
                    last_seen=utcnow(), ip=ip[:60], pair_hash=workers.token_hash(workers.pair_code(tok)))
         s.add(w)
         s.commit()
-        return {"worker_id": w.id, "token": tok}
+        return {"worker_id": w.id, "token": tok, "approved": False}
+
+
+@app.get("/api/worker/package")
+def worker_package(request: Request):
+    """The helper program for a new Windows PC, for the one-line install command (the helper key in x-helper-key)."""
+    ip = _client_ip(request)
+    if auth.rate_limited(ip, "helper"):
+        raise HTTPException(429, "Too many attempts")
+    key = request.headers.get("x-helper-key", "").strip()
+    cur = enroll.current_key(create=False)
+    if not cur or not secrets.compare_digest(enroll.key_hash(key), enroll.key_hash(cur)) or not enroll.allowed():
+        auth.note_fail(ip, "helper")
+        raise HTTPException(403, enroll.INVALID)
+    return Response(_helper_zip(tenant.current()), media_type="application/zip", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/worker/jobs")
-def worker_jobs(request: Request):
+def worker_jobs(request: Request, response: Response):
     wid = _worker_or_401(request)
     h, now = request.headers, utcnow()
     can = workers.parse_can(h.get("x-worker-can"))  # None: an older helper (does everything, knows no tickets)
@@ -3780,6 +4055,14 @@ def worker_jobs(request: Request):
     room = {"dl": HELPER_DOWNLOADS if slots is None else slots, "all": slots}
     llm = h.get("x-worker-llm") == "1"
     jobs = _collect_jobs(can, room, llm, "x-worker-ai" in h, now)
+    pc_jobs, pc_folder = [], None
+    if (h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None
+            and acl.feature("clips.pc_folder")):  # switched off for this account: the helper watches no folder
+        # the folder of videos on the PC ("From my PC", app/pcfolder.py): only this helper's own copy, never with a ticket
+        with SessionLocal() as s:
+            pc_folder = pcfolder.folder_for(s.get(Worker, wid))
+            pc_jobs = pcfolder.jobs(s, now, wid)
+            s.commit()
     if archives and getattr(request.state, "ticket", None) is None:
         # archive / restore / inventory: only this helper's OWN copy (the one its token belongs to), never another
         # account's through the central helper, never with a ticket — customers' videos never land on another PC
@@ -3813,7 +4096,26 @@ def worker_jobs(request: Request):
                 oid = j.get("clip_id") or j.get("project_id") or j.get("source_id")
                 j["ticket"] = workers.make_ticket(tid, j["type"], oid, wid)
             jobs += more
-    return {"jobs": jobs, "version": SERVER_VERSION}
+    jobs += pc_jobs  # (the helper runs them after the downloads, like the archive jobs)
+    out = {"jobs": jobs, "version": SERVER_VERSION}
+    if pc_folder is not None:
+        out["pc_folder"] = pc_folder
+    elif (h.get("x-worker-pc") and workers.can_do(can, "archive") and getattr(request.state, "ticket", None) is None
+          and not acl.feature("clips.pc_folder")):
+        out["pc_folder"] = ""  # "From my PC" switched off by the Super Admin: the helper stops looking at the folder
+    has = h.get("x-worker-enroll")
+    if has is not None and getattr(request.state, "ticket", None) is None:
+        # a helper that knows helper keys and has not got this account's current one: hand it over, so that it can
+        # join again by itself if its token is ever lost (the owner's PC needs nothing typed). Only to an approved
+        # helper of this same copy, only when its key is missing or old; never logged.
+        with SessionLocal() as s:
+            w = s.get(Worker, wid)
+            key = enroll.hand_over(w) if w is not None and w.approved else None
+            s.commit()
+        if key and enroll.kid_of(key) != has.strip():
+            out["enroll_key"] = key
+            response.headers["Cache-Control"] = "no-store"
+    return out
 
 
 _central_turn = [0]  # which customer the central helper looks at first (moves on each call)
@@ -3956,6 +4258,8 @@ def worker_script(chid: int, body: ScriptIn, request: Request):
 
 def _wants_captions(s, p: Project, c: Clip) -> bool:
     if (c.caption_style or {}).get("off"):
+        return False
+    if not acl.feature("clips.captions"):  # switched off for this account: no clip waits for captions
         return False
     if p.quick:
         return bool(p.quick.get("captions", True))
@@ -4159,11 +4463,264 @@ def worker_archive_inventory(body: InventoryIn, request: Request):
     return out
 
 
+# ---------- the folder of videos on the PC ("From my PC", app/pcfolder.py) ----------
+class PcFileIn(BaseModel):
+    sha: str = Field(max_length=64)
+    rel: str = Field("", max_length=500)
+    name: str = Field("", max_length=255)
+    folder: str = Field("", max_length=255)
+    size: int = Field(0, ge=0, le=10**13)
+    duration: float = Field(0, ge=0, le=10**6)
+    width: int = Field(0, ge=0, le=100000)
+    height: int = Field(0, ge=0, le=100000)
+    info: dict | None = None  # info.json of its sub-folder (checked and cut to size by pcfolder.clean_info)
+    description_txt: str = Field("", max_length=20000)
+    thumb: bool = False  # it has a picture to send (the folder's thumbnail or a frame)
+
+
+class PcSeenIn(BaseModel):
+    sha: str = Field(max_length=64)
+    rel: str = Field("", max_length=500)
+    name: str = Field("", max_length=255)
+    folder: str | None = Field(None, max_length=255)
+
+
+class PcReportIn(BaseModel):
+    folder: str = Field("", max_length=300)
+    exists: bool = True
+    items: list = Field(default_factory=list, max_length=100)  # PcFileIn each, checked one by one
+    present: list | None = Field(None, max_length=20000)  # PcSeenIn each: every video in the folder now
+
+
+@app.post("/api/worker/pc-items")
+def worker_pc_items(body: PcReportIn, request: Request):
+    """The helper's folder: details of new videos (never the video), and which are still there. Item by item: a bad
+    item is named in "errors" and never stops the others."""
+    from pydantic import ValidationError
+
+    wid = _own_helper(request)
+    good, errors = [], {}
+    for it in body.items:
+        if not isinstance(it, dict):
+            errors["?"] = "not an item"
+            continue
+        try:
+            good.append(PcFileIn.model_validate(it).model_dump())
+        except ValidationError as e:
+            errors[str(it.get("sha") or "?")[:64]] = "invalid: " + "; ".join(
+                f"{'.'.join(str(x) for x in er['loc'])} {er['msg']}" for er in e.errors()[:3])[:200]
+    present = None
+    if body.present is not None:
+        present = []
+        for p in body.present:
+            try:
+                present.append(PcSeenIn.model_validate(p).model_dump())
+            except ValidationError:
+                continue
+    with SessionLocal() as s:
+        out = pcfolder.report(s, wid, {"folder": body.folder, "exists": body.exists, "items": good, "present": present})
+        s.commit()
+    out["errors"] = {**errors, **out.get("errors", {})}
+    return out
+
+
+async def _read_capped(request: Request, cap: int) -> bytes:
+    data = bytearray()
+    async for chunk in request.stream():
+        data += chunk
+        if len(data) > cap:
+            raise HTTPException(413, "Too large")
+    return bytes(data)
+
+
+def _pc_thumb_save(iid: int, wid: int, data: bytes, kind: str):
+    with SessionLocal() as s:
+        row = s.get(PcItem, iid)
+        if row is None or row.worker_id != wid:
+            raise HTTPException(404, "Not found")
+        why = pcfolder.save_thumb(row, data, kind)
+        if why:
+            raise HTTPException(400, why)
+        c = s.get(Clip, row.clip_id) if row.clip_id else None
+        p = pcfolder._thumb_path(row)
+        if c is not None and p is not None and row.thumb == "file" and c.status == "queued" and not c.youtube_id:
+            c.thumb_path, c.thumb_custom = str(p), True
+        s.commit()
+
+
+@app.post("/api/worker/pc-thumb/{iid}")
+async def worker_pc_thumb(iid: int, request: Request, kind: str = Query("frame", max_length=10)):
+    """The small picture of a PC video (the folder's thumbnail, or a frame of the video): JPEG / PNG, at most 2 MB."""
+    from starlette.concurrency import run_in_threadpool
+
+    wid = await run_in_threadpool(_own_helper, request)
+    data = await _read_capped(request, pcfolder.THUMB_MAX)
+    await run_in_threadpool(_pc_thumb_save, iid, wid, data, kind)
+    return {"ok": True}
+
+
+def _pc_file_check(iid: int, wid: int):
+    with SessionLocal() as s:
+        try:
+            return pcfolder.receive_check(s, iid, wid)
+        except LookupError:
+            raise HTTPException(404, "Not found")
+        except ValueError as e:
+            raise HTTPException(409, str(e))
+
+
+def _pc_file_finish(iid: int, tmp: Path):
+    with SessionLocal() as s:
+        done, why = pcfolder.receive_finish(s, iid, tmp)
+        s.commit()
+        return done, why
+
+
+@app.post("/api/worker/pc-file/{iid}")
+async def worker_pc_file(iid: int, request: Request):
+    """The PC sends one video shortly before its upload, as the raw body: counted while it arrives (at most the size it
+    reported), then checked by sha256. Only when the server asked for it, only from the helper whose folder has it."""
+    from starlette.concurrency import run_in_threadpool
+
+    wid = await run_in_threadpool(_own_helper, request)
+    cap, tmp = await run_in_threadpool(_pc_file_check, iid, wid)
+    try:
+        if int(request.headers.get("content-length") or 0) > cap:
+            raise HTTPException(413, "This file is larger than the one in the list")
+    except ValueError:
+        pass
+    size = 0
+    try:
+        with open(tmp, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > cap:
+                    raise HTTPException(413, "This file is larger than the one in the list")
+                f.write(chunk)
+        if not size:
+            raise HTTPException(400, "No file was sent")
+        done, why = await run_in_threadpool(_pc_file_finish, iid, tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+    if not done:
+        raise HTTPException(409, why)
+    return {"ok": True}
+
+
+def _pc_on():
+    """Clips -> From my PC has its own switch; every address of it checks it (the reading ones need the Clips page too)."""
+    acl.need("clips.pc_folder")
+
+
+@app.get("/api/pc-items")
+def pc_items():
+    acl.need("page.clips")
+    with SessionLocal() as s:
+        return pcfolder.listing(s)
+
+
+@app.get("/api/pc-items/{iid}/thumb")
+def pc_item_thumb(iid: int):
+    acl.need("page.clips")
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        p = pcfolder._thumb_path(row)
+    if p is None:
+        raise HTTPException(404, "No picture yet")
+    return FileResponse(p, headers={"Cache-Control": "private, max-age=300"})
+
+
+class PcApproveIn(BaseModel):
+    topic: str = Field("", max_length=120)
+
+
+@app.post("/api/pc-items/{iid}/approve")
+def pc_item_approve(iid: int, body: PcApproveIn):
+    _pc_on()
+    acl.need_clip_room()
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        c, why = pcfolder.approve(s, row, body.topic)
+        if c is None:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row, c)
+
+
+@app.post("/api/pc-items/approve-all")
+def pc_items_approve_all():
+    """Every waiting video (also the ones marked "approve": "manual" — this is the owner's own press), in the
+    background: GET /api/pc-items shows the progress ("bulk")."""
+    _pc_on()
+    acl.need_clip_room()
+    return pcfolder.approve_all_start()
+
+
+@app.post("/api/pc-items/{iid}/skip")
+def pc_item_skip(iid: int):
+    _pc_on()
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        why = pcfolder.skip(s, row)
+        if why:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row)
+
+
+@app.post("/api/pc-items/{iid}/unskip")
+def pc_item_unskip(iid: int):
+    _pc_on()
+    with SessionLocal() as s:
+        row = _get(s, PcItem, iid)
+        why = pcfolder.unskip(s, row)
+        if why:
+            raise HTTPException(409, why)
+        return pcfolder.as_dict(row)
+
+
+class PcAutoIn(BaseModel):
+    on: bool
+
+
+@app.post("/api/pc-items/auto")
+def pc_items_auto(body: PcAutoIn):
+    """"Videos I add to the PC folder go up by themselves" (new ones only; "approve": "manual" always waits)."""
+    _pc_on()
+    pcfolder.set_auto(body.on)
+    return {"auto": pcfolder.auto_on()}
+
+
+class PcFolderIn(BaseModel):
+    folder: str = Field("", max_length=300)  # "" = do not watch a folder
+    default: bool = False  # back to the usual folder
+
+
+@app.post("/api/workers/{wid}/pc-folder")
+def worker_pc_folder(wid: int, body: PcFolderIn):
+    """The folder of videos this helper watches (it hears it on its next call)."""
+    _pc_on()
+    f = body.folder.strip().strip('"').strip()
+    if f and not re.match(r"^([A-Za-z]:[\\/]|\\\\[^\\/]|/|~)", f):
+        raise HTTPException(400, r"Write the whole folder, for example D:\youtube")
+    if f and re.fullmatch(r"([A-Za-z]:[\\/]*|[\\/]+|~[\\/]*)", f):
+        raise HTTPException(400, r"Not a whole drive: choose a folder of videos, for example D:\youtube")
+    with SessionLocal() as s:
+        w = _get(s, Worker, wid)
+        w.pc_folder = None if body.default else f
+        s.commit()
+        return {"folder": pcfolder.folder_for(w), "default": w.pc_folder is None}
+
+
 @app.post("/api/worker/fail/{cid}")
 def worker_fail(cid: int, body: WorkerFailIn, request: Request):
     t = getattr(request.state, "ticket", None)
     if t and body.kind != t["kind"]:  # a ticket opens only the job it was given for (never archive / restore)
         raise HTTPException(403, "This job ticket is not valid")
+    if body.kind == "pc_send":  # cid is a PC folder item here (app/pcfolder.py); only the helper whose folder has it
+        wid = _own_helper(request)
+        with SessionLocal() as s:
+            pcfolder.failed(s, cid, wid, body.error[:300])
+            s.commit()
+        return {"ok": True}
     if body.kind in ("archive", "restore"):
         wid = _own_helper(request)
         with SessionLocal() as s:
@@ -4248,6 +4805,13 @@ def helper_setup_sh():
     return _phone_file("setup.sh")
 
 
+@app.get("/helper/install.ps1")
+def helper_install_ps1():
+    """The Windows helper's one-time setup (the dashboard's "Laptop helper" command runs it). No secrets inside."""
+    return Response((PHONE_DIR.parent / "install.ps1").read_bytes(), media_type="text/plain; charset=utf-8",
+                    headers={"Cache-Control": "no-store"})
+
+
 @app.post("/api/workers/{wid}/approve")
 def approve_worker(wid: int, body: PairIn):
     _need_step("helper")
@@ -4258,15 +4822,65 @@ def approve_worker(wid: int, body: PairIn):
             raise HTTPException(400, "Wrong code. Type the 6-digit pairing code shown in the helper's window or log.")
         w.approved = True
         s.commit()
+        enroll.forget_removed(w.install_id)  # approved by a person again: it may use the key again later
         return workers.as_dict(w)
 
 
 @app.delete("/api/workers/{wid}")
 def delete_worker(wid: int):
     with SessionLocal() as s:
-        s.delete(_get(s, Worker, wid))
+        w = _get(s, Worker, wid)
+        enroll.remember_removed(w.token_hash, w.install_id)  # it never joins again by itself with the helper key
+        s.delete(w)
         s.commit()
         return {"deleted": True}
+
+
+# ---------- helper key: helpers join by themselves (app/enroll.py) ----------
+def _key_response(key: str) -> JSONResponse:
+    return JSONResponse({**enroll.commands(key, BASE_URL), **enroll.summary()},
+                        headers={"Cache-Control": "no-store, private", "Pragma": "no-cache"})
+
+
+@app.get("/api/helper/key")
+def helper_key_state():
+    """Is there a helper key, and which helpers joined with it (never the key itself)."""
+    return enroll.summary()
+
+
+@app.post("/api/helper/key/show")
+def helper_key_show():
+    """The account's admin: the key and the one-line install commands (made the first time)."""
+    key = enroll.current_key()
+    if not key:
+        raise HTTPException(409, "The helper key is switched off. Press “New key” to make one.")
+    return _key_response(key)
+
+
+class RotateIn(BaseModel):
+    leaked: bool = False
+
+
+@app.post("/api/helper/key/rotate")
+def helper_key_rotate(body: RotateIn | None = None):
+    """A new key; the old one stops at once. Helpers approved by a person, and helpers that joined with the key being
+    replaced, keep working and are handed the new key. leaked=True: first switch the key off and remove every helper
+    that joined by key (they never come back by themselves), then make the new key."""
+    if body and body.leaked:
+        enroll.revoke()
+        with SessionLocal() as s:
+            for w in s.query(Worker).filter(Worker.enrolled.isnot(None)).all():
+                enroll.remember_removed(w.token_hash, w.install_id)
+                s.delete(w)
+            s.commit()
+    return _key_response(enroll.rotate())
+
+
+@app.post("/api/helper/key/revoke")
+def helper_key_revoke():
+    """Switch the key off: no helper joins by itself until a new key is made. Connected helpers keep working."""
+    enroll.revoke()
+    return enroll.summary()
 
 
 class AnalysisIn(BaseModel):

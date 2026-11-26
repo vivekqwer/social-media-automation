@@ -153,7 +153,10 @@ def current(now: datetime | None = None) -> dict:
 
 # ---------------------------------------------------------------- settings
 def enabled() -> bool:
-    return (get_setting(K_ON) or "on") != "off"  # on unless the account switched it off
+    from . import acl
+
+    # on unless the account switched it off — and only while the Super Admin's "Auto-tune" switch is on for it
+    return (get_setting(K_ON) or "on") != "off" and acl.feature("ideas.autotune")
 
 
 def _load(key, default):

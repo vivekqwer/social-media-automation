@@ -1,6 +1,7 @@
+import os
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy import JSON, BigInteger, Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from . import tenant
@@ -13,7 +14,22 @@ def utcnow() -> datetime:
 
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 connect_args = {"check_same_thread": False} if IS_SQLITE else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args, pool_pre_ping=True)  # tenant 1 + the shared tables
+
+
+def pool_options(url: str) -> dict:
+    """Connection pool of the database. PostgreSQL (Railway): ONE engine — and so one pool — serves every customer (each
+    customer is a schema of the same database), so the pool is sized for the whole server: 10 kept + 20 extra = at most
+    30 connections, well inside Railway Postgres' 100. A request that cannot get one within 10 s fails fast instead of
+    holding a thread for 30 s (SQLAlchemy's default 5 + 10 was used up by a burst of dashboard reads on 24 Nov).
+    SQLite keeps SQLAlchemy's own defaults (one file per customer, local use and tests)."""
+    if url.startswith("sqlite"):
+        return {"pool_pre_ping": True}
+    num = lambda k, d: int(os.getenv(k) or d)  # noqa: E731
+    return {"pool_pre_ping": True, "pool_size": num("DB_POOL_SIZE", 10), "max_overflow": num("DB_MAX_OVERFLOW", 20),
+            "pool_timeout": num("DB_POOL_TIMEOUT", 10), "pool_recycle": 1800}
+
+
+engine = create_engine(DATABASE_URL, connect_args=connect_args, **pool_options(DATABASE_URL))  # tenant 1 + the shared tables
 Base = declarative_base()  # the tables every customer has a private copy of
 _engines: dict[int, object] = {tenant.OWNER: engine}
 _makers: dict[int, object] = {}
@@ -177,6 +193,8 @@ class Clip(Base):
     archive_missing = Column(DateTime)  # the helper's daily folder list did not have this clip's file (nothing deleted)
     held_was = Column(String(20))  # status before the strike responder held this clip (status "held": it will not upload)
     kept_private = Column(Boolean)  # already on YouTube with a future publish time: set to private after a strike (strikes.py)
+    pc_item_id = Column(Integer, index=True)  # made from a video in the folder on the owner's PC (app/pcfolder.py): the file
+    #                                           comes from the helper shortly before its upload and is deleted after it
     # draft | rendering | rendered | queued | uploading | uploaded | failed | held (after a strike from its creator)
     status = Column(String(20), default="draft")
     output_path = Column(String(500))
@@ -212,6 +230,7 @@ class Channel(Base):
     review_first = Column(Boolean, default=False)  # True: clips wait for my approval instead of auto-queueing
     seen = Column(JSON, default=list)
     seen_topics = Column(JSON, default=list)  # trending sources: topics already used
+    niche = Column(String(40))  # made by "What is your channel about?" (app/niches.py key, or custom:<topic>)
     auto_scripts = Column(Boolean, default=False)  # reel source: the helper's local AI writes scripts on trending topics
     script_wanted = Column(JSON)  # {"topic":..., "since":...} waiting for the helper's local AI
     last_run = Column(DateTime)
@@ -247,9 +266,47 @@ class Worker(Base):
     archive_dir = Column(String(300))  # where this helper keeps the saved videos (it tells the server on every poll)
     inventory_at = Column(DateTime)  # this helper was last asked to list its archive folder
     central = Column(Boolean, default=False)  # the Super Admin's helper that also serves every customer without their own
+    install_id = Column(String(32))  # random id the helper keeps in a file (stays the same when its token changes)
+    enrolled = Column(String(16))  # id of the helper key it joined with by itself (empty: approved by hand / pairing code)
+    pc_folder = Column(String(300))  # the folder of videos it watches ("From my PC"); None = the default, "" = off
+    pc_state = Column(JSON)  # what it last said about that folder: {folder, exists, videos, at}
     can = Column(String(200))  # job types it says it can do ("all" or e.g. "source,analyze"); empty = an older helper (all, no tickets)
     ip = Column(String(64))
     last_seen = Column(DateTime)
+    created_at = Column(DateTime, default=utcnow)
+
+
+class PcItem(Base):
+    """A video in the folder on the owner's PC (app/pcfolder.py). Only its details and a small picture are on the server;
+    the file itself comes shortly before its upload and is deleted right after it."""
+
+    __tablename__ = "pc_items"
+    id = Column(Integer, primary_key=True)
+    sha = Column(String(64), unique=True)  # sha256 of the file: the same video is one item, wherever it is moved
+    worker_id = Column(Integer, index=True)  # the helper whose folder has it (the only one asked for the file)
+    rel = Column(String(500))  # where it is inside the folder (sub-folder\video.mp4 or a loose file)
+    name = Column(String(255))
+    folder = Column(String(255))  # its sub-folder ("" for a loose file)
+    size = Column(BigInteger)
+    duration = Column(Float)
+    width = Column(Integer)
+    height = Column(Integer)
+    info = Column(JSON)  # info.json (+ description.txt) as checked by pcfolder.clean_info; None = no info.json
+    thumb = Column(String(10))  # "file" (the folder's thumbnail) | "frame" (a small picture from the video) | None
+    state = Column(String(20), default="new")  # new | approved | skipped | blocked | done
+    note = Column(String(400))  # what last happened, in plain words
+    topic = Column(String(120))
+    clip_id = Column(Integer)
+    auto_at = Column(DateTime)  # approved by itself (switch on) not before this (a sub-folder may still get its info.json)
+    missing_at = Column(DateTime)  # the helper's folder no longer has it
+    wanted_at = Column(DateTime)  # the server asked the helper for the file
+    lease_at = Column(DateTime)  # a helper took the "send it" job at
+    tries = Column(Integer, default=0)
+    fetched_at = Column(DateTime)
+    moved_at = Column(DateTime)  # its publish time passed before it could go up: moved to a new day
+    moves = Column(Integer, default=0)
+    uploaded_at = Column(DateTime)
+    seen_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
 
 
@@ -384,3 +441,8 @@ def migrate(tenant_id: int = tenant.OWNER, metadata=None):
                 full = f'"{sch}".{table.name}' if sch else table.name
                 with (engine if not IS_SQLITE else eng).begin() as conn:
                     conn.execute(text(f"ALTER TABLE {full} ADD COLUMN {col.name} {ddl}"))
+        for col in table.columns:  # an index of a column added above (create_all only makes indexes of new tables)
+            if col.index:
+                full = f'"{sch}".{table.name}' if sch else table.name
+                with (engine if not IS_SQLITE else eng).begin() as conn:
+                    conn.execute(text(f"CREATE INDEX IF NOT EXISTS ix_{table.name}_{col.name} ON {full} ({col.name})"))

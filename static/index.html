@@ -264,12 +264,16 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <label class="f">What is this video about?<input id="up-topic" maxlength="120" placeholder="A few words, any language — e.g. street food delhi, गाजर का हलवा"></label>
           <div class="mut sm" style="margin:6px 0 10px;line-height:1.6">Title, description, tags, thumbnail text and an upload time are chosen from what people are searching and watching now on YouTube. You can change all of it before you approve — nothing is uploaded until then.</div>
           <div class="row" style="gap:8px"><button class="btn" id="up-pick"><i data-ico="upload"></i>Choose the video file</button><button class="btn ghost" id="up-cancel">Cancel</button></div></div></div>
+        <div class="card hide" id="pc-card" style="margin-bottom:16px"><div class="ch"><div><h3>From my PC</h3><p>Videos in the folder on your PC. Only their details are here — each video stays on the PC until about a day before its upload, then goes to YouTube on its own day and is deleted from the server.</p></div>
+          <button class="btn ok sm hide" id="pc-all">Approve all</button></div>
+          <div class="cb" id="pc-body"></div></div>
         <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
         <div id="clip-grid" class="clips"></div>
       </section>
 
       <section id="p-sources" class="hide">
         <div class="page-h"><div><h1>Sources</h1><div class="desc">Channels the system takes videos from.</div></div><button class="btn" id="open-add"><i data-ico="plus"></i>Add sources</button></div>
+        <div class="card" style="margin-bottom:16px" id="nz-card"><div class="ch"><div><h3>Change my niche</h3><p>What your channel is about. Each niche has its own ready-made topic sources; removing one switches its sources off (nothing is deleted, clips already made stay).</p></div></div><div class="cb" id="nz-body"></div></div>
         <div class="card"><div class="tw" id="src-list"></div></div>
       </section>
 
@@ -312,6 +316,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="row" style="justify-content:space-between;margin-bottom:12px;gap:10px"><div class="tabs" id="al-tabs"></div><div class="row"><button class="btn outline sm hide" id="al-retry"><i data-ico="refresh"></i>Retry all failed</button><button class="btn outline sm" id="al-seen">Mark all as seen</button></div></div>
         <div class="mut sm" id="al-hint" style="margin-bottom:12px"></div>
         <div class="card hide" id="al-strike-set" style="margin-bottom:12px"><div class="cb"><label class="row" style="gap:10px;font-weight:500;flex-wrap:nowrap"><span class="switch"><input type="checkbox" id="st-auto"><i></i></span><span>Send the humble request to the creator automatically</span></label><div class="mut sm" id="st-auto-hint" style="margin-top:6px"></div></div></div>
+        <div class="card hide" id="al-wd" style="margin-bottom:12px"></div>
         <div id="al-list"></div>
       </section>
 
@@ -366,6 +371,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="grid" style="align-content:start">
             <div class="card hide" id="plan-card"><div class="ch"><div><h3>Your plan</h3><p id="plan-sub">…</p></div><span class="badge" id="plan-badge">…</span></div><div class="cb" id="plan-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
+            <div class="card" id="wa-card"><div class="ch"><div><h3>WhatsApp alerts (optional)</h3><p>Only the problems the system could not fix by itself, and the &ldquo;needs you&rdquo; alerts &mdash; to your own WhatsApp, at most 10 a day. E-mail and the phone app above stay the main way.</p></div><span class="badge" id="wa-badge">&hellip;</span></div><div class="cb" id="wa-box"></div></div>
             <div class="card" id="ph-card"><div class="ch"><div><h3>Phone notifications (no password)</h3><p>Video live, every 10 clips scheduled, views, new subscribers and alerts — straight to your phone, with the free ntfy app.</p></div><span class="badge" id="ph-badge">…</span></div><div class="cb" id="ph-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
@@ -413,16 +419,17 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div id="bk-list" style="margin-top:12px"><span class="mut sm">…</span></div>
               <div class="mut sm" style="margin-top:10px;line-height:1.7">Keep the downloaded file somewhere safe (Google Drive, a pen drive). <b>Channel logins in a backup only work on this same server</b> — after restoring on a new server, press <b>Reconnect</b> on each channel. Restoring replaces everything with the backup; a safety backup of what is there now is made first.</div></div></div>
             <div class="card"><div class="ch"><div><h3>Helper PC</h3><p>Your own computer fetches videos and voices when YouTube blocks the server.</p></div></div><div class="cb">
+              <div id="wk-key" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"><span class="mut sm">…</span></div>
               <div id="wk-claim" class="hide" style="margin-bottom:10px;padding:10px;border:1px solid var(--border);border-radius:10px"></div>
               <label class="row sm hide" id="wk-shared" style="gap:8px;margin-bottom:10px"><span class="switch"><input type="checkbox" id="wk-shared-on"><i></i></span><span id="wk-shared-txt">Use the shared helper when my PC is off</span></label>
               <div id="wk-list"></div>
               <div id="wk-arch" class="sm mut" style="margin-top:8px;line-height:1.7"></div>
               <div class="tabs" id="wk-tabs" style="margin-top:12px"><button class="tab on" data-wt="pc">Windows PC</button><button class="tab" data-wt="phone">Android phone</button></div>
-              <div class="mut sm" id="wk-pc" style="margin-top:10px;line-height:1.7"><b>Start automatically (recommended, once):</b> in the project folder double-click <b>worker\install_autostart.bat</b>. The helper then runs hidden whenever your PC is on, restarts itself if it stops, and updates itself when the server gets new code.<br>Manual start: <b>worker\run_worker.bat</b>. New helpers appear here — press <b>Approve</b>.</div>
+              <div class="mut sm" id="wk-pc" style="margin-top:10px;line-height:1.7"><b>A new Windows PC:</b> press <b>Show</b> above, copy the <b>Windows PC</b> command, open <b>Windows PowerShell</b> (Start → type PowerShell), paste it and press Enter; when it waits for the key, press <b>Copy key</b>. It installs the helper, connects it by itself (nothing to approve) and starts it hidden at every sign-in. It restarts itself if it stops, reconnects by itself after sleep or a network change, and updates itself when the server gets new code.<br>The helper already in the project folder: <b>worker\install_autostart.bat</b> once; it is handed the key by itself. A helper started without the key appears below as waiting — press <b>Approve</b> and type its pairing code.</div>
               <div class="mut sm hide" id="wk-phone" style="margin-top:10px;line-height:1.7">An Android phone at home, on the charger and on Wi-Fi, downloads the videos (no reels, voice-overs or automatic captions).
                 <ol style="margin:6px 0;padding-left:18px"><li>Install <b>F-Droid</b> (f-droid.org), then in F-Droid install <b>Termux</b> and <b>Termux:Boot</b> — not the Play Store Termux. Open Termux:Boot once.</li><li>Settings → Apps → Termux and Termux:Boot → Battery → <b>Unrestricted</b>.</li><li>Open Termux, paste this command and press Enter:</li></ol>
                 <div class="row" id="wk-phone-cmd" style="gap:8px;flex-wrap:wrap"><code id="wk-cmd" style="user-select:all;word-break:break-all;flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">…</code><button class="btn ghost sm" id="wk-cmd-copy">Copy</button></div>
-                <div style="margin-top:6px">At the end it shows a 6-digit pairing code: press <b>Approve</b> on the new “Android phone” above and type it. It then starts by itself whenever the phone starts and updates itself.</div></div></div></div>
+                <div style="margin-top:6px">With the command above and the helper key (<b>Show</b> → <b>Copy key</b>, pasted when it asks) the phone connects by itself — nothing to approve. It then starts by itself whenever the phone starts, reconnects by itself after Wi-Fi drops, and updates itself. (An older command without the key ends with a 6-digit pairing code: press <b>Approve</b> on the new “Android phone” above and type it.)</div></div></div></div>
             <div class="card"><div class="ch"><div><h3>YouTube access for the server</h3><p>Needed when YouTube says “Sign in to confirm you're not a bot”.</p></div><span class="badge" id="ck-badge">…</span></div><div class="cb">
               <ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.7"><li>Use a <b>spare Google account</b>, not your main one.</li><li>Open YouTube in a private window, sign in, then export <i>cookies.txt</i> for youtube.com (extension “Get cookies.txt LOCALLY”).</li><li>Close the private window, then paste the file here.</li></ol>
               <textarea id="ck-text" placeholder="# Netscape HTTP Cookie File&#10;.youtube.com&#9;TRUE&#9;/&#9;..." style="min-height:90px;font-size:12px"></textarea>
@@ -1028,6 +1035,7 @@ function renderAlerts(){
   $('#al-list').innerHTML=ALSHOW.length?ALSHOW.map(alCard).join(''):empty('bell',em[0],ALTAB==='all'&&!d.watching?'Alerts appear here once videos are uploaded.':em[1]);
   $$('[data-alact]',$('#al-list')).forEach(btn=>btn.onclick=()=>{const [n,i]=btn.dataset.alact.split(':').map(Number),a=ALSHOW[n],b=a&&(a.actions||[])[i];if(b)once(()=>alAct(a,b),btn)});
   $$('[data-st]',$('#al-list')).forEach(btn=>btn.onclick=()=>once(()=>stAct(btn),btn));
+  renderWatchdog();
   const sr=d.strike_reply,box=$('#al-strike-set');box.classList.toggle('hide',!(sr&&ALTAB==='strikes'));
   if(sr){const sw=$('#st-auto');sw.checked=!!sr.auto;sw.disabled=!sr.allowed&&!sr.auto;
     $('#st-auto-hint').textContent='After a copyright complaint the system writes a short, sincere mail asking the creator to take it back. On: it goes out by itself from your Gmail — only when YouTube itself shows the video removed and the address is the one YouTube’s own notice gives for that creator; once per video, never twice, at most '+Number(sr.per_day)+' a day. Every other address waits for your Send. Off: everything waits here until you press “Send the request now”. YouTube itself cannot be answered automatically: the words for YouTube are prepared in each case and you paste them in YouTube Studio.'
@@ -1065,7 +1073,7 @@ function clipMini(c,actions){
 function wireOpen(root){$$('[data-open]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.open));$$('[data-approve]',root).forEach(e=>e.onclick=()=>once(()=>approve(+e.dataset.approve)));$$('[data-retry]',root).forEach(e=>e.onclick=()=>openEditor(+e.dataset.retry))}
 
 const FIXBTN={connect:['Connect / reconnect channel','/auth/login'],resume:['Resume uploads'],retry_failed:['Retry all failed'],run_source:['Run now'],helper:['How to start the helper'],
-  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys']};
+  verify:['Open youtube.com/verify','https://www.youtube.com/verify'],add_source:['Add source'],sources:['Open Sources'],gmail:['Connect Gmail','/auth/gmail'],guide:['Open Setup guide'],keys:['Enter Google keys'],review:['Open Clips']};
 async function loadHealth(h0,target){
   let h=h0;if(!h){try{h=await api('/api/health')}catch(e){return}}
   $(target||'#hl-list').innerHTML=h.items.length?h.items.map((it,i)=>{const b=it.fix&&FIXBTN[it.fix];
@@ -1080,6 +1088,7 @@ async function doFix(it){  // returns false when it only opened another page (no
   if(it.fix==='keys'){window.KEYSOPEN=true;go('settings');return false}
   if(it.fix==='add_source'){openAdd();return false}if(it.fix==='sources'){go('sources');return false}if(it.fix==='guide'){go('guide');return false}
   if(it.fix==='helper'){window.GUIDEOPEN='helper';go('guide');return false}
+  if(it.fix==='review'){go('clips');return false}
   if(it.fix==='resume'){await api(`/api/destinations/${+it.id}/resume`,'POST');toast('Uploads resumed')}
   else if(it.fix==='retry_failed'){const r=await api('/api/fix/retry-failed','POST');toast(`${r.retried} clip(s) are being made again`)}
   else if(it.fix==='run_source'){await api(`/api/channels/${+it.id}/run`,'POST');toast('Source started — new clips appear in a few minutes')}
@@ -1202,6 +1211,45 @@ async function loadSources(){
   $$('[data-sdest]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.sdest}/destination`,'POST',{destination_id:+b.value});toast('This source now uploads to '+b.options[b.selectedIndex].text+' (its waiting clips moved too)')}));
   $$('[data-lang]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.lang}/language`,'POST',{language:b.value});toast(b.value==='en'?'AI scripts in English (Indian voice) — the small local AI writes English much better':'AI scripts in Hinglish')}));
   $$('[data-autoup]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.autoup}/review`,'POST',{review_first:!b.checked});toast(b.checked?'New clips will upload automatically':'New clips will wait for your approval')}));
+  loadNiches().catch(()=>{});
+}
+/* ---------- "What is your channel about?": niches -> topic sources made for you (app/niche_sources.py) ---------- */
+async function nichePicker(el,done,st){
+  if(!el)return;st=st||await api('/api/niches');
+  if(!st.topic_on){el.innerHTML='<div class="alert"><span>Topic sources are switched off for your account, so niches cannot be used. Ask the person who gave you access.</span></div>';return}
+  const act=new Set(st.mine.filter(m=>m.active).map(m=>m.key)),free=st.catalog.filter(n=>!act.has(n.key));
+  el.innerHTML=`<div class="alert" style="margin-bottom:10px"><span>${esc(st.note)}</span></div>
+    ${free.length?`<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">${free.map(n=>`<label class="card" style="padding:10px;cursor:pointer;display:block"><span class="row" style="gap:8px;flex-wrap:nowrap"><input type="checkbox" data-nz="${esc(n.key)}"><b>${esc(n.label)}</b></span><span class="mut sm" style="display:block;margin-top:4px">${esc(n.phrases.slice(0,3).join(' · '))}${n.trending&&st.trending_on?' · + trending':''}</span>${n.warning?'<span class="sm" style="display:block;margin-top:4px;color:var(--bad)">Few Creative Commons videos: expect fewer clips.</span>':''}</label>`).join('')}</div>`:''}
+    <label class="f" style="margin-top:10px">Or write your own topic<input class="nz-topic" maxlength="60" placeholder="e.g. indian street food · yoga at home · coding for beginners"></label>
+    <div class="nz-prev mut sm" style="margin-top:4px"></div>
+    <label class="row sm" style="gap:8px;margin-top:10px"><span class="switch"><input type="checkbox" class="nz-rev" checked><i></i></span>Check the first clips myself before they go up (Review first)</label>
+    <div class="row" style="margin-top:10px;gap:8px;flex-wrap:wrap"><button class="btn nz-go">Make my sources</button><span class="mut sm">Up to ${st.max_niches} niches or own topics at once; together they make about ${st.per_day} clips a day.${st.room==null?'':' '+st.room+' more source'+(st.room===1?'':'s')+' allowed on your plan.'}</span></div>`;
+  const inp=$('.nz-topic',el),prev=$('.nz-prev',el);let tm;
+  inp.oninput=()=>{clearTimeout(tm);const t=inp.value.trim();if(!t){prev.innerHTML='';return}
+    tm=setTimeout(async()=>{let p;try{p=(await api('/api/niches?topic='+encodeURIComponent(t))).preview}catch(e){return}if(!p||inp.value.trim()!==t)return;
+      prev.innerHTML=(p.phrases.length?'Sources for: '+p.phrases.map(x=>'<b>'+esc(x)+'</b>').join(' · '):'Write words, not a link.')
+        +(p.warning?`<div style="color:var(--bad);margin-top:4px">${esc(p.warning)}</div>`:'')
+        +(p.suggest.length?'<div style="margin-top:4px">People also search: '+p.suggest.map(x=>`<button class="btn ghost sm" data-nzs="${esc(x)}">${esc(x)}</button>`).join(' ')+'</div>':'');
+      $$('[data-nzs]',prev).forEach(b=>b.onclick=()=>{inp.value=b.dataset.nzs;inp.oninput()})},700)};
+  $('.nz-go',el).onclick=()=>once(async()=>{const keys=$$('[data-nz]:checked',el).map(x=>x.dataset.nz),topic=inp.value.trim();
+    if(!keys.length&&!topic)throw new Error('Tick a niche or write your own topic first');
+    const r=await api('/api/niches','POST',{keys,topic,review_first:$('.nz-rev',el).checked,tz_offset:new Date().getTimezoneOffset()});
+    const n=r.made.length+r.turned_on.length;
+    toast(n?`${n} source${n===1?'':'s'} ready — they look for Creative Commons videos every ${r.interval_hours} hours`:'Those sources were already there');
+    if(r.why||r.warnings.length)alert([r.why,...r.warnings].filter(Boolean).join('\n\n'));
+    if(done)await done()},$('.nz-go',el));
+}
+async function loadNiches(){
+  const el=$('#nz-body');if(!el)return;const st=await api('/api/niches'),mine=st.mine;
+  el.innerHTML=(mine.length?mine.map(m=>`<div class="item" style="flex-wrap:wrap"><div class="tx grow"><b>${esc(m.label)}</b>${m.custom?' <span class="badge outline">my topic</span>':''} ${m.active?'<span class="badge uploaded">On</span>':'<span class="badge outline">Off</span>'}
+      <span class="mut sm" style="display:block">${m.on} of ${m.sources} source${m.sources===1?'':'s'} on · ${m.videos} video${m.videos===1?'':'s'} used so far · ${esc(m.phrases.slice(0,4).join(' · '))}</span>
+      ${m.warnings.map(w=>`<span class="sm" style="display:block;color:var(--bad)">${esc(w)}</span>`).join('')}</div>
+      ${m.active?`<button class="btn outline sm" data-nzoff="${esc(m.key)}">Remove</button>`:`<button class="btn outline sm" data-nzon="${esc(m.key)}">Switch on again</button>`}</div>`).join(''):'<div class="mut sm" style="margin-bottom:8px">No niche picked yet.</div>')
+    +`<details id="nz-add" style="margin-top:10px" ${mine.length?'':'open'}><summary style="cursor:pointer;font-weight:500">Add a niche or your own topic</summary><div id="nz-pick" style="margin-top:8px"></div></details>`;
+  nichePicker($('#nz-pick'),()=>loadSources(),st);
+  $$('[data-nzoff]',el).forEach(b=>b.onclick=()=>once(async()=>{if(!confirm('Switch off every source of this niche?\n\nNothing is deleted and clips already made stay. You can switch it on again here.'))return;
+    const r=await api('/api/niches/remove','POST',{key:b.dataset.nzoff});toast(r.switched_off+' source'+(r.switched_off===1?'':'s')+' switched off');loadSources()},b));
+  $$('[data-nzon]',el).forEach(b=>b.onclick=()=>once(async()=>{const r=await api('/api/niches','POST',{keys:[b.dataset.nzon]});toast((r.turned_on.length+r.made.length)+' source(s) switched on again');loadSources()},b));
 }
 
 async function loadDests(){
@@ -1228,7 +1276,7 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
-  loadFace();loadFaceSize();loadPhone();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
+  loadFace();loadFaceSize();loadPhone();loadWhatsApp();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
   d.innerHTML=`<input class="af-k" style="width:34%" placeholder="keywords, e.g. tawa, pan, cooker" value="${esc(r.keywords||'')}"><input class="af-t grow" placeholder="🍳 My kitchen gear: https://amzn.to/..." value="${esc(r.text||'')}"><button class="btn bad sm icon af-del">${ico('trash')}</button>`;
@@ -1272,6 +1320,37 @@ function bkPreview(p){
     const o=$('#bk-other');if(o&&!o.checked)throw new Error('Tick “Yes, put this backup here anyway” first.');
     const r=await api('/api/backup/restore','POST',{ref:p.ref,sha:p.sha||'',confirm:c,other_account:!!(o&&o.checked)});const n=r.restored||{};
     $('#bk-prev').innerHTML='';toast(`Restored: ${n.clips||0} clips, ${n.channels||0} sources, ${n.destinations||0} channels. Reloading…`);setTimeout(()=>location.reload(),1800)},$('#bk-go'));
+}
+async function loadWhatsApp(){let w;try{w=await api('/api/whatsapp')}catch(e){return}const b=$('#wa-badge');b.className='badge '+(w.on?'uploaded':w.set?'queued':'outline');b.textContent=w.on?'On':w.set?'Off':'Not set up';
+  const steps=`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Open <a href="https://www.callmebot.com/blog/free-api-whatsapp-messages/" target="_blank" rel="noopener">CallMeBot's WhatsApp page</a> (free) on your phone and save the CallMeBot number it shows in your contacts.</li><li>From your WhatsApp, send that contact this message: <code style="user-select:all">I allow callmebot to send me messages</code></li><li>It answers with your <b>API key</b>. Type your own WhatsApp number (with +91) and that key below, then press <b>Save</b> and <b>Send a test</b>.</li></ol><div class="mut sm" style="margin-bottom:10px">The free WhatsApp service is sometimes full and gives no key for a few days &mdash; then just try again later. Your e-mail and the phone app keep working meanwhile.</div>`;
+  const form=`<div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Your WhatsApp number<input id="wa-phone" maxlength="20" autocomplete="off" inputmode="tel" placeholder="+91 98xxxxxxxx"></label><label class="f grow">API key from CallMeBot<input id="wa-key" maxlength="40" autocomplete="off" placeholder="the key it sent you"></label></div><div class="row" style="margin-top:8px"><button class="btn sm" id="wa-save">Save</button></div>`;
+  $('#wa-box').innerHTML=!w.allowed?`<div class="mut sm">${esc('WhatsApp alerts are switched off for your account.')}</div>`
+    :!w.set?steps+form
+    :`<div class="sm" style="line-height:1.8">Messages go to the number ending in <b>${esc(w.phone)}</b> (${Number(w.sent_today)} of ${Number(w.per_day)} sent today).</div>
+      <div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" id="wa-test">Send a test</button><button class="btn outline sm" id="wa-tog">${w.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="wa-del">Remove</button></div>
+      <details style="margin-top:10px"><summary class="sm">Change the number or the key</summary><div style="margin-top:8px">${steps}${form}</div></details>`;
+  if($('#wa-save'))$('#wa-save').onclick=()=>once(async()=>{await api('/api/whatsapp','POST',{action:'save',phone:$('#wa-phone').value.trim(),apikey:$('#wa-key').value.trim()});toast('Saved — now press Send a test');loadWhatsApp()},$('#wa-save'));
+  if($('#wa-test'))$('#wa-test').onclick=()=>once(async()=>{await api('/api/whatsapp/test','POST');toast('Sent — check WhatsApp');loadWhatsApp()},$('#wa-test'));
+  if($('#wa-tog'))$('#wa-tog').onclick=()=>once(async()=>{await api('/api/whatsapp','POST',{action:w.on?'off':'on'});loadWhatsApp()},$('#wa-tog'));
+  if($('#wa-del'))$('#wa-del').onclick=()=>once(async()=>{if(!confirm('Remove the WhatsApp number and key? Nothing more is sent there.'))return;await api('/api/whatsapp','DELETE');loadWhatsApp()},$('#wa-del'));
+}
+const WDNAME={stuck:'Stuck clip',retry:'Tried again',late:'New day',disk:'Disk clean-up',login:'Login',helper:'Helper PC',errors:'System errors',scheduler:'Timed job'};
+function renderWatchdog(){const box=$('#al-wd'),r=ALB&&ALB.self_repair;const show=!!r&&ALTAB==='system';box.classList.toggle('hide',!show);if(!show)return;
+  const sup=ME.role==='super';const fixed=r.items.filter(i=>i.kind==='fixed'),told=r.items.filter(i=>i.kind==='alert');
+  const counts=Object.keys(r.counts||{}).map(k=>`<span class="badge outline">${esc(WDNAME[k]||k)} &times;${Number(r.counts[k])}</span>`).join(' ');
+  const row=i=>`<div class="sm" style="padding:6px 0;border-top:1px solid var(--border)"><span class="mut">${when(i.at)}</span> &middot; ${esc(i.text||'')}</div>`;
+  box.innerHTML=`<div class="ch"><div><h3>Fixed by itself (last 7 days)</h3><p>${r.on?'Self-repair is on: known problems are fixed by themselves, safely and a few times at most. What it cannot fix is sent to you once, by e-mail and to your phone.':'Self-repair is switched off for this account.'}</p></div>${r.on?'<button class="btn outline sm" id="wd-run">Check now</button>':''}</div>
+    <div class="cb"><div class="row" style="gap:6px;flex-wrap:wrap;margin-bottom:8px">${counts||'<span class="mut sm">Nothing needed fixing.</span>'}</div>
+      ${fixed.slice(0,30).map(row).join('')}
+      ${told.length?`<div style="margin-top:10px"><b class="sm">Sent to you (it could not fix these by itself)</b>${told.slice(0,10).map(row).join('')}</div>`:''}
+      ${(r.quiet||[]).length?`<details style="margin-top:10px"><summary class="sm">Seen before, quiet now (${r.quiet.length}) &mdash; not counted any more; they show again by themselves if they come back</summary>${r.quiet.map(q=>`<div class="sm" style="padding:6px 0;border-top:1px solid var(--border)"><span class="mut">${when(q.at)}</span> &middot; ${esc(q.title||'')}${q.count>1?' &times;'+Number(q.count):''}<div class="mut" style="word-break:break-word">${esc(q.tech||'')}</div></div>`).join('')}</details>`:''}
+      ${sup?`<details style="margin-top:12px"><summary class="sm">Super Admin: self-repair switches for this account</summary><div style="margin-top:8px">
+        <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="wd-on" ${r.config.on?'checked':''}><i></i></span><span>Self-repair</span></label>
+        ${r.remedies.map(m=>`<label class="row sm" style="gap:8px;margin-top:6px"><input type="checkbox" data-wdr="${esc(m.key)}" ${m.on?'checked':''}>${esc(m.name)}</label>`).join('')}
+        ${r.existing.map(m=>`<div class="mut sm" style="margin-top:6px">&check; ${esc(m.name)}</div>`).join('')}
+        <div class="row" style="margin-top:8px"><button class="btn sm" id="wd-save">Save</button></div></div></details>`:''}</div>`;
+  if($('#wd-run'))$('#wd-run').onclick=()=>once(async()=>{await api('/api/watchdog/check','POST');toast('Checked');await loadAlerts()},$('#wd-run'));
+  if($('#wd-save'))$('#wd-save').onclick=()=>once(async()=>{const off=$$('[data-wdr]',box).filter(x=>!x.checked).map(x=>x.dataset.wdr);await api('/api/admin/watchdog','POST',{on:$('#wd-on').checked,off});toast('Saved');await loadAlerts()},$('#wd-save'));
 }
 async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}const b=$('#ph-badge');b.className='badge '+(p.on?'uploaded':p.set?'queued':'outline');b.textContent=p.on?'On':p.set?'Off':'Not set up';
   $('#ph-box').innerHTML=!p.set?`<ol class="sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Press <b>Set up</b>. A QR code appears.</li><li>On your phone install <b>ntfy</b> (free, Play Store / App Store).</li><li>Scan the QR code with the phone camera and open the link, then press <b>Subscribe</b> (or in the ntfy app press + and type the topic name).</li></ol><button class="btn" id="ph-setup">Set up</button>`
@@ -1371,20 +1450,51 @@ $('#face-del').onclick=()=>once(async()=>{if(confirm('Remove the default face fr
 async function loadWorkers(){
   try{const L=await api('/api/workers');
     $('#wk-list').innerHTML=L.length?L.map(w=>`<div class="item"><div class="avatar" style="background:var(--muted);color:var(--fg)">${ico('dashboard')}</div><div class="tx"><b>${esc(w.name)}</b><span class="mut sm">${w.last_seen?'Last seen '+when(w.last_seen):'Never seen'}${w.approved?'':' · registered '+when(w.created_at)+(w.ip?' from '+esc(w.ip):'')}</span></div>
-      ${!w.approved?'<span class="badge queued">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${!w.approved?'<span class="badge queued" title="Started without the helper key">Waiting for approval</span>':w.online?'<span class="badge uploaded">Online</span>':'<span class="badge outline">Offline</span>'}
+      ${w.enrolled?'<span class="badge outline" title="Joined by itself with the helper key">Key</span>':''}
       ${w.central?'<span class="badge uploaded" title="Also downloads for every account without a helper of its own">Central</span>':''}
       ${w.approved&&ME.role==='super'&&!ME.viewing?`<button class="btn outline sm" data-wc="${w.id}" data-on="${w.central?0:1}" title="A central helper also downloads for every account that has no helper of its own online">${w.central?'Stop central':'Make central'}</button>`:''}
-      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}">Approve</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Start worker\\run_worker.bat on your computer.');
+      ${!w.approved?`<button class="btn ok sm" data-wa="${w.id}" title="Only for a helper without the key">Approve (pairing code)</button>`:''}<button class="btn bad sm icon" data-wd="${w.id}" title="Remove (it does not join again by itself)">${ico('trash')}</button></div>`).join(''):empty('dashboard','No helper PC yet','Press Show above and run the command on your PC or phone.');
     const hp=(OV&&OV.helper)||{},na=+hp.archived||0;
     $('#wk-arch').innerHTML=(L.some(w=>w.approved&&(!w.can||w.can==='all'||w.can.split(',').includes('archive')))&&hp.archive_ready===false)
       ?`<span style="color:var(--warn)">${ico('alert')} <b>Update the helper PC so it can save uploaded videos — until then they stay on the server.</b> It updates itself while it runs; otherwise start <b>worker\\run_worker.bat</b> once.</span>`
       :`${ico('check')} <b>${na}</b> uploaded video${na===1?'':'s'} saved on your PC, in <b>${esc(hp.archive_dir||'the folder RajiStudioArchive in your user folder')}</b>. The server keeps a video only while it waits for its upload; open a clip and press <b>Get the video back from the PC</b> to bring one back.`
         +(hp.archive_missing?` <span style="color:var(--warn)">${ico('alert')} ${+hp.archive_missing} saved video(s) are missing from that folder — nothing was deleted; put the folder back if you moved it.</span>`:'');
     $$('[data-wa]').forEach(b=>b.onclick=()=>once(async()=>{const code=prompt('Type the 6-digit pairing code shown in the helper window on your PC or in Termux on the phone (also in helper.log):');if(code===null)return;await api(`/api/workers/${b.dataset.wa}/approve`,'POST',{code});toast('Helper approved');loadWorkers()}));
-    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper PC?')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
+    $$('[data-wd]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this helper? It stops getting work and does not join again by itself. (To stop every helper that has the key, press New key.)')){await api(`/api/workers/${b.dataset.wd}`,'DELETE');loadWorkers()}}));
     $$('[data-wc]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';await api(`/api/admin/workers/${b.dataset.wc}/central`,'POST',{on});toast(on?'Central helper: it now also downloads for every account without a helper':'No longer central');loadWorkers()},b));
   }catch(e){}
-  phoneCmd();
+  phoneCmd();loadKey();
+}
+// ---------- helper key: helpers join by themselves (the key is shown only after "Show", to this account's admin) ----------
+// The install commands never contain the key: the installer asks for it (Windows also reads it from the clipboard).
+let KEYCMD=null;
+async function loadKey(shown){
+  const box=$('#wk-key');if(!box)return;let k;
+  if(shown)KEYCMD=shown;
+  try{k=shown||await api('/api/helper/key')}catch(e){box.classList.add('hide');return}
+  box.classList.remove('hide');
+  const on=k.state!=='off',joined=(k.joined||[]).filter(j=>j.current),anyJoined=(k.joined||[]).length;
+  const cmd=(id,title,how,text)=>`<div style="margin-top:8px"><b>${title}</b> <span class="mut sm">${how}</span><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><code id="${id}" style="user-select:all;word-break:break-all;flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">${esc(text)}</code><button class="btn ghost sm" data-kcopy="${id}">Copy</button></div></div>`;
+  const masked=KEYCMD?KEYCMD.key.split('.').slice(0,2).join('.')+'.••••••••':'';
+  box.innerHTML=(on?`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${ico('check')}<span class="sm" style="flex:1;min-width:200px"><b>Helpers connect by themselves.</b> Run a command below on a new PC or phone and give it the helper key when it asks — no approval, no pairing code. Up to ${k.max_helpers} helpers per key.</span>
+      ${KEYCMD?'<button class="btn outline sm" id="wk-khide">Hide</button>':'<button class="btn sm" id="wk-kshow">Show</button>'}<button class="btn outline sm" id="wk-krot">New key</button><button class="btn outline sm" id="wk-kleak">Key leaked</button><button class="btn ghost sm" id="wk-krev">Switch off</button></div>`
+      :`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center">${ico('alert')}<span class="sm" style="flex:1;min-width:200px"><b>The helper key is switched off.</b> New helpers wait for approval with a pairing code. Helpers already connected keep working.</span><button class="btn sm" id="wk-krot">New key</button>${anyJoined?'<button class="btn outline sm" id="wk-kleak">Key leaked</button>':''}</div>`)
+    +(joined.length?`<div class="mut sm" style="margin-top:6px">Joined with this key: ${joined.map(j=>esc(j.name)+(j.created_at?' ('+when(j.created_at)+')':'')).join(', ')}</div>`:'')
+    +(on&&KEYCMD?`<div style="margin-top:8px"><b>Your helper key</b> <span class="mut sm">— only for your own PCs and phones</span><div class="row" style="gap:8px;flex-wrap:wrap;margin-top:4px"><code style="flex:1;min-width:200px;padding:8px;border:1px solid var(--border);border-radius:8px">${esc(masked)}</code><button class="btn sm" id="wk-kcopykey">Copy key</button></div></div>`
+      +cmd('wk-klap','Windows PC','— paste in Windows PowerShell; when it waits for the key, press Copy key (it reads the clipboard):',KEYCMD.laptop)
+      +cmd('wk-kphone','Android phone','— paste in Termux; when it asks for the key, press Copy key and paste it there:',KEYCMD.phone)
+      +'<div class="mut sm" style="margin-top:6px">The commands hold no key, so the key never lands in a shell history. Anyone who has the key can add a helper to your account: do not share it. If it leaked, press <b>Key leaked</b>.</div>':'');
+  const hide=$('#wk-khide');if(hide)hide.onclick=()=>{KEYCMD=null;loadKey();phoneCmd()};
+  const show=$('#wk-kshow');if(show)show.onclick=()=>once(async()=>{await loadKey(await api('/api/helper/key/show','POST'))},show);
+  $('#wk-krot').onclick=()=>once(async()=>{if(on&&!confirm('Make a new helper key? The old key stops working at once.\n\nHelpers you approved yourself, and helpers that joined with the current key, keep working and get the new key by themselves. Helpers that joined with an older key do not.\n\nIf the key leaked, press “Key leaked” instead: “New key” alone does not remove helpers that already joined with it.'))return;
+    await loadKey(await api('/api/helper/key/rotate','POST'));toast('New helper key made')},$('#wk-krot'));
+  const leak=$('#wk-kleak');if(leak)leak.onclick=()=>once(async()=>{if(!confirm('Key leaked? This does three things at once:\n\n1. switches the old key off,\n2. removes EVERY helper that joined with a key ('+anyJoined+') — they do not come back by themselves; approve your own again with their pairing code,\n3. makes a new key.\n\nHelpers you approved yourself keep working.'))return;
+    await loadKey(await api('/api/helper/key/rotate','POST',{leaked:true}));toast('Old key off, helpers that joined with it removed, new key made');loadWorkers()},leak);
+  const rev=$('#wk-krev');if(rev)rev.onclick=()=>once(async()=>{if(!confirm('Switch the helper key off? New helpers then need approval with a pairing code. Helpers already connected keep working.'))return;
+    await api('/api/helper/key/revoke','POST');KEYCMD=null;toast('Helper key switched off');loadKey();phoneCmd()},rev);
+  const ck=$('#wk-kcopykey');if(ck)ck.onclick=async()=>{try{await navigator.clipboard.writeText(KEYCMD.key);toast('Key copied — paste it where the installer asks')}catch(e){prompt('Copy this key:',KEYCMD.key)}};
+  $$('[data-kcopy]').forEach(b=>b.onclick=async()=>{const v=$('#'+b.dataset.kcopy).textContent;try{await navigator.clipboard.writeText(v);toast('Copied')}catch(e){prompt('Copy this command:',v)}});
 }
 $$('#wk-tabs [data-wt]').forEach(b=>b.onclick=()=>{$$('#wk-tabs .tab').forEach(x=>x.classList.toggle('on',x===b));$('#wk-pc').classList.toggle('hide',b.dataset.wt!=='pc');$('#wk-phone').classList.toggle('hide',b.dataset.wt!=='phone')});
 async function phoneCmd(){
@@ -1394,7 +1504,8 @@ async function phoneCmd(){
   if(sh&&r.code){sh.classList.remove('hide');$('#wk-shared-on').checked=!!r.shared_chosen;
     $('#wk-shared-txt').textContent='Use the shared helper when my PC is off'+(r.shared?' — the shared helper downloads your videos now'+(r.shared_online?'':' (it is offline at the moment)'):' — off: only your own helper PC downloads')+'. It never makes your reels, voice-overs or captions.';
     $('#wk-shared-on').onchange=e=>once(async()=>{await api('/api/account/shared-helper','POST',{on:e.target.checked});toast('Saved');phoneCmd()})}
-  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}`;el.textContent=cmd+(r.code?'   (when it asks for the helper code, paste: '+r.code+')':'');
+  // never the key in this command: setup.sh asks for it (Helper key box above: Show -> Copy key)
+  const cmd=`curl -fsSL ${o}/helper/setup.sh | bash -s -- ${o}`;el.textContent=cmd+'   (it asks for your helper key: press Show above, then Copy key'+(r.code?'; without a key it asks for the helper code: '+r.code:'')+')';
   $('#wk-cmd-copy').onclick=async()=>{try{await navigator.clipboard.writeText(cmd);toast('Copied')}catch(e){prompt('Copy this command:',cmd)}};
 }
 async function loadCookies(){
@@ -1405,7 +1516,45 @@ $('#ck-del').onclick=()=>once(async()=>{await api('/api/settings/cookies','DELET
 $('#cp-go').onclick=()=>once(async()=>{await api('/api/change-password','POST',{old_password:$('#cp-old').value,new_password:$('#cp-new').value});$('#cp-old').value='';$('#cp-new').value='';toast('Password changed')},$('#cp-go'));
 
 const TABS=[['rendered','Ready to review'],['queued','Queued'],['uploaded','Uploaded'],['failed','Failed'],['draft,rendering,fetching','Drafts']];
+// ---------- From my PC: videos in the folder on the PC (app/pcfolder.py) ----------
+async function loadPc(){
+  const card=$('#pc-card');if(!card)return;let r;
+  if(!can('clips.pc_folder')){card.classList.add('hide');return}
+  try{r=await api('/api/pc-items')}catch(e){card.classList.add('hide');return}
+  const W=r.waiting||[],R=r.recent||[],H=r.helpers||[];
+  if(!W.length&&!R.length&&!H.length){card.classList.add('hide');return}
+  card.classList.remove('hide');
+  const fold=H.map(h=>`${esc(h.name)}: <b>${h.folder?esc(h.folder):'no folder'}</b>`+(h.knows?(h.exists===false?' <span style="color:var(--warn)">(not found on that PC)</span>':` (${+h.videos||0} video${+h.videos===1?'':'s'})`):(h.folder?' (read once that helper has updated itself)':''))
+    +` <button class="btn ghost sm" data-pcf="${h.id}" data-cur="${esc(h.folder||'')}">Change</button>`).join(' · ');
+  const meta=x=>[esc(x.rel||x.name),x.duration?T(x.duration):'',x.suggested?'suggested '+when(x.suggested):'',x.manual?'waits for you':'',esc(x.licence||'')].filter(Boolean).join(' · ');
+  const tile=x=>`<div class="item" style="align-items:flex-start;gap:12px;flex-wrap:wrap"><div style="width:120px;height:68px;flex:none;border-radius:8px;background:var(--muted) center/cover no-repeat${x.thumb?` url('/api/pc-items/${x.id}/thumb')`:''}"></div>
+    <div class="tx" style="flex:1;min-width:180px"><b>${esc(x.title||x.topic||x.name)}</b><span class="mut sm">${meta(x)}</span>
+    ${x.note?`<span class="sm" style="color:${x.state==='blocked'||x.missing?'var(--bad)':'inherit'}">${esc(x.note)}</span>`:''}
+    ${!x.has_info&&x.state==='new'?`<input data-pct="${x.id}" maxlength="120" placeholder="What is this video about? Title, description and tags are found from it" value="${esc(x.topic||'')}" style="margin-top:6px;width:100%">`:''}</div>
+    <div class="row" style="gap:6px;flex:none">${x.state==='new'&&!x.missing?`<button class="btn ok sm" data-pca="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn ghost sm" data-pcs="${x.id}">Skip</button></div></div>`;
+  const line=x=>`<div class="sm" style="padding:4px 0">${esc(x.title||x.topic||x.name)} — ${x.state==='done'?'on YouTube':x.state==='skipped'?'skipped':x.missing?'<span style="color:var(--bad)">missing on the PC</span>':x.publish_at?'goes live '+when(x.publish_at)+(x.on_server?' (the video is on the server for its upload)':x.wanted?' (asked from your PC)':' (still on your PC)'):esc(x.state)}${x.moved?' <span style="color:var(--warn)">— moved to a new day</span>':''}${x.state==='skipped'?` <button class="btn ghost sm" data-pcu="${x.id}">Show again</button>`:''}</div>`;
+  $('#pc-all').classList.toggle('hide',W.filter(x=>x.state==='new'&&!x.missing).length<2);
+  $('#pc-body').innerHTML=`<div class="mut sm" style="line-height:1.6">${ico('alert')} ${esc(r.notice)}</div>
+    <label class="row" style="gap:10px;font-weight:500;margin:10px 0"><span class="switch"><input type="checkbox" id="pc-auto" ${r.auto?'checked':''}><i></i></span><span>Videos I add to the PC folder go up by themselves</span></label>
+    <div class="mut sm" style="margin-bottom:8px">${r.auto?'New loose videos (straight in the folder) get the next free day (one a day, 6 PM) by themselves. A video in its own sub-folder goes by itself only when its info.json says <b>"approve": "auto"</b>; every other one waits for you.':'Every new video waits here for Approve.'} Folder${H.length===1?'':'s'}: ${fold||'no helper PC yet (My channels → Helper PC)'}</div>`
+    +(W.length?W.map(tile).join(''):'<div class="mut sm">Nothing is waiting.</div>')
+    +(R.length?`<details style="margin-top:10px"><summary class="sm">Approved and done (${R.length})</summary>${R.map(line).join('')}</details>`:'');
+  $('#pc-auto').onchange=e=>once(async()=>{await api('/api/pc-items/auto','POST',{on:e.target.checked});toast(e.target.checked?'New videos in the folder now go up by themselves':'New videos now wait for Approve');loadPc()});
+  $$('[data-pca]').forEach(b=>b.onclick=()=>once(async()=>{const i=$(`[data-pct="${b.dataset.pca}"]`);const x=await api(`/api/pc-items/${b.dataset.pca}/approve`,'POST',{topic:i?i.value.trim():''});toast('Approved — '+(x.publish_at?'goes live '+when(x.publish_at):'queued'));loadPc()},b));
+  $$('[data-pcs]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcs}/skip`,'POST');toast('Skipped — it stays on your PC');loadPc()},b));
+  $$('[data-pcu]').forEach(b=>b.onclick=()=>once(async()=>{await api(`/api/pc-items/${b.dataset.pcu}/unskip`,'POST');loadPc()},b));
+  $('#pc-all').onclick=()=>once(async()=>{const ok=W.filter(x=>x.state==='new'&&!x.missing),m=ok.filter(x=>x.manual).length;
+    if(!confirm(`Approve all ${ok.length} waiting videos?`+(m?` This includes ${m} marked “approve: manual” — the ones that wait for you.`:'')+` Each gets its own day, one a day (6 PM) after the last scheduled one.`))return;
+    await api('/api/pc-items/approve-all','POST');toast('Approving in the background…');loadPc()},$('#pc-all'));
+  const B=r.bulk||{};clearTimeout(window.PC_POLL);
+  if(B.total!==undefined){const bx=document.createElement('div');bx.className='sm';bx.style.margin='8px 0';
+    bx.textContent=B.running?`Approving… ${B.done} of ${B.total} done (${B.approved} approved).`:`Approve all: ${B.approved} of ${B.total} approved`+(B.not&&B.not.length?` — ${B.not.length} not: ${B.not[0].why}`:'')+'.';
+    $('#pc-body').prepend(bx);if(B.running){$('#pc-all').classList.add('hide');window.PC_POLL=setTimeout(()=>{if(!$('#p-clips').classList.contains('hide'))loadPc()},2000)}}
+  $$('[data-pcf]').forEach(b=>b.onclick=()=>once(async()=>{const f=prompt('Folder of videos on that PC (empty = do not watch a folder):',b.dataset.cur);if(f===null)return;
+    await api(`/api/workers/${b.dataset.pcf}/pc-folder`,'POST',{folder:f.trim()});toast('Saved — the helper reads it within a minute');loadPc()},b));
+}
 async function loadClips(){
+  loadPc();
   $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
   await loadOverview();const c=OV.counts;
   const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0),held:c.held||0};
@@ -1416,7 +1565,7 @@ async function loadClips(){
   const L=await api('/api/clips?status='+encodeURIComponent(st));
   $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${x.thumb_path?`/api/clips/${x.id}/thumbnail?v=${encodeURIComponent(x.thumb_note||'')}`:thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
     <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
-    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
+    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.from_pc&&x.status==='queued'?`<div class="sm mut">From your PC — ${x.pc_on_server?'the video is on the server for its upload':'the video comes from your PC about a day before its upload'}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
     <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
     ${x.yt_state&&x.yt_state!=='ok'?`<div class="sm" style="color:var(--bad);margin-top:6px">${ico('alert')} ${esc(ytLabel(x.yt_state))}</div>`:''}</div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
   wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));
@@ -1760,19 +1909,21 @@ const NAVPAGES=['dashboard','clips','sources','analytics','viral','ideas','alert
 function pageOn(p){return !NAVPAGES.includes(p)||can('page.'+p)}
 function firstPage(){return NAVPAGES.find(pageOn)||'none'}
 const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
-  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc]',
-  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
+  'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc],#nz-add,[data-nzon]',
+  'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo,[data-nzoff]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
   'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
-  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve]','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite',
+  'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
   'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send,#pm-auto-box',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmfind],[data-pmconfirm],[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
-  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','pexels.use':'.card:has(#px-key)',
-  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
-  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)'};
+  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
+  'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
+  'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
+  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
+  'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){
   let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}
@@ -1806,7 +1957,7 @@ function renderPlan(){
   keysForm($('#gk-body'),()=>{toast('Keys saved. If a channel now shows “Reconnect needed”, connect it again.');loadDests()});
   loadOffers().catch(()=>{});
   api('/api/account/helper-code').then(r=>{if(!r.code||!claim)return;claim.classList.remove('hide');
-    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">On your helper PC, save this code in a text file named <b>helper_code.txt</b> inside the <b>worker</b> folder before the first start. It attaches that PC to your account. Then approve the PC below with the pairing code it shows.</div>`;
+    claim.innerHTML=`<b>Your helper code:</b> <code style="user-select:all">${esc(r.code)}</code> <button class="btn ghost sm" id="wk-copy">Copy</button><div class="mut sm" style="margin-top:4px">Not needed with “Download my helper” (it carries your helper key) or the commands above with your helper key — they connect by themselves. Only for a helper without the key: save this code in <b>worker\\helper_code.txt</b> before its first start, then approve it below with the pairing code it shows.</div>`;
     $('#wk-copy').onclick=async()=>{try{await navigator.clipboard.writeText(r.code);toast('Copied')}catch(e){prompt('Copy this code:',r.code)}}}).catch(()=>{});
 }
 const PERIODS={monthly:'per month',yearly:'per year',once:'one-time'};
@@ -1862,10 +2013,11 @@ async function loadStart(){
       <div class="row" style="flex-wrap:wrap;gap:10px"><label class="f grow">Client ID<input id="ob-cid" autocomplete="off" placeholder="1234567890-abc….apps.googleusercontent.com" value="${esc(g.client_id||'')}"></label><label class="f grow">Client secret<input id="ob-sec" type="password" autocomplete="new-password" placeholder="GOCSPX-…"></label><button class="btn" id="ob-keys" style="align-self:flex-end">Save</button></div>`,
     channel:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/login">Connect YouTube channel</a></div>`,
     verify:()=>`<div class="row" style="margin-top:8px"><a class="btn outline" href="https://www.youtube.com/verify" target="_blank" rel="noopener">Open youtube.com/verify</a><button class="btn" data-oback="verify">I have verified it</button></div>`,
-    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a><span class="mut sm">${o.helper_waiting?'A helper is waiting — type its pairing code:':'After starting it, type the pairing code it shows:'}</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn" id="ob-approve">Approve</button></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">${o.helper_waiting?'':'Waiting for your helper to start… this page checks every 10 seconds.'}</div>`,
+    helper:()=>`<div class="row" style="margin-top:8px;flex-wrap:wrap"><a class="btn" href="/api/helper/download">Download my helper</a></div><div class="mut sm" style="margin-top:6px" id="ob-hwait">It connects by itself — nothing to approve. Waiting for your helper to start… this page checks every 10 seconds.</div>
+      ${o.helper_waiting?`<div class="row" style="margin-top:8px;flex-wrap:wrap"><span class="mut sm">A helper without the key is waiting — type its pairing code:</span><input id="ob-pair" inputmode="numeric" maxlength="6" placeholder="6 digits" style="width:110px"><button class="btn outline" id="ob-approve">Approve</button></div>`:''}`,
     face:()=>`<div class="row" style="margin-top:8px"><label class="btn">Upload my photo<input type="file" accept="image/jpeg,image/png,image/webp" id="ob-face" hidden></label><button class="btn ghost" data-oback="face">Skip for now</button><span class="mut sm" id="ob-facenote"></span></div>`,
     gmail:()=>`<div class="row" style="margin-top:8px"><a class="btn" href="/auth/gmail">Connect Gmail</a><button class="btn ghost" data-oback="gmail">Skip for now</button></div>`,
-    source:()=>`<div class="row" style="margin-top:8px"><button class="btn" id="ob-src">Add my first source</button></div>`};
+    source:()=>`<div id="ob-niche" style="margin-top:8px"></div><div class="row" style="margin-top:10px"><button class="btn ghost sm" id="ob-src">Add a source myself instead</button></div>`};
   $('#ob-steps').innerHTML=o.steps.map((st,i)=>{const cur=st.key===o.current;return `<div class="card" style="margin-bottom:12px;${st.locked?'opacity:.5':''}"><div class="ch"><div><h3>${st.done?'✅':st.locked?'🔒':'👉'} ${i+1}. ${esc(st.title)}${st.skipped?' <span class="badge outline">skipped</span>':''}</h3><p>${esc(st.why)}</p></div>${st.done?'<span class="badge uploaded">Done</span>':st.locked?'<span class="badge outline">Opens after step '+i+'</span>':'<span class="badge queued">Do this now</span>'}</div>
     ${cur?`<div class="cb"><ol class="sm" style="margin:0 0 6px;padding-left:18px;line-height:1.8">${st.how.map(h=>`<li>${esc(h)}</li>`).join('')}</ol>${body[st.key]()}</div>`:''}
     ${st.key==='google'&&st.done&&!g.shared?'<div class="cb"><details><summary class="sm" style="cursor:pointer">Wrong keys? Change them</summary><div id="ob-rekeys" class="sm" style="margin-top:8px"></div></details></div>':''}</div>`}).join('');
@@ -1878,7 +2030,9 @@ async function loadStart(){
     await api(`/api/workers/${w.id}/approve`,'POST',{code:$('#ob-pair').value});toast('Helper approved');await after()},$('#ob-approve'));
   if($('#ob-face'))$('#ob-face').onchange=()=>once(async()=>{const f=$('#ob-face').files[0];if(!f)return;const fd=new FormData();fd.append('file',f);$('#ob-facenote').textContent='Removing the background… (can take a minute)';try{await api('/api/faces/0','POST',fd)}finally{$('#ob-facenote').textContent=''}toast('Photo saved');await after()});
   if($('#ob-src'))$('#ob-src').onclick=()=>{window.OBSRC=true;openAdd()};
-  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName));
+  if($('#ob-niche'))nichePicker($('#ob-niche'),after).catch(e=>{$('#ob-niche').textContent=e.message});
+  clearTimeout(window._obT);if(o.current==='helper'||o.current==='source')window._obT=setTimeout(function again(){const typing=($('#ob-pair')&&$('#ob-pair').value)||(document.activeElement&&['INPUT','TEXTAREA'].includes(document.activeElement.tagName))
+      ||$('#ob-niche [data-nz]:checked')||($('#ob-niche .nz-topic')&&$('#ob-niche .nz-topic').value);/* never wipe niches being picked */
     if($('#p-start').classList.contains('hide')||$('#m-add').classList.contains('on'))return;
     if(typing){window._obT=setTimeout(again,10000);return}loadStart().catch(()=>{})},10000);
 }

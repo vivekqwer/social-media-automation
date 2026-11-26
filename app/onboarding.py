@@ -24,7 +24,7 @@ STEPS = [  # key, title, why, can it be skipped
     ("helper", "Your helper PC", "A small program on a Windows PC at home. It downloads the videos (YouTube blocks downloads from servers).", False),
     ("face", "Your face for thumbnails", "Put on every thumbnail, next to a frame of the video.", True),
     ("gmail", "Gmail for alerts and permission mails", "Alerts come to your inbox; permission mails to creators are sent from it when you press Send.", True),
-    ("source", "Your first source", "Where clips come from. It runs by itself after this.", False),
+    ("source", "What is your channel about?", "Pick your niche (or write your own topic): sources that find videos for it are made for you and run by themselves.", False),
 ]
 
 HOW = {
@@ -56,7 +56,7 @@ HOW = {
         "On a Windows PC that is usually on (at home), press “Download my helper” below and save the ZIP file.",
         "Open the folder where it was saved, right-click the ZIP → “Extract All…” → Extract. Open the new folder.",
         "Double-click “Start helper”. If Windows shows a blue “Windows protected your PC” box, press “More info” → “Run anyway” (it is your own helper). The first time it installs what it needs; if it says Python was installed, close the window and double-click “Start helper” once more.",
-        "The window shows a 6-digit pairing code. Type that code below and press Approve.",
+        "It connects by itself (the download carries your helper key) — nothing to approve. This page moves on as soon as it runs.",
         "To make it start by itself with Windows: open the folder “worker” and double-click “install_autostart”.",
     ],
     "face": [
@@ -69,10 +69,11 @@ HOW = {
         "Not now? Press Skip — alerts are then only shown in the dashboard and permission mails cannot be sent. You can connect it later in My channels.",
     ],
     "source": [
-        "Press “Add my first source”.",
-        "Easiest start: Source type “Topic”, write what your channel is about (for example “indian street food”). Only videos whose owners allow reuse (Creative Commons) are used.",
-        "Leave “Review first” on: the first clips then wait for your approval in Clips.",
-        "Press Add. The system now finds videos, cuts the best moments and prepares them by itself.",
+        "Tick one or more niches below that fit your channel, or write your own topic (for example “indian street food”).",
+        "Only videos whose owners allow reuse (Creative Commons) are used. Some subjects (music, films, TV, cricket) have almost none — the page tells you.",
+        "Leave “Check the first clips myself” on: the first clips then wait for your approval in Clips.",
+        "Press “Make my sources”. The system now finds videos, cuts the best moments and prepares them by itself. You can change your niche later in Sources.",
+        "Prefer a creator's channel or something else? Press “Add a source myself” instead.",
     ],
 }
 
