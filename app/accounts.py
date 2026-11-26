@@ -48,6 +48,7 @@ class Account(CoreBase):
     paid_plan = Column(String(40))  # the plan the running payment is for; the end only acts while the account is still on it
     limit_before_pay = Column(Integer)  # channel limit before the first payment of this paid period (given back at the end)
     limit_by_hand = Column(Boolean)  # the Super Admin set the channel limit by hand: a payment's end leaves it alone
+    owned_plan = Column(String(40))  # a one-time plan this account paid for: a monthly/yearly plan bought later falls back to it
     session_gen = Column(String(20), default="0")  # changes on logout / password change: old cookies stop working
     terms_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
@@ -60,6 +61,7 @@ def init():
 
     CoreBase.metadata.create_all(engine)
     migrate(tenant.OWNER, CoreBase.metadata)
+    payments.mark_old_applied()  # payments from before the "applied" mark existed are not applied a second time
     with CoreSession() as s:  # every active customer's tables exist and are up to date
         ids = [a.tenant_id for a in s.query(Account).filter(Account.status == "active", Account.tenant_id.isnot(None))]
     for tid in ids:

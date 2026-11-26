@@ -94,6 +94,7 @@ PERMS = [
     ("meta.use", "extras", "Instagram + Facebook", True),
     ("telegram.use", "extras", "Telegram", True),
     ("phone.use", "extras", "Phone notifications (ntfy app) and news alerts (video live, views, subscribers)", True),
+    ("report.weekly", "extras", "Weekly report (Monday 9 AM: views, subscribers, top videos — by e-mail and phone app)", True),
     ("keywords.use", "extras", "Keyword helper (research, better keywords, keywords refreshed before upload)", True),
     ("backup.use", "extras", "Backup & restore (download, check and restore a backup; daily backups always run)", True),
     ("strikes.reply", "extras", "Strike responder: the request to the creator to take a complaint back", True),
@@ -338,6 +339,8 @@ ROUTES = [
     ("GET", "/api/phone", SIGNED, None),
     ("POST", "/api/phone", "phone.use", "Changed phone notifications"),
     ("POST", "/api/phone/test", "phone.use", None),
+    ("GET", "/api/settings/weekly-report", SIGNED, None),
+    ("POST", "/api/settings/weekly-report", "report.weekly", "Changed the weekly report"),
     ("GET", "/api/whatsapp", SIGNED, None),
     ("POST", "/api/whatsapp", "whatsapp.use", "Changed WhatsApp alerts"),  # never the number or the key in the log
     ("POST", "/api/whatsapp/test", "whatsapp.use", None),
@@ -1184,11 +1187,36 @@ def apply_plan(aid: int, name: str, keep_restrictions: bool = False) -> dict:
     plan's, stay. A channel limit they LOWERED by hand stays when it is lower than the plan's. Values an account only
     kept from a deleted or edited plan are not restrictions: the plan that was paid for replaces them. Direct controls
     are never touched here."""
+    pname, change, kept = plan_change(name, keep_restrictions)
+    a = _account(aid)
+    _write_access(aid, change)
+    record_plan(aid, pname, kept, keep_restrictions, a.tenant_id)
+    return public_access(aid)
+
+
+def record_plan(aid: int, pname: str, kept: list, keep_restrictions: bool, tenant_id: int | None):
+    if keep_restrictions:
+        record(aid, "system", "admin.plan", (f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)")
+               + (f" — kept what the Super Admin restricted: {', '.join(kept)}" if kept else ""), tenant_id)
+    else:
+        record(aid, "super", "admin.plan", f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)", tenant_id)
+
+
+def apply_in(row: Account, change):
+    """The change of plan_change() made on an account row inside the caller's own transaction (app/payments.py: the
+    plan, the end date and the payment's "applied" mark are saved together). The caller holds _write_lock and calls
+    invalidate() after its commit."""
+    acc = _own(row)
+    change(acc, row)
+    row.access = acc
+
+
+def plan_change(name: str, keep_restrictions: bool = False):
+    """(plan name, change(access, row), list filled with what was kept): what apply_plan writes, without writing it."""
     cfg = config()
     pname = _plan_name(cfg, name) if name else ""
     if name and pname is None:
         raise ValueError("There is no plan with this name.")
-    a = _account(aid)
     plan_set = cfg["plans"].get(pname) or {"limits": {}}
     plan_limits = _resolve({"plan": pname}, cfg)["limits"]
     kept = []
@@ -1220,13 +1248,7 @@ def apply_plan(aid: int, name: str, keep_restrictions: bool = False) -> dict:
             held["limits"].append("channels")  # this plan leaves the channel limit alone: the mark stays with it
         acc["held"] = held
 
-    _write_access(aid, change)
-    if keep_restrictions:
-        record(aid, "system", "admin.plan", (f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)")
-               + (f" — kept what the Super Admin restricted: {', '.join(kept)}" if kept else ""), a.tenant_id)
-    else:
-        record(aid, "super", "admin.plan", f"Put on the plan “{pname}”" if pname else "Taken off every plan (default switches)", a.tenant_id)
-    return public_access(aid)
+    return pname or "", change, kept
 
 
 def usage(tid: int | None) -> dict:

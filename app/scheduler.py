@@ -492,13 +492,14 @@ def start():
     #                        Alerts → Strikes and the address is YouTube's own — and their answer)
     #   pc_due               "Videos from a folder on their PC"; uploads paused -> no file is asked for (inside pc_due)
     #   phone_events         "Phone notifications" (phone.enabled() also checks it, so no push goes out when it is off)
+    #   weekly_due           "Weekly report" (and the account's own switch in My channels); acts on Mondays from 9 AM IST
     #   freshen_due          "Keyword helper" (keywords refreshed before upload)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
     #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
     #                        and the creators' answers stays with "Permission mails to creators"
     #   always: daily_backup, sweep_stale, check_helper, cleanup_disk, retry_thumbnails, check_uploads, sync_all, sync_all_watch_time,
     #           strike_watch (a strike YouTube itself shows: never-use list, held clips, scheduled videos kept private — no switch),
-    #           recover, unpark_due (only drafts the Super Admin parked), plans_ending (owner's copy, all accounts)
+    #           recover, unpark_due (only drafts the Super Admin parked), plans_ending + payments_check (owner's copy, all accounts)
     # Budget: a customer on the owner's Google project spends only what the owner's due uploads leave (quota.shared_room)
     add(process_queue, "interval", minutes=1, max_instances=1, coalesce=True)
     # check often; each source runs only when its own interval has passed (deploys can't reset or pause this)
@@ -554,6 +555,18 @@ def start():
     # run missed by a restart at 3:30 still happens within the hour
     sch.add_job(plans_ending, "cron", hour=3, minute=30, max_instances=1, coalesce=True, misfire_grace_time=3600)
     sch.add_job(plans_ending, "date", run_date=datetime.now(timezone.utc) + timedelta(minutes=5), misfire_grace_time=3600)
+    from .payments import recover_unapplied
+
+    def payments_check():  # a payment marked paid whose plan never went on (server stopped half way): put on, once
+        from . import tenant
+
+        with tenant.use(tenant.OWNER):
+            recover_unapplied()
+    sch.add_job(payments_check, "interval", minutes=10, max_instances=1, coalesce=True,
+                next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
+    from .weekly import weekly_due
+    add(when_on("report.weekly", weekly_due), "interval", minutes=15, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=6))  # Monday 9 AM IST report (once a week per account)
     from .backup import daily as daily_backup
     add(daily_backup, "interval", hours=6, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=15))  # one backup a day per account (skips when today's exists)

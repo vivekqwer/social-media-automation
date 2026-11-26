@@ -332,7 +332,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <label class="f" style="margin-top:8px">What the customer should do<input id="pay-text" maxlength="1000" placeholder="Pay, then write the payment reference in the request."></label>
             <div class="row" style="justify-content:flex-end;margin-top:10px"><button class="btn sm" id="pay-save">Save</button></div></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch" style="flex-wrap:wrap"><div style="flex:1 1 240px;min-width:0"><h3>Online payment (Razorpay)</h3><p>Customers pay for a plan with UPI, card or net banking, and the plan is switched on by itself. Without keys, customers see the UPI steps above.</p></div><span class="badge outline" id="rz-badge">…</span></div>
-          <div class="cb"><div class="sm" id="rz-state">…</div>
+          <div class="cb"><div class="sm" id="rz-state">…</div><div class="sm mut" id="rz-wh-last" style="margin-top:4px"></div>
             <div class="row" style="flex-wrap:wrap;gap:10px;margin-top:10px"><label class="f grow">Key ID<input id="rz-id" maxlength="60" autocomplete="off" placeholder="rzp_test_… or rzp_live_…"></label><label class="f grow">Key Secret<input id="rz-secret" type="password" maxlength="200" autocomplete="new-password" placeholder="empty = keep the saved one"></label><label class="f grow">Webhook secret<input id="rz-wh" type="password" maxlength="200" autocomplete="new-password" placeholder="empty = keep the saved one"></label></div>
             <div class="row" style="justify-content:flex-end;gap:8px;margin-top:10px"><button class="btn ghost sm" id="rz-clear">Remove keys</button><button class="btn outline sm" id="rz-check">Check keys</button><button class="btn sm" id="rz-save">Save</button></div>
             <details style="margin-top:10px"><summary style="cursor:pointer;font-weight:500">Step by step: where to find the keys (no coding)</summary>
@@ -372,6 +372,10 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Connected channels</h3><p>Use the Google account that owns the channel.</p></div></div><div class="cb" id="dest-list"></div></div>
             <div class="card" id="wa-card"><div class="ch"><div><h3>WhatsApp alerts (optional)</h3><p>Only the problems the system could not fix by itself, and the &ldquo;needs you&rdquo; alerts &mdash; to your own WhatsApp, at most 10 a day. E-mail and the phone app above stay the main way.</p></div><span class="badge" id="wa-badge">&hellip;</span></div><div class="cb" id="wa-box"></div></div>
             <div class="card" id="ph-card"><div class="ch"><div><h3>Phone notifications (no password)</h3><p>Video live, every 10 clips scheduled, views, new subscribers and alerts — straight to your phone, with the free ntfy app.</p></div><span class="badge" id="ph-badge">…</span></div><div class="cb" id="ph-box"></div></div>
+            <div class="card"><div class="ch"><div><h3>Weekly report</h3><p>Every Monday at 9 AM: views this week vs last week, new subscribers, your top 3 videos, what was published and what is coming up — to your Gmail and the phone app (when they are set up).</p></div><span class="badge" id="wr-badge">…</span></div>
+              <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="wr-on" checked><i></i></span>Send me the weekly report</label>
+                <div class="mut sm" id="wr-where" style="margin-top:6px"></div>
+                <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">What it would say now</summary><div class="sm" id="wr-prev" style="white-space:pre-wrap;margin-top:6px"></div></details></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Instagram + Facebook</h3><p>Every Short that goes up on YouTube is also posted as an Instagram Reel and on your Facebook Page (Creative Commons, own and original videos only).</p></div><span class="badge" id="mt-badge">…</span></div>
@@ -1340,7 +1344,7 @@ async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}c
   if($('#ph-tog'))$('#ph-tog').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:p.on?'off':'on'});loadPhone()},$('#ph-tog'));
   if($('#ph-new'))$('#ph-new').onclick=()=>once(async()=>{if(!confirm('Make a new QR code? The phone that scanned the old one stops getting messages until it scans the new one.'))return;await api('/api/phone','POST',{action:'new'});loadPhone()},$('#ph-new'));
 }
-async function loadFaceSize(){loadReminder();loadComment();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadFaceSize(){loadReminder();loadComment();loadWeekly();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
 async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
   $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
   $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
@@ -1369,6 +1373,13 @@ $('#fc-save').onclick=()=>once(async()=>{await api('/api/settings/comment','POST
 $('#fc-on').onchange=async()=>{const el=$('#fc-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
   LOCK=true;el.disabled=true;try{const r=await api('/api/settings/comment','POST',{on,preset:FC?FC.preset:'ask',custom:FC?FC.custom:''});
     if(FC){FC.on=r.on}fcBadge(r.on);el.checked=r.on;toast(fcMsg(r.on))}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
+function wrPaint(r){$('#wr-on').checked=!!r.on;const b=$('#wr-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
+  const to=[r.mail?'your Gmail':'',r.phone?'the phone app':''].filter(Boolean).join(' and ');
+  const l=r.last;$('#wr-where').innerHTML=(to?`Goes to ${to}.`:'Connect Gmail or the phone app above to receive it.')+(l?` Last: ${esc(l.week)} — ${l.skipped?'no data that week, nothing sent':[l.mail?'mail sent':'',l.phone?'phone message sent':''].filter(Boolean).join(', ')||'nothing could be sent'}.`:'');
+  $('#wr-prev').textContent=r.preview||'No numbers yet — the first report comes on the first Monday with data.'}
+async function loadWeekly(){try{wrPaint(await api('/api/settings/weekly-report'))}catch(e){}}
+$('#wr-on').onchange=async()=>{const el=$('#wr-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
+  LOCK=true;el.disabled=true;try{const r=await api('/api/settings/weekly-report','POST',{on});wrPaint(r);toast(r.on?'Weekly report on — every Monday at 9 AM':'Weekly report off')}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
 function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   $('#e-fc-on').checked=c.comment_on!==false;$('#e-fc-text').value=c.comment_text||'';
   $('#e-fc-on').disabled=$('#e-fc-text').disabled=done;$('#e-fc-save').classList.toggle('hide',done);
@@ -1895,7 +1906,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
-  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
+  'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','report.weekly':'.card:has(#wr-on)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
   'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
@@ -2146,6 +2157,7 @@ function rzPaint(k){
   $('#rz-badge').textContent=k.enabled?(k.mode==='live'?'Live — real money':'Test mode — no real money'):'Not set up';
   $('#rz-state').innerHTML=`Key ID: ${k.key_set?'saved ✓ (ends in <b>'+esc(k.key_end)+'</b>)':'<b>not saved</b>'} · Key Secret: ${k.secret_set?'saved ✓':'<b>not saved</b>'} · Webhook secret: ${k.webhook_set?'saved ✓':'<b>not saved</b> (needed so a payment is applied even when the customer closes the page)'}`;
   $('#rz-url').textContent=k.webhook_url||'';$('#rz-id').value='';$('#rz-secret').value='';$('#rz-wh').value='';
+  const lw=k.last_webhook;$('#rz-wh-last').innerHTML=lw?`Last webhook received: <b>${new Date(lw.at).toLocaleString([], {dateStyle:'medium',timeStyle:'short'})}</b> (${lw.ok?'ok':'failed: '+esc(lw.reason||'unknown')})`:'Last webhook received: <b>none yet</b> (Razorpay calls it after each payment; a test payment shows whether it works)';
 }
 async function loadRazorpay(){
   rzPaint(await api('/api/admin/razorpay'));

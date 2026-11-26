@@ -2688,6 +2688,26 @@ def comment_set(body: CommentIn):
     return _comment_settings()
 
 
+# ---------- weekly report: Monday 9 AM IST, by e-mail and phone app (app/weekly.py) ----------
+class WeeklyIn(BaseModel):
+    on: bool
+
+
+@app.get("/api/settings/weekly-report")
+def weekly_get():
+    from . import weekly
+
+    return {**weekly.status(), "allowed": acl.allowed("report.weekly")}
+
+
+@app.post("/api/settings/weekly-report")
+def weekly_set(body: WeeklyIn):
+    from . import weekly
+
+    weekly.set_on(body.on)
+    return {**weekly.status(), "allowed": acl.allowed("report.weekly")}
+
+
 # ---------- strike responder: cases, the request to the creator, the words for YouTube (app/strikes.py) ----------
 class StrikeReplyIn(BaseModel):
     auto: bool = False

@@ -119,11 +119,12 @@ OWNER_PER_DAY = 40  # alerts to the owner's own inbox (separate from creator mai
 
 
 WATCHDOG_PER_DAY = 15  # the watchdog's "could not fix it by itself" mails: their own count, never crowded out
+WEEKLY_PER_DAY = 2  # the Monday report (app/weekly.py): its own small count, never crowded out by alerts
 
 
 def notify_owner(text: str, kind: str = "alert") -> bool:
     """An alert to the owner's own Gmail (used when Telegram is not set up; the watchdog's alerts always, with kind
-    "watchdog"). True when it was sent."""
+    "watchdog"; the Monday report with kind "weekly"). True when it was sent."""
     import html
 
     from .config import BASE_URL
@@ -131,14 +132,15 @@ def notify_owner(text: str, kind: str = "alert") -> bool:
     me = connected_email()
     if not me:
         return False
-    wd = kind == "watchdog"
-    key = ("gmail_owner_wd:" if wd else "gmail_owner:") + utcnow().strftime("%Y-%m-%d")
+    wd, wk = kind == "watchdog", kind == "weekly"
+    key = ("gmail_owner_wd:" if wd else "gmail_owner_wk:" if wk else "gmail_owner:") + utcnow().strftime("%Y-%m-%d")
     n = int(get_setting(key) or 0)
-    if n >= (WATCHDOG_PER_DAY if wd else OWNER_PER_DAY):
+    if n >= (WATCHDOG_PER_DAY if wd else WEEKLY_PER_DAY if wk else OWNER_PER_DAY):
         return False
     plain = html.unescape(re.sub(r"<[^>]+>", "", text or "")).strip()
     first = plain.splitlines()[0][:90] if plain else "Update"
     tail = ("(The system tried to fix this by itself and could not. This mail comes from your own Gmail.)" if wd else
+            "(Your weekly report, every Monday at 9 AM. Switch it off in My channels → Weekly report.)" if wk else
             "(These alerts come from your own Gmail. Connect Telegram in My channels to get them as phone messages with "
             "buttons instead.)")
     msg = MIMEText(plain + f"\n\nOpen Raji Studio: {BASE_URL}/\n" + tail, "plain", "utf-8")
