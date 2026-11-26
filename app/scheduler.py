@@ -34,6 +34,12 @@ def _pacific_midnight(now: datetime, offset_days: int = 0) -> datetime:
 def recover():
     """After a crash/redeploy (Railway restarts on every deploy): pick up interrupted work by itself."""
     rerender, requick = [], []
+    try:  # a waiting clip that was getting the like & subscribe animation: back as it was (its video is whole)
+        from .subscribe_anim import recover_remakes
+
+        recover_remakes()
+    except Exception:  # noqa: BLE001
+        log.exception("recover: subscribe animation re-makes")
     with SessionLocal() as s:
         for c in s.query(Clip).filter(Clip.status.in_(["uploading", "rendering"])).all():
             if c.status == "uploading":

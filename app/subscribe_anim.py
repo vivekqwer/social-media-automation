@@ -36,7 +36,7 @@ import shutil
 import subprocess
 import threading
 import time
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -671,9 +671,12 @@ def burn(workdir: Path, src_name: str, p: dict, out_name: str = "out.mp4") -> bo
 REMAKE_KEY = "sub_anim_remake"
 WAITING = ("queued", "rendered")
 STOP_AFTER = 3  # failures in a row
-SECONDS_EACH = 25  # about how long laying it over one finished Short takes on the server
+SECONDS_EACH = 25  # about how long laying it over one finished Short takes on the server (one encode pass)
 SECONDS_FULL = 150  # a clip without any video file: a full render (download + render)
-LEAD_MARGIN = timedelta(minutes=10)  # a clip that goes to YouTube sooner than this is left as it is
+TICK_SECONDS = 120  # remake_tick's interval: the next clip starts at once when the worker is free, else on the next tick
+SOON = timedelta(minutes=10)  # a clip going public (or, without a file, going to YouTube) sooner than this is left alone
+PENDING_MAX = timedelta(hours=30)  # a full render that never ends (helper never came): given up, counted as failed
+_state_lock = threading.RLock()  # every read-change-write of the state below (one server process)
 
 
 def _rstate() -> dict:
@@ -683,11 +686,14 @@ def _rstate() -> dict:
         st = json.loads(get_setting(REMAKE_KEY) or "{}") or {}
     except (ValueError, TypeError):
         st = {}
+    if not isinstance(st, dict):
+        st = {}
     st.setdefault("row", 0)
     st.setdefault("done", 0)
     st.setdefault("failed", 0)
     st.setdefault("stopped", None)
-    st.setdefault("pending", {})  # clips handed to a full render: id -> their autoqueue before it
+    st.setdefault("pending", {})  # clips handed to a full render: id -> {"aq", "was", "at"}
+    st.setdefault("active", {})  # the clip being re-made now: id -> {"was", "aq", "out"} (a restart gives it back)
     return st
 
 
@@ -695,6 +701,15 @@ def _rsave(st: dict):
     from .db import set_setting
 
     set_setting(REMAKE_KEY, json.dumps(st))
+
+
+def _rmod(fn):
+    """Read the state, change it with fn(st), save it — under one lock. Returns what fn returns."""
+    with _state_lock:
+        st = _rstate()
+        out = fn(st)
+        _rsave(st)
+        return out
 
 
 def _files(clip) -> tuple:
@@ -712,6 +727,8 @@ def _needs(clip, cfg: dict, rcfg: dict | None = None) -> bool:
         return False  # has it, or adding it failed (the button tries those again)
     if clip.youtube_id or clip.pc_item_id or clip.status not in WAITING:
         return False
+    if v is not None and v > 0 and _files(clip)[1] is None:
+        return False  # an older sticker is burned into out.mp4 and the clean video is gone: never two stickers
     dur = float((clip.end or 0) - (clip.start or 0))
     if dur < MIN_CLIP or not wanted(clip, cfg):
         return False
@@ -723,7 +740,25 @@ def _needs(clip, cfg: dict, rcfg: dict | None = None) -> bool:
         cta = rplan(clip, W, H, dur, rcfg or rsettings())
     except Exception:  # noqa: BLE001
         cta = None
-    return bool(_windows(dur, cta))  # e.g. a 5.6 s clip with no free moment: made without it, never tried again
+    return bool(_windows(dur, cta))
+
+
+def busy_windows(clip, dur: float | None = None, pad: float = 0.15) -> list:
+    """[(start, end) seconds] where the FINISHED video (out.mp4) of this clip shows the sticker; [] when it has none.
+    For picking thumbnail frames from out.mp4 (body.mp4 never has it)."""
+    v = getattr(clip, "sub_anim_v", None)
+    if v is None or v <= 0:
+        return []
+    dur = float(dur if dur is not None else (clip.end or 0) - (clip.start or 0))
+    try:
+        from .render import DIMS
+        from .reminder import plan as rplan
+
+        W, H = DIMS.get(getattr(clip, "aspect", "9:16"), DIMS["16:9"])
+        cta = rplan(clip, W, H, dur)
+    except Exception:  # noqa: BLE001
+        cta = None
+    return [(max(0.0, t - pad), t + DUR + pad) for t in _windows(dur, cta)]
 
 
 def waiting(s=None) -> list:
@@ -752,8 +787,11 @@ def status() -> dict:
     on = cfg["on"] and acl.feature("clips.subscribe_anim")
     rows = waiting() if on else []
     full = sum(1 for c in rows if not (_files(c)[1] or _files(c)[2]))
+    # one at a time; the next starts as soon as the render worker is free (new clips always go first). When the worker
+    # is busy all the time, only the 2-minute tick starts one: minutes_if_busy
     secs = (len(rows) - full) * SECONDS_EACH + full * SECONDS_FULL
     return {"on": on, "waiting": len(rows), "need_full_render": full, "minutes": int(math.ceil(secs / 60)) if rows else 0,
+            "minutes_if_busy": int(math.ceil(len(rows) * max(SECONDS_EACH, TICK_SECONDS) / 60)) if rows else 0,
             "done": st["done"], "failed": st["failed"], "stopped": st["stopped"], "full_render_waiting": len(st["pending"]),
             "version": VERSION}
 
@@ -768,9 +806,8 @@ def restart() -> dict:
         s.execute(update(Clip).where(Clip.sub_anim_v == -1, Clip.status.in_(WAITING), Clip.youtube_id.is_(None))
                   .values(sub_anim_v=None))
         s.commit()
-    st = _rstate()
-    st.update(stopped=None, row=0)
-    _rsave(st)
+    _rmod(lambda st: st.update(stopped=None, row=0))
+    _start_next()
     return status()
 
 
@@ -800,53 +837,117 @@ def _tell(text: str):
         pass
 
 
-def remake_tick():
-    """Timed job (every 2 minutes, per account): give ONE waiting clip the sticker, when nothing else is being made."""
-    from . import acl, jobs, tenant
-    from .db import utcnow
-
-    if not acl.feature("clips.subscribe_anim") or not settings()["on"]:
-        return None
-    st = _rstate()
-    if st["stopped"]:
-        return None
-    tid = tenant.current()
-    if st["pending"]:  # full renders started earlier: see how they ended
-        busy = _follow(st)
-        _rsave(st)
-        if busy or st["stopped"]:
-            return None
-    if jobs.queued("run_render", tid) or jobs.queued("remake_one", tid) or jobs.busy(tid):
-        return None  # new clips and other work go first; this is slow on purpose
-    now = utcnow()
-    soon = now + LEAD_MARGIN
-    lead = _lead()
-    for c in waiting():
-        if c.publish_at and c.status == "queued" and c.publish_at - lead < soon:
-            d, body, out = _files(c)
-            if not (body or out):
-                continue  # no file and its upload is due: a full render now would make it late
-        jobs.executor.submit(remake_one, c.id)
-        return c.id
-    return None
-
-
-def remake_one(cid: int) -> str:
-    """Give one waiting clip the sticker. Everything else about the clip stays as it is."""
+def recover_remakes(only: set | None = None) -> int:
+    """A clip left "rendering" by a re-make that never finished (a redeploy / restart in the middle): give it back its
+    status, autoqueue and video. Its out.mp4 is untouched until the new one replaces it in one step, so the finished
+    video is always whole. Called by scheduler.recover() before it re-renders stuck clips, and by the watchdog."""
     from sqlalchemy import update
 
     from .db import Clip, SessionLocal
 
+    def take(st):
+        keys = [k for k in st["active"] if only is None or int(k) in only]
+        return {k: st["active"].pop(k) for k in keys}
+
+    with _state_lock:
+        items = _rmod(take)
+        n = 0
+        if items:
+            with SessionLocal() as s:
+                for k, info in items.items():
+                    res = s.execute(update(Clip).where(Clip.id == int(k), Clip.status == "rendering")
+                                    .values(status=info.get("was") or "queued", autoqueue=info.get("aq"),
+                                            output_path=info.get("out"), error=None))
+                    n += res.rowcount
+                s.commit()
+    return n
+
+
+def _worker_idle(skip: tuple | None = None) -> bool:
+    """No job of ANY account waits or runs on the single render worker (jobs.executor), except `skip` (itself)."""
+    from . import jobs
+
+    with jobs._rlock:
+        return not any(n > 0 for k, n in jobs._queued.items() if k != skip)
+
+
+def _pick():
+    """The next clip to re-make (earliest publish time first), or None."""
+    from .db import utcnow
+
+    now = utcnow()
+    lead = _lead()
+    for c in waiting():
+        if c.publish_at and c.publish_at < now + SOON:
+            continue  # goes public within minutes: never held up, not even for a minute
+        d, body, out = _files(c)
+        if not (body or out) and c.status == "queued" and c.publish_at and c.publish_at - lead < now + SOON:
+            continue  # no file and its upload is due: a full render now would make it late
+        return c.id
+    return None
+
+
+def _start_next(skip: tuple | None = None):
+    """Hand the next waiting clip to the render worker if it is free. Returns its id or None."""
+    from . import acl, jobs
+
+    if not acl.feature("clips.subscribe_anim") or not settings()["on"]:
+        return None
     st = _rstate()
+    if st["stopped"] or st["active"] or not _worker_idle(skip):
+        return None  # stopped, one is being made, or new clips / other work go first
+    cid = _pick()
+    if cid is not None:
+        jobs.executor.submit(remake_one, cid)
+    return cid
+
+
+def remake_tick():
+    """Timed job (every 2 minutes, per account): give ONE waiting clip the sticker when the render worker is free.
+    Each re-make starts the next one itself while the worker stays free, so this tick is only the fallback."""
+    from . import acl, jobs, tenant
+
+    if not acl.feature("clips.subscribe_anim") or not settings()["on"]:
+        return None
+    if _rstate()["active"] and not jobs.queued("remake_one", tenant.current()):
+        recover_remakes()  # a re-make that died without giving its clip back
+    if _rstate()["pending"] and _rmod(_follow):  # full renders started earlier: see how they ended
+        return None
+    return _start_next()
+
+
+def remake_one(cid: int) -> str:
+    """Give one waiting clip the sticker. Everything else about the clip stays as it is. Then start the next one."""
+    from . import tenant
+
+    result = "skip"
+    try:
+        result = _remake(cid)
+        return result
+    finally:
+        if result != "skip":
+            try:
+                _start_next(skip=(tenant.current(), "remake_one", cid))
+            except Exception:  # noqa: BLE001
+                log.warning("subscribe animation: could not start the next clip")
+
+
+def _remake(cid: int) -> str:
+    from sqlalchemy import update
+
+    from .db import Clip, SessionLocal, utcnow
+
     with SessionLocal() as s:
         c = s.get(Clip, cid)
-        if c is None or not _needs(c, settings()) or not wanted(c):
+        if c is None or not _needs(c, settings()):
             return "skip"
         was, aq, out_path = c.status, c.autoqueue, c.output_path
+        _rmod(lambda st: st["active"].__setitem__(str(cid), {"was": was, "aq": aq, "out": out_path}))
         res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == was, Clip.youtube_id.is_(None))
                         .values(status="rendering", error=None, autoqueue=(was == "queued")))
         s.commit()
         if res.rowcount != 1:
+            _rmod(lambda st: st["active"].pop(str(cid), None))
             return "skip"  # it changed meanwhile (uploading, edited...)
         s.refresh(c)
         d, body, out = _files(c)
@@ -857,23 +958,26 @@ def remake_one(cid: int) -> str:
 
                 apply_short_cover(c)
                 result = "fail" if c.sub_anim_v == -1 else "ok"
-            elif out is not None:  # only the finished video: lay the sticker over it
+            elif out is not None and c.sub_anim_v in (None, 0):  # only the finished video, no sticker in it yet
                 p = plan_for(c, out)
                 if p is None:
                     c.sub_anim_v, result = 0, "ok"
                 elif burn(out.parent, out.name, p, out.name):
                     c.sub_anim_v, result = VERSION, "ok"
-            else:  # no video file at all on the server: the normal render (a missing source goes to the helper PC)
+            elif out is None:  # no video file at all on the server: the normal render (a missing source -> helper PC)
                 s.execute(update(Clip).where(Clip.id == cid).values(status="draft"))
                 s.commit()
+                _rmod(lambda st: (st["active"].pop(str(cid), None),
+                                  st["pending"].__setitem__(str(cid), {"aq": aq, "was": was, "at": utcnow().isoformat()})))
                 from .render import run_render
 
-                st["pending"][str(cid)] = {"aq": aq}
-                _rsave(st)
-                run_render(cid)
-                st = _rstate()
-                _follow(st)
-                _rsave(st)
+                try:
+                    run_render(cid)
+                finally:
+                    with SessionLocal() as s2:  # stopped before it even started: back as it was
+                        s2.execute(update(Clip).where(Clip.id == cid, Clip.status == "draft").values(status=was, autoqueue=aq))
+                        s2.commit()
+                    _rmod(_follow)
                 return "full"
         except Exception as e:  # noqa: BLE001
             from .render import _note
@@ -884,8 +988,7 @@ def remake_one(cid: int) -> str:
                 "sub_anim_v": c.sub_anim_v if result == "ok" else -1}
         s.execute(update(Clip).where(Clip.id == cid, Clip.status == "rendering").values(**vals))
         s.commit()
-    _count(st, result == "ok", cid)
-    _rsave(st)
+    _rmod(lambda st: (st["active"].pop(str(cid), None), _count(st, result == "ok", cid)))
     return result
 
 
@@ -894,7 +997,7 @@ def _follow(st: dict) -> bool:
     True = one is being made right now (the next clip waits; one waiting for the helper does not hold the others up)."""
     from sqlalchemy import update
 
-    from .db import Clip, SessionLocal
+    from .db import Clip, SessionLocal, utcnow
 
     busy = False
     for key, info in list(st["pending"].items()):
@@ -903,15 +1006,17 @@ def _follow(st: dict) -> bool:
             if c is None:
                 st["pending"].pop(key, None)
                 continue
-            if c.status in ("rendering", "draft"):
-                busy = True
-                continue
-            if c.status == "fetching":
-                continue  # the helper PC fetches its video; the render runs by itself afterwards
+            try:
+                since = datetime.fromisoformat(info.get("at") or "")
+            except (TypeError, ValueError):
+                since = utcnow()
+            if c.status in ("rendering", "draft", "fetching") and utcnow() - since < PENDING_MAX:
+                busy = busy or c.status == "rendering"
+                continue  # still being made (the helper PC may be fetching its video)
             ok = c.status in WAITING and c.sub_anim_v is not None and c.sub_anim_v >= 0
             if c.status in WAITING:
                 s.execute(update(Clip).where(Clip.id == c.id).values(autoqueue=info.get("aq")))
-            elif c.status == "failed":
+            elif not ok:
                 s.execute(update(Clip).where(Clip.id == c.id).values(sub_anim_v=-1))
             s.commit()
         st["pending"].pop(key, None)

@@ -376,7 +376,11 @@ def _stuck(st: dict, now) -> dict:
 def _rerender(cid: int, st: dict, now, it: dict) -> bool:
     from .jobs import executor
     from .render import run_render
+    from .subscribe_anim import recover_remakes
 
+    if recover_remakes({cid}):  # it was getting the like & subscribe animation: back as it was, no new render
+        it["n"], it["at"] = it["n"] + 1, _iso(now)
+        return True
     with SessionLocal() as s:
         res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == "rendering").values(status="draft", error=None))
         s.commit()

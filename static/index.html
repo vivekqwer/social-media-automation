@@ -1416,7 +1416,7 @@ async function loadSubAnim(){let r;try{r=await api('/api/settings/subscribe-anim
   $('#sa-on').checked=!!r.on;$('#sa-pos').value=r.pos||'top';
   const b=$('#sa-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
   if(!$('#sa-prev').getAttribute('src'))$('#sa-prev').src='/api/settings/subscribe-anim/preview.png';
-  const m=r.remake||{};$('#sa-note').textContent=!m.on?'':m.stopped?m.stopped:m.waiting?`${m.waiting} waiting clip(s) still need it. They get it by themselves, one at a time (about ${m.minutes} min in all); upload times stay the same.`+(m.done?` ${m.done} done so far.`:''):'Every waiting clip has it.'+(m.done?` (${m.done} clip(s) re-made)`:'')}
+  const m=r.remake||{};$('#sa-note').textContent=!m.on?'':m.stopped?m.stopped:m.waiting?`${m.waiting} waiting clip(s) still need it. They get it by themselves, one at a time (about ${m.minutes} min when the server is free, up to ${m.minutes_if_busy} min when it is busy making new clips); upload times stay the same.`+(m.done?` ${m.done} done so far.`:''):'Every waiting clip has it.'+(m.done?` (${m.done} clip(s) re-made)`:'')}
 function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
 $('#rm-preset').onchange=rmShow;
 let FC=null;
@@ -1983,7 +1983,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'channels.main':'[data-main],[data-take]','channels.language':'[data-tlang]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
-  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch,#sa-remake','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send,#pm-auto-box',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmfind],[data-pmconfirm],[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
