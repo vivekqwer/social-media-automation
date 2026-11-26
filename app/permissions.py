@@ -1044,7 +1044,7 @@ def grant(cid: str, proof: str) -> dict:
             src_id = existing.id
         else:
             ch = Channel(kind="channel", query=c["url"], resolved_url=c["url"], name=c["name"], mode="permission",
-                         permission_note=proof, auto=True, videos_per_run=2, clips_per_video=1, clip_len=35, aspect="9:16",
+                         permission_note=proof, auto=True, videos_per_run=2, clips_per_video=1, clip_len=20, aspect="9:16",
                          gap_hours=12, destination_id=dest.id, review_first=False, captions=True, post_times="10:00, 18:00",
                          tz_offset=-330)
             s.add(ch)

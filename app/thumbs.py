@@ -67,24 +67,48 @@ def _score(rgb: np.ndarray) -> float:
     return s * (0.3 if light < 45 or light > 215 else 1.0)
 
 
-def _best_time(src: Path, dur: float, rank: int = 0) -> float:
+def _clear_of(t: float, avoid, dur: float) -> float | None:
+    """t, or the first moment after the windows it falls in (None = past the end)."""
+    for _ in range(4):
+        hit = next((b for a, b in avoid if a <= t < b), None)
+        if hit is None:
+            return t
+        t = hit + 0.1
+    return t if t < dur - 0.1 else None
+
+
+def _avoid(clip, src: Path) -> list:
+    """Moments of the finished video that show the like & subscribe animation (body.mp4 / the section never do)."""
+    if not clip.output_path or Path(src) != Path(clip.output_path):
+        return []
+    try:
+        from .subscribe_anim import busy_windows
+
+        return busy_windows(clip)
+    except Exception:  # noqa: BLE001
+        return []
+
+
+def _best_time(src: Path, dur: float, rank: int = 0, avoid=()) -> float:
     scored = []
     for f in (0.12, 0.22, 0.32, 0.42, 0.52, 0.62, 0.72, 0.85):
-        t = dur * f
+        t = _clear_of(dur * f, avoid, dur)
+        if t is None or any(abs(t - x) < 0.05 for _s, x in scored):
+            continue
         r = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
                             "-vf", "scale=192:108", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
         if r.returncode or len(r.stdout) != 192 * 108 * 3:
             continue
         scored.append((_score(np.frombuffer(r.stdout, np.uint8).reshape(108, 192, 3)), t))
     if not scored:
-        return dur * 0.35
+        return _clear_of(dur * 0.35, avoid, dur) or dur * 0.35
     scored.sort(reverse=True)
     return scored[min(rank, len(scored) - 1)][1]  # rank 1 = second-best frame (for the auto-swap variant)
 
 
-def _frame(src: Path, W: int, H: int, out: Path, variant: int = 0):
+def _frame(src: Path, W: int, H: int, out: Path, variant: int = 0, avoid=()):
     dur = stream_seconds(src, "v:0") or 10.0
-    at = _best_time(src, dur, rank=2 if variant else 0)
+    at = _best_time(src, dur, rank=2 if variant else 0, avoid=avoid)
     vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.12:saturation=1.35"
     r = subprocess.run([ffmpeg_bin(), "-y", "-ss", f"{at:.2f}", "-i", str(src), "-frames:v", "1", "-vf", vf, str(out)],
                        capture_output=True, text=True)
@@ -130,11 +154,11 @@ def save_frame(clip, project, variant: int):
     """Keep one frame for a later thumbnail: the video itself is about to leave the server (saved on the PC)."""
     workdir, src, W, H = _thumb_source(clip, project)
     try:
-        _frame(src, W, H, workdir / f"thumb_frame_v{variant}.png", variant)
+        _frame(src, W, H, workdir / f"thumb_frame_v{variant}.png", variant, _avoid(clip, src))
     except Exception:  # noqa: BLE001  (e.g. a damaged body.mp4): the finished video itself
         if src == Path(clip.output_path):
             raise
-        _frame(Path(clip.output_path), W, H, workdir / f"thumb_frame_v{variant}.png", variant)
+        _frame(Path(clip.output_path), W, H, workdir / f"thumb_frame_v{variant}.png", variant, _avoid(clip, Path(clip.output_path)))
 
 
 def frame_ready(clip, project) -> bool:
@@ -154,7 +178,7 @@ def make_thumbnail(clip, project) -> Path:
 
         shutil.copyfile(kept, workdir / "thumb_frame.png")
     else:
-        _frame(src, W, H, workdir / "thumb_frame.png", variant)
+        _frame(src, W, H, workdir / "thumb_frame.png", variant, _avoid(clip, src))
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
 
     from .branding import face_scale

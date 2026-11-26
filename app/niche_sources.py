@@ -27,7 +27,7 @@ TARGET_PER_DAY = 6  # clips a day all niche sources together aim for (about one 
 MAX_HOURS = 48  # slowest run interval (main.ChannelEdit allows 1-48)
 MAX_NICHES = 4  # niches + typed topics switched on at once
 MAX_KEY = 40
-PER_RUN = {"videos_per_run": 1, "clips_per_video": 1, "clip_len": 35, "aspect": "9:16", "gap_hours": 12, "captions": True}
+PER_RUN = {"videos_per_run": 1, "clips_per_video": 1, "clip_len": 20, "aspect": "9:16", "gap_hours": 12, "captions": True}
 TRENDS = {"26": "food & how-to", "22": "people & blogs", "24": "entertainment", "23": "comedy", "20": "gaming",
           "17": "sports", "28": "science & tech"}  # the same names as main.TREND_CATS
 HONEST = ("Videos are only taken from Creative Commons videos (their owners allow reuse) or from creators who gave you "
