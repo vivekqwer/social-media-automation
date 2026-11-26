@@ -97,7 +97,7 @@ def _admin_words() -> dict:
 
 def set_words(dest_id: int, words: str) -> dict:
     d = _admin_words()
-    words = " ".join(str(words or "").split())[:300]
+    words = " ".join(str(words or "").split())[:2000]
     if words:
         d[str(int(dest_id))] = words
     else:
@@ -127,6 +127,8 @@ def profile(s, dest_id: int) -> dict | None:
     if typed:
         labels.append(typed)
         text.append(typed)
+        low = typed.lower()
+        text += [v for k, v in EXTRA.items() if k in low]  # "food" typed -> the whole food word list (dishes, Hindi)
     if not labels:
         return None
     stems = set()

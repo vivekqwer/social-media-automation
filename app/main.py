@@ -2814,7 +2814,7 @@ def posts_per_day_set(body: PostsIn):
 class NicheGuardIn(BaseModel):
     apply: bool = False  # False = only set words / show the dry run
     dest_id: int | None = None  # with words: the niche words of this channel ("" = remove them)
-    words: str | None = Field(None, max_length=300)
+    words: str | None = Field(None, max_length=2000)
 
 
 @app.get("/api/admin/niche-guard")
