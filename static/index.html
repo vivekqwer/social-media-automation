@@ -529,7 +529,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
           <div class="grow" style="display:flex;flex-direction:column;gap:8px"><input id="e-ttext" placeholder="Big text on the thumbnail (empty = from the title)">
             <label class="row sm" style="gap:8px"><span class="switch"><input type="checkbox" id="e-tface" checked><i></i></span>Put my face on the thumbnail</label>
             <label class="row sm" style="gap:8px" id="e-tcover-row" title="YouTube picks a Short's cover from the video itself"><span class="switch"><input type="checkbox" id="e-tcover" checked><i></i></span>Shorts: show the thumbnail in the first moment (so YouTube uses it as the cover)</label>
-            <div class="row"><button class="btn outline sm" id="e-tgen"><i data-ico="image"></i>Make thumbnail</button><button class="btn ghost sm hide" id="e-tpush"><i data-ico="upload"></i>Send thumbnail to YouTube</button></div>
+            <div class="row"><button class="btn outline sm" id="e-tgen"><i data-ico="image"></i>Make thumbnail</button><button class="btn ghost sm" id="e-tdesign" title="The thumbnail designer's next layout"><i data-ico="image"></i>Another design</button><button class="btn ghost sm hide" id="e-tpush"><i data-ico="upload"></i>Send thumbnail to YouTube</button></div>
             <input type="file" id="e-tfile" accept="image/jpeg,image/png" style="height:auto;padding:4px 8px;font-size:12px"><span class="mut sm" id="e-tnote"></span></div></div></div>
     </div>
   </div>
@@ -1818,6 +1818,7 @@ $('#e-meta').onclick=()=>once(async()=>{const id=CUR.id,topic=$('#e-kq').value.t
 $('#e-tgen').onclick=()=>once(async()=>{if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const c=await api(`/api/clips/${CUR.id}/thumbnail`,'POST',{text:$('#e-ttext').value,face:$('#e-tface').checked});fill(await api('/api/clips/'+c.id));etab('thumb');
   if(CUR.youtube_id){const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Thumbnail sent')}else toast('Thumbnail made — it goes to YouTube with the video')},$('#e-tgen'));
 $('#e-tfile').onchange=()=>once(async()=>{const f=$('#e-tfile').files[0];if(!f)return;if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const fd=new FormData();fd.append('file',f);await api(`/api/clips/${CUR.id}/thumbnail-upload`,'POST',fd);$('#e-tfile').value='';fill(await api('/api/clips/'+CUR.id));etab('thumb');toast('Your thumbnail will be used')});
+$('#e-tdesign').onclick=()=>once(async()=>{if(!['uploaded','uploading','rendering','fetching'].includes(CUR.status))await save();const x=await api(`/api/clips/${CUR.id}/thumbnail/design`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.youtube_id?(x.thumb_note||'Thumbnail sent'):'New design made — it goes to YouTube with the video')},$('#e-tdesign'));
 $('#e-tpush').onclick=()=>once(async()=>{const x=await api(`/api/clips/${CUR.id}/thumbnail/push`,'POST');fill(await api('/api/clips/'+x.id));etab('thumb');toast(x.thumb_note||'Done',!/set on YouTube/.test(x.thumb_note||''))},$('#e-tpush'));
 
 /* ---------- quick upload ---------- */
@@ -1955,7 +1956,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
   'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
-  'clips.face':'.card:has(#face-prev),label:has([data-face])','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
+  'clips.face':'.card:has(#face-prev),label:has([data-face])','thumbs.designer':'#e-tdesign','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send,#pm-auto-box',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmfind],[data-pmconfirm],[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','report.weekly':'.card:has(#wr-on)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',

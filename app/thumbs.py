@@ -4,6 +4,7 @@ Phone-safe layout: text is huge (few words, max 3 lines) and kept inside the are
 shows — away from the edges, the duration stamp (bottom-right of 16:9) and the cropped/overlaid parts of
 Shorts thumbnails (top and bottom of 9:16). Text is drawn by libass so Hindi is shaped correctly.
 """
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ from .render import DEVA, _esc, ass_text
 
 LATIN_FONT = ("Anton", FONTS_DIR / "Anton-Regular.ttf")
 HINDI_FONT = ("Noto Sans Devanagari", FONTS_DIR / "NotoSansDevanagari-Bold.ttf")
+log = logging.getLogger(__name__)
 
 
 def default_text(title: str) -> str:
@@ -128,6 +130,14 @@ def _thumb_source(clip, project) -> tuple[Path, Path, int, int]:
 
 def save_frame(clip, project, variant: int):
     """Keep one frame for a later thumbnail: the video itself is about to leave the server (saved on the PC)."""
+    from . import thumbdesign
+
+    if thumbdesign.enabled():  # the designer's own pick, full size (it crops it per layout later)
+        try:
+            thumbdesign.keep_frame(clip, project, variant)
+            return
+        except Exception as e:  # noqa: BLE001
+            log.info("thumb designer frame %s: %s", getattr(clip, "id", "?"), str(e)[:150])
     workdir, src, W, H = _thumb_source(clip, project)
     try:
         _frame(src, W, H, workdir / f"thumb_frame_v{variant}.png", variant)
@@ -145,6 +155,30 @@ def frame_ready(clip, project) -> bool:
 
 
 def make_thumbnail(clip, project) -> Path:
+    """The automatic thumbnail: the designer's (app/thumbdesign.py) while the Super Admin switch "thumbs.designer" is on,
+    else (or if the designer fails) the classic one below. clip.thumb_style records which one made it."""
+    from . import thumbdesign
+
+    if thumbdesign.enabled():
+        try:
+            out = thumbdesign.make(clip, project)
+            _mark(clip, thumbdesign.style_after(clip))
+            return out
+        except Exception as e:  # noqa: BLE001  (never no thumbnail: the classic one instead)
+            log.warning("thumb designer %s: %s", getattr(clip, "id", "?"), str(e)[:200])
+    out = _classic(clip, project)
+    _mark(clip, thumbdesign.CLASSIC)
+    return out
+
+
+def _mark(clip, style: str):
+    try:
+        clip.thumb_style = style
+    except Exception:  # noqa: BLE001  (an object without the column, e.g. a tool on the PC with an older database)
+        pass
+
+
+def _classic(clip, project) -> Path:
     workdir, src, W, H = _thumb_source(clip, project)
     portrait = clip.aspect == "9:16"
     variant = int(getattr(clip, "thumb_variant", 0) or 0)
@@ -156,6 +190,10 @@ def make_thumbnail(clip, project) -> Path:
     else:
         _frame(src, W, H, workdir / "thumb_frame.png", variant)
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
+    if base.size != (W, H):  # a full-size frame kept by the designer
+        from PIL import ImageOps
+
+        base = ImageOps.fit(base, (W, H), Image.LANCZOS)
 
     from .branding import face_scale
 

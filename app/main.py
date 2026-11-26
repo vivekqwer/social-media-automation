@@ -5178,6 +5178,9 @@ def _rethumb(dest_id: int | None):
             if c.output_path and Path(c.output_path).exists():
                 try:
                     c.thumb_path, c.thumb_note = str(make_thumbnail(c, s.get(Project, c.project_id))), None
+                    far = not c.publish_at or c.publish_at > utcnow() + timedelta(hours=2)
+                    if not c.pc_item_id and (c.status == "rendered" or (c.status == "queued" and c.publish_at and far)):
+                        apply_short_cover(c)  # the Short's opening frame shows the new thumbnail too
                 except Exception as e:  # noqa: BLE001
                     c.thumb_note = f"Thumbnail could not be made: {str(e)[:150]}"
         s.commit()
@@ -5275,6 +5278,33 @@ def thumb_push(cid: int):
         if not c.youtube_id or not c.thumb_path or not Path(c.thumb_path).exists():
             raise HTTPException(400, "Upload the video first and make a thumbnail")
         youtube.push_thumbnail(c)
+        s.commit()
+        return to_dict(c)
+
+
+@app.post("/api/clips/{cid}/thumbnail/design")
+def thumb_design(cid: int):
+    """Another design: the designer's next layout (app/thumbdesign.py), kept for later re-makes. Sent to YouTube
+    at once when the video is already there."""
+    from . import thumbdesign
+
+    with SessionLocal() as s:
+        c = _get(s, Clip, cid)
+        p = _get(s, Project, c.project_id)
+        from .thumbs import frame_ready
+
+        if not c.output_path or not frame_ready(c, p):
+            raise HTTPException(400, "This video is saved on your PC — get it back first." if c.archived_at
+                                else "Render the clip first")
+        c.thumb_style = thumbdesign.next_style(c)
+        try:
+            c.thumb_path, c.thumb_custom, c.thumb_note = str(thumbdesign.make(c, p)), False, None
+            if c.status in ("rendered", "queued", "failed", "draft") and not c.pc_item_id:
+                apply_short_cover(c)  # the Short's opening frame shows the new thumbnail
+        except Exception as e:  # noqa: BLE001
+            raise HTTPException(500, str(e)[:200])
+        if c.youtube_id and c.status == "uploaded":
+            youtube.push_thumbnail(c)
         s.commit()
         return to_dict(c)
 
