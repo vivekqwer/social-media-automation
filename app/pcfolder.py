@@ -364,18 +364,30 @@ def day_free(s, dest_id, t: datetime, skip_id: int | None = None) -> bool:
     return q.first() is None
 
 
+def _times() -> str:
+    """The daily public times: the Super Admin's posts-per-day choice (e.g. 13:00, 19:00), else 18:00."""
+    try:
+        import json as _j
+
+        from .db import get_setting
+
+        return (_j.loads(get_setting("posts_per_day") or "{}") or {}).get("times") or SLOT_TIME
+    except Exception:  # noqa: BLE001
+        return SLOT_TIME
+
+
 def slot_for(s, dest_id, want: datetime | None = None, skip_id: int | None = None) -> datetime:
     """The next free daily slot after the last scheduled day; the suggested date instead when it is later (the first
     free day from it when that day is taken)."""
     from .autopilot import _next_slot, fit_capacity
 
-    base = _next_slot(s, 24, dest_id, SLOT_TIME, TZ)
+    base = _next_slot(s, 24, dest_id, _times(), TZ)
     if want is None or want <= base:
         return base
     t = want
     for _ in range(400):
         if day_free(s, dest_id, t, skip_id):
-            return fit_capacity(s, t, SLOT_TIME, TZ, skip_id=skip_id)
+            return fit_capacity(s, t, _times(), TZ, skip_id=skip_id)
         t += timedelta(days=1)
     return base
 

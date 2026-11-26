@@ -251,7 +251,7 @@ def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None 
             keep = set()
             for c in rows:  # these follow their own times (viral picks, the PC folder's 18:00, own-topic best hours)
                 p = s.get(Project, c.project_id)
-                if c.pc_item_id or (c.kw or {}).get("basis") or (p is not None and p.channel_ref in viral):
+                if (c.kw or {}).get("basis") or (p is not None and p.channel_ref in viral):  # PC-folder clips follow it too
                     keep.add(c.id)
             rows = [c for c in rows if c.id not in keep]
             if not rows:
