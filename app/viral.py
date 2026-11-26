@@ -149,7 +149,7 @@ def _source(s) -> Channel:
     if not ch:
         dest = main_destination(s)
         ch = Channel(kind="viral", name="Viral picks (5 a day)", query="viral picks", mode="permission", auto=False,
-                     videos_per_run=0, clips_per_video=1, clip_len=35, aspect="9:16", gap_hours=2,
+                     videos_per_run=0, clips_per_video=1, clip_len=20, aspect="9:16", gap_hours=2,
                      destination_id=dest.id if dest else None, captions=True, review_first=False,
                      post_times="09:00, 12:00, 15:00, 18:00, 21:00", tz_offset=-330)
         s.add(ch)

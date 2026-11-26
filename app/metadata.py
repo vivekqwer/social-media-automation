@@ -131,11 +131,25 @@ def build(project: Project, clip: Clip, keywords: list[str], lang: str | None = 
         return _with_affiliates(_build_original(project, clip, keywords, lang), words)
     if project.mode == "own":  # my own long video -> Short: link back to the full video, no credit block
         meta = _build_original(project, clip, keywords, lang)
-        meta["title"] = (_clean(project.title) + " | " + HOOK[lang])[:100]
+        meta["title"] = _hook_or(project, clip, lang, (_clean(project.title) + " | " + HOOK[lang])[:100])
         meta["description"] = _cut(meta["description"].split("\n\n")[0] + f"\n\nFull video: https://youtu.be/{project.video_id}"
                                     + "\n\n" + _clean(project.description)[:1500], 4900)
         return _with_affiliates(meta, words)
     return _with_affiliates(_build(project, clip, keywords, lang), words)
+
+
+def _hook_or(project: Project, clip: Clip, lang: str, old: str, lead: str | None = None, hint: str | None = None) -> str:
+    """The hook title (app/hooks.py, switch "titles.hook") instead of "<source title> | Best Moment"; `old` when the
+    switch is off or the clip is my own reel / my own uploaded video."""
+    from . import hooks
+
+    try:
+        if not hooks.applies(project):
+            return old
+        return _clean(hooks.hook_title(project, clip, lang, lead=lead, hint=hint))[:100] or old
+    except Exception:  # noqa: BLE001  (a title must never stop a clip)
+        log.exception("hook title failed for clip %s", getattr(clip, "id", None))
+        return old
 
 
 def _credit_block(project: Project, clip: Clip) -> str:
@@ -156,6 +170,7 @@ def _build(project: Project, clip: Clip, keywords: list[str], lang: str = "en") 
     title = f"{base} | {HOOK[lang]}"
     if len(title) > 100:
         title = base[:100]
+    title = _hook_or(project, clip, lang, title)
     shorts = clip.aspect == "9:16"
     tag_src = [t for t in (list(project.tags or [])[:3] + keywords) if t][:3]
     hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", t) for t in tag_src]
@@ -277,10 +292,16 @@ def compose(project: Project, clip: Clip, plan: dict, lang: str | None = None) -
     items = plan.get("items") or []
     ranked = [i["k"] for i in items]
     shorts = clip.aspect == "9:16"
-    title = _lead_title(project, plan, build(project, clip, [], lang)["title"])
-    hook = HOOK[lang]
-    if lang != "en" and hook not in title and len(title) + 3 + len(hook) <= 100:  # the title also says it in the language
-        title = f"{title} | {hook}"
+    from . import hooks
+
+    if hooks.applies(project):  # a short hook title from the strongest phrase (app/hooks.py; switch "titles.hook")
+        title = _hook_or(project, clip, lang, build(project, clip, [], lang)["title"], lead=plan.get("lead"),
+                         hint=plan.get("hint") or (clip.kw or {}).get("hint") or "")
+    else:
+        title = _lead_title(project, plan, build(project, clip, [], lang)["title"])
+        hook = HOOK[lang]
+        if lang != "en" and hook not in title and len(title) + 3 + len(hook) <= 100:  # the title also says it in the language
+            title = f"{title} | {hook}"
     if project.mode == "original":
         fixed, copied = _clean(project.description), ""
     elif project.mode == "own":

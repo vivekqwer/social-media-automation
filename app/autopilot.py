@@ -10,7 +10,7 @@ from sqlalchemy import func
 from .db import Channel, Clip, Destination, Project, SessionLocal, utcnow
 from . import acl, quota, youtube
 from . import workers
-from .captions import fetch_cues, parse_json3
+from .captions import fetch_cues, fetch_track, parse_json3  # noqa: F401  (fetch_cues: older callers)
 from .hot import fetch_comments, fetch_heatmap, parse_timestamps, rank_moments
 from .ingest import _opts, fetch_info, is_cc
 from .metadata import auto_metadata
@@ -184,6 +184,11 @@ def _process_video(s, ch: Channel, vid: str, log: list, mode: str | None = None,
     elif (mode == "cc" or ch.kind == "topic") and not is_cc(info["license"]):
         log.append(f"skip {vid}: not CC")
         return False
+    from . import niche_guard
+
+    if niche_guard.off_topic_video(s, ch.destination_id, info, mode):  # one topic per channel (switch "niche.guard")
+        log.append(f"skip {vid}: off topic for this channel's niche")
+        return False
     p = Project(url=f"https://www.youtube.com/watch?v={vid}", mode=mode,
                 permission_note=note if note is not None else ch.permission_note, channel_ref=ch.id, **info)
     if not p.heatmap:
@@ -234,6 +239,16 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
     # "Automatic upload without review" switched off for this account: every new clip waits for approval,
     # whatever the source says
     review_first = bool(ch.review_first) or not acl.auto_upload()
+    from .hooks import on as fix_on
+    from .tuneups import natural_end
+
+    caps = bool(ch.captions) and acl.feature("clips.captions")  # "Captions from YouTube" switched off: none are added
+    track, track_err = p.caption_track, None
+    if caps and not track and p.video_id:  # one caption track per video (it was fetched once per clip before)
+        try:
+            track = fetch_track(p.video_id)
+        except Exception as e:  # noqa: BLE001
+            track_err = e
     for m in moments[:ch.clips_per_video]:
         full = acl.room_for_clip()  # the account's clips-a-day limit and storage
         if full:
@@ -241,12 +256,19 @@ def _make_clips(s, ch: Channel, p: Project, log: list):
             break
         c = Clip(project_id=p.id, start=m["start"], end=m["end"], aspect=ch.aspect, effects=["fade"],
                  destination_id=ch.destination_id, credit_on=ch.mode != "own")
+        if track and fix_on("clips.short"):  # end in a pause of the speech (+-3 s), not in the middle of a word
+            better = natural_end(track, float(c.start), float(c.end), p.duration)
+            if better:
+                c.end = better
         s.add(c)
         s.commit()
-        if ch.captions and acl.feature("clips.captions"):  # "Captions from YouTube" switched off: none are added
+        if caps:
             try:
-                c.captions = parse_json3(p.caption_track, c.start, c.end) if p.caption_track else \
-                    fetch_cues(p.video_id, c.start, c.end)
+                if track_err is not None:
+                    raise track_err
+                c.captions = parse_json3(track, c.start, c.end) if track else []
+                if not c.captions:
+                    raise ValueError("No speech captions inside this clip's time range")
                 if c.captions:
                     c.caption_style = {"on": True, "lang": "auto", "pos": "bottom", "size": "M", "color": "#ffffff"}
                 s.commit()
@@ -595,10 +617,15 @@ def unpark_due(force: int | None = None) -> dict:
     with SLOT_LOCK, SessionLocal() as s:
         rows = s.query(Clip).filter(Clip.status == "draft", Clip.error.like(PARKED)).order_by(Clip.id).all()
         mine = claimed_clips(s)  # made on the PC and waiting in Clips -> From my PC: not made again here
+        from .niche_guard import still_off
+
+        topic_cache: dict = {}
         for c in rows:
             if out["started"] >= per_day:
                 break
             if c.id in mine:
+                continue
+            if still_off(s, c, topic_cache):  # parked as off topic for its channel: stays while the niche guard is on
                 continue
             other = same_moment(s, c)
             if other is not None:
