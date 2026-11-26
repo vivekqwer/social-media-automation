@@ -189,6 +189,10 @@ def migrate_posts() -> dict:
         log.warning("posts a day: not changed (%s)", why)
         return {"done": False, "why": why}
     res = set_posts_per_day(2, TIMES[2], IST)
+    try:
+        res["respaced"] = respace_waiting()  # two a day from now on, not after the clips already timed
+    except Exception:  # noqa: BLE001
+        log.exception("posts a day: re-spacing the waiting clips failed")
     set_setting(MIG_POSTS, json.dumps({"at": utcnow().isoformat() + "Z", **res}))
     return {"done": True, **res}
 
@@ -206,4 +210,85 @@ def migrate_owner() -> dict:
             out["posts"] = migrate_posts()
     except Exception:  # noqa: BLE001
         log.exception("tune-ups at start-up")
+    return out
+
+
+# ---------------------------------------------------------------- waiting clips onto the new daily times, now
+WAITING = ("fetching", "rendering", "draft", "rendered", "queued")  # holds a slot, not on YouTube yet
+
+
+def respace_waiting(dry: bool = False, times: str | None = None, tz: int | None = None) -> dict:
+    """Owner (26 Nov 2026): two a day must start now, not after the ~260 clips already timed at one a day.
+    Every clip that holds a future slot but is NOT on YouTube yet gets the next slot of the new daily times, per
+    channel, in its current order, starting after the last video of that channel already on YouTube (those keep
+    their time: changing it costs a YouTube update each). Same order, same clips; a second run changes nothing."""
+    from datetime import timedelta
+
+    from sqlalchemy import func, update
+
+    from .autopilot import _slot_from_times, fit_capacity
+    from .db import Clip
+
+    try:
+        v = json.loads(get_setting(POSTS_KEY) or "{}")
+    except (TypeError, ValueError):
+        v = {}
+    times = times or v.get("times")
+    tz = int(tz if tz is not None else (v.get("tz_offset") if v.get("tz_offset") is not None else IST))
+    if not times:
+        return {"moved": 0, "why": "posts per day not set"}
+    now = utcnow()
+    out = {"moved": 0, "first": None, "last": None, "channels": 0, "dry": dry}
+    with SessionLocal() as s:
+        dests = [d for (d,) in s.query(Clip.destination_id).filter(
+            Clip.status.in_(WAITING), Clip.youtube_id.is_(None), Clip.publish_at.isnot(None), Clip.publish_at > now)
+            .distinct()]
+        for dest in dests:
+            rows = (s.query(Clip).filter(Clip.destination_id == dest, Clip.status.in_(WAITING), Clip.youtube_id.is_(None),
+                                         Clip.publish_at.isnot(None), Clip.publish_at > now)
+                    .order_by(Clip.publish_at, Clip.id).all())
+            if not rows:
+                continue
+            on_yt = (s.query(func.max(Clip.publish_at)).filter(Clip.destination_id == dest, Clip.youtube_id.isnot(None))
+                     .scalar())
+            base = max(now + timedelta(hours=2), on_yt or now)
+            plan, old = [], {c.id: c.publish_at for c in rows}
+            for c in rows:  # free their slots first so the daily budget check only counts what is placed
+                c.publish_at = None
+            s.flush()
+            prev = base
+            for c in rows:
+                slot = _slot_from_times(prev, times, tz) or (prev + timedelta(hours=12))
+                slot = fit_capacity(s, slot, times, tz, skip_id=c.id)
+                c.publish_at = slot
+                s.flush()
+                plan.append((c.id, c.status, old[c.id], slot))
+                prev = slot
+            s.rollback()  # nothing is kept from the planning pass; the real change is one guarded update per clip
+            moved = 0
+            if not dry:
+                for cid, status, was, slot in plan:
+                    if was == slot:
+                        continue
+                    r = s.execute(update(Clip).where(Clip.id == cid, Clip.status == status, Clip.youtube_id.is_(None),
+                                                     Clip.publish_at == was).values(publish_at=slot))
+                    moved += r.rowcount
+                s.commit()
+            else:
+                moved = sum(1 for _c, _st, was, slot in plan if was != slot)
+            out["moved"] += moved
+            out["channels"] += 1
+            first, last = plan[0][3], plan[-1][3]
+            out["first"] = min(filter(None, [out["first"], first])) if out["first"] else first
+            out["last"] = max(filter(None, [out["last"], last])) if out["last"] else last
+    for k in ("first", "last"):
+        if out[k] is not None:
+            out[k] = out[k].isoformat() + "Z"
+    if not dry and out["moved"]:
+        try:
+            from . import acl
+
+            acl.record_here("admin.posts", f"Waiting clips moved to {times} ({out['moved']} clips, until {out['last'][:10]})")
+        except Exception:  # noqa: BLE001
+            log.exception("posts a day: could not log the re-spacing")
     return out

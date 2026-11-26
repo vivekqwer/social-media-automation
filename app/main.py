@@ -2779,6 +2779,8 @@ class PostsIn(BaseModel):
     n: int = Field(ge=1, le=3)
     times: str = Field("", max_length=40)  # empty = 18:00 / 13:00, 19:00 / 10:00, 14:00, 19:00 (IST)
     tz_offset: int = Field(-330, ge=-900, le=900)
+    respace: bool = True  # also move the clips that wait (not on YouTube yet) onto the new times
+    dry: bool = False  # only show what would move
 
 
 @app.post("/api/admin/posts-per-day")
@@ -2788,7 +2790,13 @@ def posts_per_day_set(body: PostsIn):
     from . import tuneups
 
     try:
-        return tuneups.set_posts_per_day(body.n, body.times or None, body.tz_offset)
+        if body.dry:
+            return {"respaced": tuneups.respace_waiting(dry=True, times=tuneups.clean_times(body.times or None, body.n),
+                                                        tz=body.tz_offset)}
+        out = tuneups.set_posts_per_day(body.n, body.times or None, body.tz_offset)
+        if body.respace:
+            out["respaced"] = tuneups.respace_waiting()
+        return out
     except ValueError as e:
         raise HTTPException(400, str(e))
 
