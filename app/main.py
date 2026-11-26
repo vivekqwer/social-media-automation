@@ -1877,6 +1877,8 @@ def overview():
             "uploads_today": _uploads_today(s),
             "helper": _helper_state(s),
             "thumbs_pending": s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count(),
+            "thumbs_limit": s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded",
+                                                 Clip.thumb_note.like("%daily limit%")).count(),
         }
 
 
@@ -3670,7 +3672,8 @@ def setup_checklist():
         main = main_destination(s)
         main_name = main.name if main else ""
         n_sources = s.query(Channel).filter((Channel.kind.is_(None)) | (Channel.kind != "viral")).count()
-        thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded").count()
+        thumbs_wait = s.query(Clip).filter(Clip.thumb_pending.is_(True), Clip.status == "uploaded",
+                                           (Clip.thumb_note.is_(None) | ~Clip.thumb_note.like("%daily limit%"))).count()  # not a verification matter
         thumbs_ok = s.query(Clip).filter(Clip.status == "uploaded", Clip.thumb_path.isnot(None),
                                          Clip.thumb_pending.isnot(True)).count()
         hp = _helper_state(s)

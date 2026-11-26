@@ -14,7 +14,7 @@ from googleapiclient.http import MediaFileUpload
 from .config import BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, IS_LOCAL
 from . import auth, quota
 from .crypto import decrypt, encrypt
-from .db import Destination, SessionLocal, get_setting, set_setting, main_destination
+from .db import Destination, SessionLocal, get_setting, main_destination, set_setting, utcnow
 
 EMAIL_SCOPES = ["openid", "https://www.googleapis.com/auth/userinfo.email"]
 ANALYTICS_SCOPE = "https://www.googleapis.com/auth/yt-analytics.readonly"  # watch time, traffic sources, countries
@@ -439,8 +439,20 @@ def api_search_cc(topic: str, skip: set, n: int, pages: int = 3) -> list[str]:
     return out[:n]
 
 
+THUMB_PAUSE_KEY = "thumb_rate_until"  # YouTube said "too many thumbnails" (429): no thumbnail is sent until then
+
+
+def thumb_paused() -> bool:
+    from .db import get_setting
+
+    v = get_setting(THUMB_PAUSE_KEY) or ""
+    return bool(v) and v > utcnow().isoformat()
+
+
 def set_thumbnail(dest_id: int | None, video_id: str, path: str):
     mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+    if thumb_paused():  # no quota spent on a call YouTube refuses anyway
+        raise RuntimeError("429 paused: YouTube's daily limit for thumbnail changes")
     yt = client(dest_id)
     quota.spend("thumbnail")
     yt.thumbnails().set(videoId=video_id, media_body=MediaFileUpload(path, mimetype=mime)).execute()
@@ -448,6 +460,15 @@ def set_thumbnail(dest_id: int | None, video_id: str, path: str):
 
 def thumb_error_text(e) -> str:
     m = str(e)
+    if "429" in m or "uploadRateLimitExceeded" in m or "rateLimitExceeded" in m:
+        from datetime import timedelta
+
+        from .db import set_setting
+
+        if not thumb_paused():
+            set_setting(THUMB_PAUSE_KEY, (utcnow() + timedelta(hours=20)).isoformat())
+        return ("Waiting: YouTube's daily limit for thumbnail changes on this channel is reached. "
+                "It is sent again automatically tomorrow.")
     if "forbidden" in m.lower() or "permission" in m.lower() or "403" in m:
         return ("Waiting: YouTube allows custom thumbnails only after the channel's phone number is verified "
                 "(youtube.com/verify). It is sent automatically as soon as that is done.")
