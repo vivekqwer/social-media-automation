@@ -379,6 +379,13 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="wr-on" checked><i></i></span>Send me the weekly report</label>
                 <div class="mut sm" id="wr-where" style="margin-top:6px"></div>
                 <details style="margin-top:8px"><summary style="cursor:pointer;font-weight:500">What it would say now</summary><div class="sm" id="wr-prev" style="white-space:pre-wrap;margin-top:6px"></div></details></div></div>
+            <div class="card" id="gf-card"><div class="ch"><div><h3>More views: titles, topic, length</h3><p>Switched on by the system; the administrator can switch each one off.</p></div></div>
+              <div class="cb sm" style="line-height:1.7">
+                <div id="gf-hook"><b>Hook titles</b> — short titles that make people curious, in your channel's title language. Clips cut from the same video get different titles. Your own videos and titles you edited stay as they are.</div>
+                <div id="gf-retitle"><b>Scheduled videos get the new titles</b> — videos already on YouTube but not public yet, <span id="gf-rt-n">up to 20 a day</span>. Uploads always come first.</div>
+                <div id="gf-niche"><b>One topic per channel</b> — clips clearly off your channel's topic are parked (never deleted) and such videos are skipped. <span id="gf-nz-n"></span></div>
+                <div id="gf-short"><b>Shorter clips</b> — new sources make 20-second clips that end at a pause in the speech when captions are there.</div>
+                <div id="gf-posts" class="mut"></div></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Instagram + Facebook</h3><p>Every Short that goes up on YouTube is also posted as an Instagram Reel and on your Facebook Page (Creative Commons, own and original videos only).</p></div><span class="badge" id="mt-badge">…</span></div>
@@ -397,6 +404,13 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
             <div class="card"><div class="ch"><div><h3>Like &amp; subscribe reminder</h3><p>A small line that appears once, for about 3 seconds near the end of every new video (Shorts and normal videos). No sound, no blinking. Clips shorter than 8 seconds get none.</p></div><span class="badge" id="rm-badge">…</span></div>
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="rm-on" checked><i></i></span>Show it on my videos</label>
                 <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Words<select id="rm-preset"></select></label><label class="f grow hide" id="rm-custom-wrap">Your own words (up to 40 letters, no emoji)<input id="rm-custom" maxlength="40" placeholder="Like, share and subscribe for more"></label><button class="btn" id="rm-save">Save</button></div>
+                <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
+            <div class="card"><div class="ch"><div><h3>Like &amp; subscribe animation</h3><p>YouTube-style buttons at the top of every video: a small hand taps LIKE, SUBSCRIBE and the bell (about 3.5 seconds, early in the video, and once more near the end of clips of 25 seconds or longer). It never covers your face or the title, and never shows at the same time as the reminder line.</p></div><span class="badge" id="sa-badge">…</span></div>
+              <div class="cb"><div style="background:#26303d;border-radius:12px;padding:10px;text-align:center"><img id="sa-prev" alt="How the animation looks" style="max-width:100%;height:auto;display:inline-block"></div>
+                <label class="row" style="gap:10px;font-weight:500;margin-top:10px"><span class="switch"><input type="checkbox" id="sa-on" checked><i></i></span>Show it on my videos</label>
+                <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Where<select id="sa-pos"><option value="top">At the top (under the title and face)</option><option value="auto">Automatic (lower down when text is at the top)</option></select></label><button class="btn" id="sa-save">Save</button></div>
+                <div class="mut sm" id="sa-note" style="margin-top:8px"></div>
+                <button class="btn outline sm" id="sa-remake" style="margin-top:8px" title="Adds it to every clip that is waiting to upload (or waiting for review); upload times, titles and thumbnails stay the same">Re-make all waiting clips</button>
                 <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
             <div class="card"><div class="ch"><div><h3>First comment</h3><p>After every upload your channel writes the first comment under the new video, as soon as the video is public (a scheduled video: at its publish time, within about 10 minutes). <b>YouTube does not let any app pin a comment</b> — so you get a message with the video link: open it, tap ⋮ next to your comment → Pin.</p></div><span class="badge" id="fc-badge">…</span></div>
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="fc-on" checked><i></i></span>Post a first comment on my new videos</label>
@@ -473,6 +487,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
       <label class="row sm" id="e-ftitle-row" style="gap:8px;margin-top:6px" title="YouTube shows its own frame of a Short, not your thumbnail. With this on, the title and your small face are at the top of every frame, so that frame always carries them."><span class="switch"><input type="checkbox" id="e-ftitle" checked><i></i></span>Title and my face at the top of the whole Short (so YouTube's picture of it shows them)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="One short line in a small pill, shown once near the end. No sound. The words are chosen in My channels."><span class="switch"><input type="checkbox" id="e-cta" checked><i></i></span>Small “Like, share and subscribe” line near the end (about 3 seconds)</label>
+      <label class="row sm" style="gap:8px;margin-top:6px" title="YouTube-style like, subscribe and bell buttons at the top, tapped by a small hand. Switched on or off for all videos in My channels."><span class="switch"><input type="checkbox" id="e-sa" checked><i></i></span>Animated like + subscribe + bell at the top (about 3.5 seconds)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="Shorts: the crop follows the person instead of the centre"><span class="switch"><input type="checkbox" id="e-reframe" checked><i></i></span>Smart reframe (Shorts follow the person on screen)</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
@@ -511,7 +526,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="sm hide" id="e-kbasis" style="margin:6px 0;line-height:1.6"></div>
         <div class="chips" id="e-chips"></div>
         <div class="mut sm" id="e-klegend">Click a keyword to put it in the tags or take it out. <span class="kd t"></span>typed by people in YouTube search &nbsp;<span class="kd v"></span>from the original video &nbsp;<span class="kd h"></span>trending now. Most typed first — YouTube does not publish search numbers.</div>
-        <div class="row" id="e-krow"><input id="e-kq" class="grow" maxlength="120" placeholder="Optional: your own topic words, e.g. street food delhi"><button class="btn outline" id="e-kw">Find better keywords</button><button class="btn sec hide" id="e-meta"><i data-ico="sparkles"></i>Use these</button></div>
+        <div class="row" id="e-krow"><input id="e-kq" class="grow" maxlength="120" placeholder="Optional: your own topic words, e.g. street food delhi"><button class="btn outline" id="e-kw">Find better keywords</button><button class="btn ghost" id="e-hook" title="A short title that makes people curious (put in the title box; press Save to keep it)">Hook title</button><button class="btn sec hide" id="e-meta"><i data-ico="sparkles"></i>Use these</button></div>
         <div class="mut sm hide" id="e-kprev"></div>
       </div>
       <label class="f"><span>Title <span class="mut sm" id="e-mtn" style="font-weight:400"></span></span><input id="e-mt" placeholder="Title"></label>
@@ -591,7 +606,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="f">Upload as<select id="s-a"><option value="9:16">Shorts (9:16)</option><option value="16:9">Video (16:9)</option><option value="1:1">Square (1:1)</option></select></label>
       <label class="f">Videos per run<input id="s-v" type="number" value="3" min="1" max="20"></label>
       <label class="f">Clips per video<input id="s-c" type="number" value="2" min="1" max="10"></label>
-      <label class="f">Clip length (s)<input id="s-l" type="number" value="30" min="10" max="120"></label>
+      <label class="f">Clip length (s)<input id="s-l" type="number" value="20" min="10" max="120"></label>
       <label class="f">Gap (hours)<input id="s-g" type="number" value="12" min="1"></label>
       <label class="f">Post daily at<input id="s-times" placeholder="10:00, 18:30"></label>
     </div>
@@ -823,7 +838,7 @@ async function loadIdeas(){
   $$('[data-unc]').forEach(b=>b.onclick=()=>once(async()=>{await api('/api/ideas/competitors?url='+encodeURIComponent(b.dataset.unc),'DELETE');loadIdeas()}));
   $$('[data-topic]').forEach(b=>b.onclick=()=>{const words=b.dataset.topic.replace(/[#|:()\[\]!?.,'"]/g,' ').split(/\s+/).filter(w=>w.length>2).slice(0,4).join(' ').toLowerCase();
     const t=prompt('Add this as a topic source (Creative Commons videos only). Edit the words if you like:',words);if(!t)return;
-    once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:35,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
+    once(async()=>{await api('/api/channels','POST',{kind:'topic',query:t,mode:'cc',destination_id:DESTS[0]?DESTS[0].id:null,review_first:true,captions:true,clips_per_video:1,clip_len:20,videos_per_run:2,post_times:'10:00, 18:00',tz_offset:new Date().getTimezoneOffset()});toast('Topic added (Review first on) — see Sources')})});
 }
 $('#id-cat').onchange=()=>once(loadIdeas);
 // ---------- Ideas -> Keyword research (same engine and saved results as the editor's keyword helper) ----------
@@ -1214,7 +1229,7 @@ async function loadSources(){
   $$('[data-del]').forEach(b=>b.onclick=()=>once(async()=>{if(confirm('Remove this source?')){await api(`/api/channels/${b.dataset.del}`,'DELETE');loadSources()}}));
   $$('[data-sedit]').forEach(b=>b.onclick=()=>{const c=L.find(x=>x.id===+b.dataset.sedit);$('#se-id').value=c.id;$('#se-name').value=c.name||c.query||'';
     $('#se-dest').innerHTML=DESTS.map(d=>`<option value="${d.id}" ${d.id===c.destination_id?'selected':''}>${esc(d.name)}</option>`).join('');
-    $('#se-a').value=c.aspect||'9:16';$('#se-v').value=c.videos_per_run||1;$('#se-c').value=c.clips_per_video||1;$('#se-l').value=c.clip_len||30;$('#se-i').value=c.interval_hours||'';
+    $('#se-a').value=c.aspect||'9:16';$('#se-v').value=c.videos_per_run||1;$('#se-c').value=c.clips_per_video||1;$('#se-l').value=c.clip_len||20;$('#se-i').value=c.interval_hours||'';
     $('#se-t').value=c.post_times||'';$('#se-cap').checked=!!c.captions;$('#se-rev').checked=!!c.review_first;
     $$('.se-clip').forEach(e=>e.classList.toggle('hide',c.kind==='reel'));$('#m-src').classList.add('on')});
   $$('[data-sdest]').forEach(b=>b.onchange=()=>once(async()=>{await api(`/api/channels/${b.dataset.sdest}/destination`,'POST',{destination_id:+b.value});toast('This source now uploads to '+b.options[b.selectedIndex].text+' (its waiting clips moved too)')}));
@@ -1392,11 +1407,16 @@ async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}c
   if($('#ph-tog'))$('#ph-tog').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:p.on?'off':'on'});loadPhone()},$('#ph-tog'));
   if($('#ph-new'))$('#ph-new').onclick=()=>once(async()=>{if(!confirm('Make a new QR code? The phone that scanned the old one stops getting messages until it scans the new one.'))return;await api('/api/phone','POST',{action:'new'});loadPhone()},$('#ph-new'));
 }
-async function loadFaceSize(){loadReminder();loadComment();loadWeekly();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadFaceSize(){loadReminder();loadSubAnim();loadComment();loadWeekly();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
 async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
   $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
   $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
   const b=$('#rm-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off'}
+async function loadSubAnim(){let r;try{r=await api('/api/settings/subscribe-anim')}catch(e){return}
+  $('#sa-on').checked=!!r.on;$('#sa-pos').value=r.pos||'top';
+  const b=$('#sa-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
+  if(!$('#sa-prev').getAttribute('src'))$('#sa-prev').src='/api/settings/subscribe-anim/preview.png';
+  const m=r.remake||{};$('#sa-note').textContent=!m.on?'':m.stopped?m.stopped:m.waiting?`${m.waiting} waiting clip(s) still need it. They get it by themselves, one at a time (about ${m.minutes} min when the server is free, up to ${m.minutes_if_busy} min when it is busy making new clips); upload times stay the same.`+(m.done?` ${m.done} done so far.`:''):'Every waiting clip has it.'+(m.done?` (${m.done} clip(s) re-made)`:'')}
 function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
 $('#rm-preset').onchange=rmShow;
 let FC=null;
@@ -1425,7 +1445,12 @@ function wrPaint(r){$('#wr-on').checked=!!r.on;const b=$('#wr-badge');b.classNam
   const to=[r.mail?'your Gmail':'',r.phone?'the phone app':''].filter(Boolean).join(' and ');
   const l=r.last;$('#wr-where').innerHTML=(to?`Goes to ${to}.`:'Connect Gmail or the phone app above to receive it.')+(l?` Last: ${esc(l.week)} — ${l.skipped?'no data that week, nothing sent':[l.mail?'mail sent':'',l.phone?'phone message sent':''].filter(Boolean).join(', ')||'nothing could be sent'}.`:'');
   $('#wr-prev').textContent=r.preview||'No numbers yet — the first report comes on the first Monday with data.'}
-async function loadWeekly(){try{wrPaint(await api('/api/settings/weekly-report'))}catch(e){}}
+async function loadWeekly(){try{wrPaint(await api('/api/settings/weekly-report'))}catch(e){}loadGrowth()}
+async function loadGrowth(){try{const r=await api('/api/settings/growth'),on=r.on||{};
+  ['hook','retitle','niche','short'].forEach((k,i)=>{const el=$('#gf-'+k);if(el)el.classList.toggle('hide',!on[['titles.hook','titles.retitle','niche.guard','clips.short'][i]])});
+  if(r.retitle)$('#gf-rt-n').textContent=`up to ${r.retitle.per_day} a day (${r.retitle.done} done so far, ${r.retitle.today} today)`;
+  const nz=r.niche||{};$('#gf-nz-n').textContent=nz.at?`Last check ${when(nz.at)}: ${nz.parked||0} parked.`:'';
+  const p=r.posts||{};$('#gf-posts').textContent=p.n?`Public posts a day: ${p.n} (${p.times} India time).`:''}catch(e){}}
 $('#wr-on').onchange=async()=>{const el=$('#wr-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
   LOCK=true;el.disabled=true;try{const r=await api('/api/settings/weekly-report','POST',{on});wrPaint(r);toast(r.on?'Weekly report on — every Monday at 9 AM':'Weekly report off')}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
 function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
@@ -1447,6 +1472,8 @@ function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   if(!done&&c.comment_can===false&&st!=='no permission')n+='<div>This channel must be reconnected once to allow comments (My channels).</div>';
   $('#e-fc-note').innerHTML=n}
 $('#e-fc-save').onclick=()=>once(async()=>{const id=CUR.id;const c=await api(`/api/clips/${id}/comment`,'POST',{on:$('#e-fc-on').checked,text:$('#e-fc-text').value});if(!sameClip(id))return;Object.assign(CUR,c);fcEditor(CUR);toast('Comment saved')},$('#e-fc-save'));
+$('#sa-save').onclick=()=>once(async()=>{await api('/api/settings/subscribe-anim','POST',{on:$('#sa-on').checked,pos:$('#sa-pos').value});toast('Saved — new clips use it; clips that are waiting get it by themselves, one at a time.');loadSubAnim()},$('#sa-save'));
+$('#sa-remake').onclick=()=>once(async()=>{const r=await api('/api/subscribe-anim/remake','POST',{});toast(r.waiting?`${r.waiting} waiting clip(s) get the animation, one at a time (about ${r.minutes} min). Upload times stay the same.`:'Every waiting clip already has it.');loadSubAnim()},$('#sa-remake'));
 $('#rm-save').onclick=()=>once(async()=>{await api('/api/settings/reminder','POST',{on:$('#rm-on').checked,preset:$('#rm-preset').value,custom:$('#rm-custom').value});toast('Saved — new clips use it. Clips that are already made: Clips → “Make all waiting clips again”.');loadReminder()},$('#rm-save'));
 $('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
@@ -1668,7 +1695,7 @@ function fill(c){
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
   $('#e-rewrite').classList.toggle('hide',!(AISRC.has(c.source_id)&&!['uploaded','uploading'].includes(c.status)));
   $('#e-refetch').parentElement.classList.toggle('hide',!!c.own_upload);
-  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
+  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-sa').checked=c.sub_anim_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
   $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
@@ -1753,7 +1780,7 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,sub_anim_on:$('#e-sa').checked,
     comment_on:$('#e-fc-on').checked,comment_text:$('#e-fc-text').value,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
@@ -1809,6 +1836,8 @@ $('#e-kw').onclick=()=>once(async()=>{const id=CUR.id;const r=await api(`/api/ke
   kwChips(r.kw.items);$('#e-knote').textContent=r.kw.note;
   $('#e-kprev').innerHTML=`<b>Nothing is changed yet.</b> New title: “${esc(r.title)}”. Press “Use these” to write the title, description and tags from these keywords — or click single keywords to put them in your own tags.`;
   $('#e-kprev').classList.remove('hide');$('#e-meta').classList.remove('hide')},$('#e-kw'));
+$('#e-hook').onclick=()=>once(async()=>{const id=CUR.id;const r=await api(`/api/clips/${id}/hook-title`,'POST');if(!sameClip(id))return;
+  $('#e-mt').value=r.title;kwCount();toast('Hook title put in the title box — press Save to keep it')},$('#e-hook'));
 $('#e-chips').onclick=e=>{const el=e.target.closest('span[data-k]');if(!el)return;const k=el.dataset.k,t=tagList(),i=t.findIndex(x=>x.toLowerCase()===k.toLowerCase());if(i>=0)t.splice(i,1);else t.push(k);$('#e-mg').value=t.join(', ');kwCount()};
 $('#e-mt').oninput=$('#e-mg').oninput=$('#e-md').oninput=kwCount;
 $('#e-meta').onclick=()=>once(async()=>{const id=CUR.id,topic=$('#e-kq').value.trim();await save();await api(`/api/clips/${id}/metadata`,'POST',{topic});const c=await api('/api/clips/'+id);if(!sameClip(id))return;fill(c);etab('meta');toast('Title, description and tags are written from the keywords')},$('#e-meta'));
@@ -1955,15 +1984,16 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'channels.main':'[data-main],[data-take]','channels.language':'[data-tlang]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
-  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
+  'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch,#sa-remake','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
   'clips.face':'.card:has(#face-prev),label:has([data-face])','thumbs.designer':'#e-tdesign','clips.captions':'#e-cgen','clips.voice':'#e-tts,#e-vfile',
   'gmail.connect':'a[href="/auth/gmail"],#gm-del','gmail.send':'[data-pmsend],#vr-send,#pm-auto-box',
   'permissions.manage':'#pm-emails,#pm-find,[data-pmfind],[data-pmconfirm],[data-pmgr],[data-pmno],[data-pmask],[data-pmyes],[data-pmskip],[data-pmundo],#gm-idsave',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','report.weekly':'.card:has(#wr-on)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
-  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
-  'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box'};
+  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)','clips.subscribe_anim':'.card:has(#sa-on),label:has(#e-sa)',
+  'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box',
+  'titles.hook':'#gf-hook,#e-hook','titles.retitle':'#gf-retitle','niche.guard':'#gf-niche','clips.short':'#gf-short'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){
   let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}

@@ -40,6 +40,9 @@ LAYOUTS = ["top", "box", "band", "arrow"]
 MAX_BYTES = 1_900_000
 PER_DAY = int(os.getenv("THUMB_REDESIGN_PER_DAY") or "15")  # re-made old thumbnails a day, per account
 PER_RUN = 5
+# every ffmpeg call has a deadline: a thumbnail is also made right before an upload (scheduler._ensure_thumb), and a
+# hung ffmpeg must never leave a clip stuck in "uploading"
+GRAB_TIMEOUT, PASS_TIMEOUT, TEXT_TIMEOUT = 90, 240, 90
 
 YELLOW, RED, WHITE, BLACK = (255, 214, 10), (236, 32, 40), (255, 255, 255), (0, 0, 0)
 DEVA = re.compile(r"[ऀ-ॿ]")
@@ -239,10 +242,33 @@ def faces(rgb: np.ndarray) -> list[tuple[float, float, float, float]]:
         return []
 
 
+def _run(args, timeout: float, **kw):
+    """subprocess.run with a deadline; a run past it counts as failed (returncode -9, nothing read)."""
+    try:
+        return subprocess.run(args, capture_output=True, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        log.warning("thumb designer: ffmpeg took longer than %s s and was stopped", timeout)
+        empty = "" if kw.get("text") else b""
+        return subprocess.CompletedProcess(args, -9, empty, "timeout" if kw.get("text") else b"timeout")
+
+
+def probe(src: Path) -> tuple[int, int, float]:
+    """(width, height, seconds) from the file's header (fast; with a deadline)."""
+    r = _run([ffmpeg_bin(), "-hide_banner", "-i", str(src)], GRAB_TIMEOUT, text=True)
+    err = r.stderr or ""
+    m = re.search(r"Video:.*?[, ](\d{2,5})x(\d{2,5})[, \[]", err)
+    w, h = (int(m.group(1)), int(m.group(2))) if m else (1080, 1920)
+    if re.search(r"rotation of -?(90|270)", err) or re.search(r"rotate\s*:\s*(90|270)", err):
+        w, h = h, w
+    d = re.search(r"Duration: (\d+):(\d+):([\d.]+)", err)
+    dur = int(d.group(1)) * 3600 + int(d.group(2)) * 60 + float(d.group(3)) if d else 0.0
+    return w, h, dur
+
+
 def _grab(src: Path, t: float, width: int | None) -> Image.Image | None:
     vf = f"scale={width}:-2" if width else "scale='min(1920,iw)':-2"
-    r = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", str(src), "-frames:v", "1",
-                        "-vf", vf, "-f", "image2pipe", "-vcodec", "png", "-"], capture_output=True)
+    r = _run([ffmpeg_bin(), "-v", "error", "-ss", f"{max(0.0, t):.2f}", "-i", str(src), "-frames:v", "1",
+              "-vf", vf, "-f", "image2pipe", "-vcodec", "png", "-"], GRAB_TIMEOUT)
     if r.returncode or not r.stdout:
         return None
     try:
@@ -304,17 +330,15 @@ def _total(m: dict, sharp_median: float) -> float:
 _scored_cache: dict = {}
 
 
-def _small_frames(src: Path, dur: float, n: int) -> list[tuple[float, Image.Image]]:
+def _small_frames(src: Path, dur: float, n: int, size=None) -> list[tuple[float, Image.Image]]:
     """n small frames spread over the clip in ONE decoding pass (one seek per frame is much slower on long GOPs)."""
-    from .ingest import video_size
-
-    size = video_size(src) or (1080, 1920)
+    size = size or probe(src)[:2]
     w = 320
     h = max(2, int(round(size[1] * w / size[0] / 2)) * 2)
     t0, span = dur * 0.05, dur * 0.9
-    r = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{t0:.2f}", "-i", str(src), "-t", f"{span:.2f}",
-                        "-vf", f"fps={n / max(0.5, span):.4f},scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
-                       capture_output=True)
+    r = _run([ffmpeg_bin(), "-v", "error", "-ss", f"{t0:.2f}", "-i", str(src), "-t", f"{span:.2f}",
+              "-vf", f"fps={n / max(0.5, span):.4f},scale={w}:{h}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+             PASS_TIMEOUT)
     fs = w * h * 3
     k = len(r.stdout) // fs
     out = []
@@ -324,18 +348,26 @@ def _small_frames(src: Path, dur: float, n: int) -> list[tuple[float, Image.Imag
     return out
 
 
-def pick_times(src: Path, dur: float, n: int = 16) -> list[tuple[float, float]]:
-    """[(score, time)] best first, for n frames spread over the clip."""
+def _inside(t: float, avoid) -> bool:
+    return any(a <= t <= b for a, b in avoid or ())
+
+
+def pick_times(src: Path, dur: float, n: int = 16, avoid=()) -> list[tuple[float, float]]:
+    """[(score, time)] best first, for n frames spread over the clip; never a moment inside `avoid` windows
+    ([(start, end)] seconds: the like & subscribe sticker / the thumbnail cover of a finished video)."""
+    avoid = tuple(tuple(w) for w in avoid or ())
     try:
-        key = (str(src), Path(src).stat().st_mtime, round(dur, 2), n)
+        key = (str(src), Path(src).stat().st_mtime, round(dur, 2), n, avoid)
     except OSError:
         key = None
     if key and key in _scored_cache:
         return _scored_cache[key]
-    got = [(t, frame_score(im)) for t, im in _small_frames(src, dur, n)]
+    got = [(t, frame_score(im)) for t, im in _small_frames(src, dur, n) if not _inside(t, avoid)]
     if not got:  # one seek per frame as a fallback
         for i in range(n // 2):
             t = dur * (0.05 + 0.9 * i / max(1, n // 2 - 1))
+            if _inside(t, avoid):
+                continue
             im = _grab(src, t, 320)
             if im is not None:
                 got.append((t, frame_score(im)))
@@ -644,7 +676,6 @@ def _rounded(d, rect, r, fill):
 # ---------------------------------------------------------------- the thumbnail
 def source_image(clip, project, variant: int) -> Image.Image:
     """The best frame (full size) of the clip's own section, or the frame kept when the video went to the PC."""
-    from .ingest import stream_seconds
     from .thumbs import _thumb_source
 
     workdir, src, _W, _H = _thumb_source(clip, project)
@@ -653,10 +684,21 @@ def source_image(clip, project, variant: int) -> Image.Image:
         return Image.open(kept).convert("RGB")
     if not src.exists():
         raise RuntimeError("the video is not on the server and no frame was kept for this")
-    dur = stream_seconds(src, "v:0") or 10.0
-    t = choose_time(pick_times(src, dur), dur, variant)
+    _w, _h, dur = probe(src)
+    dur = dur or 10.0
+    avoid = []
+    if clip.output_path and Path(src) == Path(clip.output_path):  # the finished video: never the sticker or the cover
+        from .render import COVER_SECONDS
+        from .thumbs import _avoid
+
+        avoid = [(0.0, COVER_SECONDS + 0.3)] + [tuple(w) for w in _avoid(clip, src)]
+    t = choose_time(pick_times(src, dur, avoid=avoid), dur, variant)
+    if _inside(t, avoid):
+        from .thumbs import _clear_of
+
+        t = _clear_of(t, avoid, dur) or dur * 0.5
     img = _grab(src, t, None)
-    if img is None:
+    if img is None and not _inside(dur * 0.35, avoid):
         img = _grab(src, dur * 0.35, None)
     if img is None:
         raise RuntimeError("no frame could be read from the video")
@@ -820,9 +862,9 @@ def compose(img: Image.Image, W: int, H: int, words: list[str], own: bool, layou
                           f"\\pos({int(txt.xs[txt.key_line])},{int(txt.ys[txt.key_line])})\\frz2", 1)
     assf.write_text(ass, encoding="utf-8")
     try:
-        r = subprocess.run([ffmpeg_bin(), "-y", "-v", "error", "-i", basef.name,
-                            "-vf", f"ass={assf.name}:fontsdir='{_esc(FONTS_DIR)}'", "-frames:v", "1", outf.name],
-                           cwd=workdir, capture_output=True, text=True)
+        r = _run([ffmpeg_bin(), "-y", "-v", "error", "-i", basef.name,
+                  "-vf", f"ass={assf.name}:fontsdir='{_esc(FONTS_DIR)}'", "-frames:v", "1", outf.name],
+                 TEXT_TIMEOUT, cwd=workdir, text=True)
         if r.returncode != 0:
             raise RuntimeError("thumbnail text failed: " + r.stderr[-300:])
         final = Image.open(outf).convert("RGB")
@@ -913,6 +955,42 @@ def candidates(s, now):
     return sorted(out, key=lambda c: (order[c.status], c.publish_at or now + timedelta(days=3650), c.id))
 
 
+def _push_room() -> bool:
+    """One thumbnails.set (50 units) fits after EVERY upload still due today (and, on the owner's Google project,
+    the owner's uploads): the same rule as the title re-write (app/hooks.py) — a thumbnail never takes an upload."""
+    from . import quota
+
+    try:
+        from .comments import _uploads_due_here
+
+        due = int(_uploads_due_here())
+    except Exception:  # noqa: BLE001
+        due = 10 ** 6  # unknown: keep everything for uploads
+    return quota.can_update(due) and quota.shared_room(quota.COST["thumbnail"])
+
+
+def stale_covers(s, now) -> list:
+    """Shorts not on YouTube yet whose thumbnail is newer than the opening frame burned into the video (e.g. the face
+    photo changed: only the thumbnails are re-made at once; the slow re-encode of the video happens here, capped)."""
+    from datetime import timedelta
+
+    from .db import Clip
+
+    soon = now + timedelta(hours=2)
+    rows = s.query(Clip).filter(Clip.aspect == "9:16", Clip.thumb_path.isnot(None), Clip.pc_item_id.is_(None),
+                                Clip.short_cover.isnot(False), Clip.status.in_(["rendered", "queued"]),
+                                (Clip.status == "rendered") | (Clip.publish_at > soon)).all()
+    out = []
+    for c in rows:
+        try:
+            body, vid, th = Path(c.output_path or "").parent / "body.mp4", Path(c.output_path or ""), Path(c.thumb_path)
+            if c.output_path and body.exists() and vid.exists() and th.exists() and th.stat().st_mtime > vid.stat().st_mtime + 1:
+                out.append(c)
+        except OSError:
+            continue
+    return out
+
+
 def refresh_old(max_run: int = PER_RUN) -> dict:
     """Timed job (per account, "thumbs.designer"): re-make old-style thumbnails, at most PER_DAY a day. Clips not on
     YouTube yet: new thumbnail + the Short's opening frame made again. Uploaded, not public: only the new thumbnail
@@ -938,9 +1016,8 @@ def refresh_old(max_run: int = PER_RUN) -> dict:
             if not frame_ready(c, p):
                 continue  # the video is on the PC only and no frame was kept: nothing to make it from
             uploaded = c.status == "uploaded"
-            if uploaded and not (quota.DAILY_UNITS - quota.used() >= 2 * quota.UPLOAD_COST + quota.COST["thumbnail"]
-                                 and quota.shared_room(quota.COST["thumbnail"])):
-                break  # the day's allowance is for uploads first
+            if uploaded and not _push_room():
+                continue  # the day's allowance is for uploads first (clips not on YouTube yet need none)
             _count()
             try:
                 c.thumb_path = str(make_thumbnail(c, p))
@@ -950,6 +1027,8 @@ def refresh_old(max_run: int = PER_RUN) -> dict:
                 else:
                     c.thumb_style = "x" + VERSION  # the designer failed for this clip: not tried again every day
                     res["skipped"] += 1
+                    s.commit()
+                    continue  # the old thumbnail again: nothing to send, no new opening frame
                 s.commit()
             except Exception as e:  # noqa: BLE001
                 s.rollback()
@@ -971,6 +1050,21 @@ def refresh_old(max_run: int = PER_RUN) -> dict:
                     from .render import apply_short_cover
 
                     apply_short_cover(c)  # the Short's opening frame shows the new thumbnail
+                    s.commit()  # what apply_short_cover recorded (e.g. sub_anim_v of the like & subscribe sticker)
+        recover = stale_covers(s, now)
+        for c in recover:
+            if res["remade"] + res["skipped"] + res.get("covers", 0) >= max_run or done_today() >= PER_DAY:
+                break
+            _count()
+            from .render import apply_short_cover
+
+            try:
+                apply_short_cover(c)
+                s.commit()
+                res["covers"] = res.get("covers", 0) + 1
+            except Exception as e:  # noqa: BLE001
+                s.rollback()
+                log.info("thumb cover %s: %s", c.id, str(e)[:200])
     res["left_today"] = max(0, PER_DAY - done_today())
     if res["remade"] or res["skipped"]:
         log.info("thumb redesign: %s", res)

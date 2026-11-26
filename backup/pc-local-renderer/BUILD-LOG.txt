@@ -1,0 +1,9 @@
+2026-11-24  make_local.py built and run
+- Loads newest dashboard backup into tool\data\app.db (app's own restore steps), selects ids.txt (or 'Parked:' clips),
+  skips repeats with autopilot.same_moment, downloads + renders with the app's own code (D:\fix-main, read-only),
+  writes D:\youtube\NNN_title\ {video.mp4, thumbnail.jpg, description.txt, info.json}, error.txt on failure.
+- info.json carries "approve": "manual", source_channel, licence_line, suggested 18:00 IST dates from 2027-07-01.
+- Ids missing from the backup are listed in waiting.txt and keep their number/date.
+- Test: clips 220, 223, 241 made (35 s, 1080x1920 h264 + aac, plays; credit, face band, reminder, cover, thumbnail ok);
+  moved to tool\test-output (not in ids.txt). 130-498 s per clip (CPU shared with other work).
+- Full run started 22:57 (192 clips in the 11-24 backup, 43 waiting, 2 repeats skipped).

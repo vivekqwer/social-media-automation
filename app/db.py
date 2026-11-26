@@ -161,6 +161,8 @@ class Clip(Base):
     voice_fit = Column(String(8))  # speed = the voice-over is sped up/slowed down to end exactly with the clip
     frame_title = Column(Boolean)  # Shorts: title + small face at the top of every frame (None/True = on)
     cta_on = Column(Boolean)  # small "like and subscribe" reminder near the end of the video (None/True = on)
+    sub_anim_on = Column(Boolean)  # animated like + subscribe + bell at the top (None/True = on; app/subscribe_anim.py)
+    sub_anim_v = Column(Integer)  # what the finished video carries: None = made before it existed, 0 = without, -1 = failed, n = version
     reuploaded_as = Column(Integer)  # this video was deleted from YouTube and uploaded again as that clip
     removed_at = Column(DateTime)  # deleted from YouTube and removed from the dashboard by the owner (kept as history)
     live_noted = Column(Boolean)  # the owner was told this video went live
@@ -224,7 +226,7 @@ class Channel(Base):
     auto = Column(Boolean, default=True)
     videos_per_run = Column(Integer, default=3)
     clips_per_video = Column(Integer, default=2)
-    clip_len = Column(Integer, default=30)
+    clip_len = Column(Integer, default=20)  # seconds; 20 since Nov 2026 (shorter Shorts are watched to the end more often)
     aspect = Column(String(8), default="9:16")
     gap_hours = Column(Integer, default=12)  # spacing between scheduled uploads
     destination_id = Column(Integer)  # which of my channels receives the uploads
