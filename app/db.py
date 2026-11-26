@@ -173,6 +173,9 @@ class Clip(Base):
     meta_done = Column(Boolean, default=False)  # also posted to Instagram / Facebook
     meta_result = Column(JSON)
     thumb_variant = Column(Integer, default=0)  # 1 = second thumbnail tried automatically because views were low
+    # thumbnail A/B (app/growth.py): {"state": "a"|"b"|"done", "a_at", "a_views", "b_at", "b_views", "end_views",
+    #  "a_rate", "b_rate", "by": "ctr"|"views", "winner": "A"|"B", "note"}
+    thumb_test = Column(JSON)
     fetch_since = Column(DateTime)  # waiting for the helper PC since
     fetch_tries = Column(Integer, default=0)  # times a helper took the download job
     job_lease = Column(DateTime)  # a helper took this clip's job at; others wait until it expires
@@ -249,6 +252,7 @@ class Destination(Base):
     paused = Column(Boolean, default=False)  # uploads held (set automatically when YouTube removes/blocks a video)
     paused_reason = Column(Text)
     paused_at = Column(DateTime)
+    title_lang = Column(String(10))  # titles, description hook and hashtags: None/"en" English | "hinglish" | "hi" (app/metadata.py)
     created_at = Column(DateTime, default=utcnow)
 
 

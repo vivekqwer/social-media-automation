@@ -280,13 +280,15 @@ def inventory(s, wid: int, names) -> dict:
 # ---------------------------------------------------------------- clean-up
 def crosspost_pending(c: Clip, p: Project | None, meta_on: bool, now) -> bool:
     """Instagram/Facebook fetch the file from the server: keep it until that post is done (or never will be)."""
-    from .meta import CROSSPOST_MODES
+    from .meta import CROSSPOST_MODES, _ig_pending, public_since
 
-    if not meta_on or c.meta_done or c.meta_result:
+    if not meta_on or c.meta_done:
         return False
+    if c.meta_result:  # tried: kept only while Instagram has not fetched the file yet (its container is not ready)
+        return _ig_pending(c.meta_result) and public_since(c) >= now - CROSSPOST_WAIT
     if c.aspect != "9:16" or not p or p.mode not in CROSSPOST_MODES:
         return False
-    return not (c.attempted_at and c.attempted_at < now - CROSSPOST_WAIT)
+    return public_since(c) >= now - CROSSPOST_WAIT  # a scheduled video counts from when it goes public
 
 
 def _keep_frame(c: Clip, p: Project | None):

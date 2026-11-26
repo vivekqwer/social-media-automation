@@ -57,6 +57,7 @@ PERMS = [
     ("channels.disconnect", "channels", "Disconnect a YouTube channel", True),
     ("channels.main", "channels", "Change the main channel / move work between channels", True),
     ("channels.pause", "channels", "Pause and resume uploads to a channel", True),
+    ("channels.language", "channels", "Title language of a channel (English / Hinglish / Hindi)", True),
 
     ("sources.add", "sources", "Add sources", True),
     ("sources.edit", "sources", "Change sources (settings, start / stop, scripts)", True),
@@ -161,6 +162,8 @@ ROUTES = [
     ("GET", "/privacy", ANYONE, None),
     ("GET", "/terms", ANYONE, None),
     ("GET", "/about", ANYONE, None),
+    ("GET", "/welcome", ANYONE, None),  # the public home page (visitors who are not signed in also get it at /)
+    ("GET", "/api/public/plans", ANYONE, None),  # read-only: plan names and prices for the home page, nothing else
     ("GET", "/healthz", ANYONE, None),
     ("GET", "/helper/phone.py", ANYONE, None),  # the Android phone helper: a public file of the repository, no secrets
     ("GET", "/helper/setup.sh", ANYONE, None),
@@ -210,6 +213,9 @@ ROUTES = [
     ("POST", "/api/admin/users/{aid}/control", SUPER, None),
     ("DELETE", "/api/admin/users/{aid}/channels/{did}", SUPER, None),
     ("POST", "/api/admin/users/{aid}/delete-data", SUPER, None),
+    ("POST", "/api/admin/users/{aid}/trial", SUPER, None),  # extend / end a free trial
+    ("GET", "/api/admin/signup", SUPER, None),  # new accounts: approve by hand or start at once; the free trial
+    ("POST", "/api/admin/signup", SUPER, None),
     ("POST", "/api/admin/workers/{wid}/central", SUPER, None),  # a helper of the owner's copy serves every account
     # --- pages: what each one reads
     ("GET", "/api/overview", SIGNED, None),  # counts and channel list every page needs
@@ -221,6 +227,7 @@ ROUTES = [
     ("GET", "/api/analytics", "page.analytics", None),
     ("POST", "/api/analytics/sync", "page.analytics", None),
     ("GET", "/api/reports", "page.analytics", None),
+    ("GET", "/api/thumb-tests", "page.analytics", None),  # thumbnail A/B tests: which one won
     ("GET", "/api/reports/{name}", "page.analytics", None),
     ("POST", "/api/reports/weekly", "page.analytics", "Made a weekly report"),
     ("GET", "/api/viral", "page.viral", None),
@@ -264,6 +271,7 @@ ROUTES = [
     ("POST", "/api/destinations/{did}/take-over", "channels.main", "Moved all work to another channel"),
     ("POST", "/api/destinations/{did}/pause", "channels.pause", "Paused uploads to a channel"),
     ("POST", "/api/destinations/{did}/resume", "channels.pause", "Resumed uploads to a channel"),
+    ("POST", "/api/destinations/{did}/language", "channels.language", "Changed the title language of a channel"),
     # --- sources (the source type and the number of sources are checked inside POST /api/channels)
     ("POST", "/api/channels", "sources.add", "Added a source"),
     ("PUT", "/api/channels/{chid}", "sources.edit", "Changed a source"),
@@ -376,6 +384,9 @@ ROUTES = [
     ("GET", "/api/meta", SIGNED, None),
     ("POST", "/api/meta/setup", "meta.use", "Connected Instagram + Facebook"),
     ("POST", "/api/meta/toggle", "meta.use", None),
+    ("POST", "/api/meta/page", "meta.use", "Chose the Facebook Page for Instagram + Facebook"),
+    ("POST", "/api/meta/targets", "meta.use", "Changed where Shorts are cross-posted"),
+    ("POST", "/api/meta/app", "meta.use", "Saved the Meta app for Instagram + Facebook"),  # never the secret in the log
     ("DELETE", "/api/meta", "meta.use", "Disconnected Instagram + Facebook"),
     ("POST", "/api/clips/{cid}/crosspost", "meta.use", "Posted a clip to Instagram / Facebook"),
     ("GET", "/api/telegram", SIGNED, None),

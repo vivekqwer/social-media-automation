@@ -280,6 +280,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <section id="p-analytics" class="hide">
         <div class="page-h"><div><h1>Analytics</h1><div class="desc" id="an-desc">Live from YouTube — updates every 2 minutes while this page is open.</div></div><div class="row" style="gap:8px"><button class="btn outline" id="an-report"><i data-ico="upload"></i>Weekly report (PDF)</button><button class="btn" id="an-sync"><i data-ico="refresh"></i>Update now</button></div></div>
         <div id="an-chans"></div>
+        <div id="an-thumbs" class="sm hide" style="margin:0 0 14px"></div>
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>All videos</h3><p>Every video on your channels, newest first. “New” = views since the last update.</p></div>
           <select id="an-sort" style="width:auto"><option value="date">Newest first</option><option value="views">Most views</option><option value="new">Most new views</option></select></div>
           <div class="tw" id="an-videos"></div></div>
@@ -345,6 +346,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
                 <li>Try one payment in test mode (Razorpay shows test cards and the test UPI ID on its payment screen). When it works, do steps 2–4 again in Live mode: live keys start with <b>rzp_live_</b> and need their own webhook.</li>
               </ol></details></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Payments</h3><p>Online payments from customers, newest first. “Started” means the customer opened the payment window but did not finish (yet).</p></div><button class="btn outline sm" id="rz-reload">Refresh</button></div><div class="cb" id="rz-pays"><span class="mut sm">…</span></div></div>
+        <div class="card" style="margin-bottom:16px"><div class="ch" style="flex-wrap:wrap"><div style="flex:1 1 240px;min-width:0"><h3>New accounts and free trial</h3><p>How someone who registers starts. Visitors see the trial on the home page. No card is asked for; when a trial ends the account goes back to the free plan and nothing is deleted.</p></div><span class="badge outline" id="su-badge">…</span></div><div class="cb" id="su-box"><span class="mut sm">…</span></div></div>
         <div class="card" style="margin-bottom:16px"><div class="ch"><div><h3>Plans &amp; defaults</h3><p>A plan is a ready set of switches and limits (for example “Starter” or “Pro”). Put a customer on a plan with one press in their Access panel. The default set is what customers without a plan get.</p></div><button class="btn outline sm" id="pl-new"><i data-ico="plus"></i>New plan</button></div><div class="cb" id="pl-list"><span class="mut sm">…</span></div></div>
         <div class="card"><div class="ch"><div><h3>Accounts</h3><p id="us-sub">…</p></div></div><div class="cb" id="us-list"></div></div>
         <div class="card" style="margin-top:16px"><div class="ch"><div><h3>Activity log</h3><p>What customers did and what you changed for them, newest first.</p></div>
@@ -770,6 +772,9 @@ function renderAnalytics(){
 async function loadAnalytics(){
   if(!AN){$('#an-chans').innerHTML=skel(1);$('#an-videos').innerHTML='<div class="cb">'+skel(3)+'</div>'}
   AN=await api('/api/analytics');renderAnalytics();
+  api('/api/thumb-tests').then(r=>{const el=$('#an-thumbs');const n=r.a_won+r.b_won;el.classList.toggle('hide',!n&&!r.running);
+    el.innerHTML=`<b>Thumbnail tests</b> (videos with few views get a second thumbnail for 48 hours; the better one stays): ${r.running} running · the second thumbnail (B) won ${r.b_won} · the first (A) won ${r.a_won}`
+      +(r.recent||[]).filter(x=>x.line).slice(0,3).map(x=>`<div class="mut">${esc(x.title||'')}: ${esc(x.line)}</div>`).join('')}).catch(()=>{});
   // live mode: while this page is open, ask the server for fresh numbers every 2 minutes
   clearInterval(ANPOLL);ANPOLL=setInterval(async()=>{if($('#p-analytics').classList.contains('hide'))return clearInterval(ANPOLL);try{AN=await api('/api/analytics/sync?live=1','POST');renderAnalytics()}catch(e){}},120000);
 }
@@ -1235,7 +1240,7 @@ async function loadDests(){
   const banner=just&&DL.length>1?`<div class="alert" style="margin-bottom:10px"><span><b>${esc(just.name)}</b> is connected. What should it do?</span><div class="row" style="margin-top:8px;flex-wrap:wrap"><button class="btn sm" data-take="${just.id}">Move everything here (switch channel)</button><button class="btn outline sm" id="dl-keep">Keep both — I choose per source</button></div></div>`:'';
   $('#dest-list').innerHTML=banner+(DL.length?DL.map(d=>`<div class="item" style="flex-wrap:wrap"><div class="avatar">${esc((d.name||'?')[0].toUpperCase())}</div><div class="tx grow"><b>${esc(d.name)}</b> ${d.is_main?'<span class="badge uploaded">Main</span>':''}<span class="mut sm" style="display:block">${d.sources} source${d.sources===1?'':'s'} · ${d.pending} clip${d.pending===1?'':'s'} waiting · ${d.uploaded} uploaded · face: ${d.face==='own'?'its own':d.face==='default'?'default':'none yet'}${d.can_comment===false?' · <a href="/auth/login" title="This channel was connected before comments were added. Connect it once more (same channel) so it can post the first comment under new videos. Uploads are not affected.">reconnect once to allow comments</a>':''}</span></div>
     ${d.needs_reconnect?'<a class="badge failed" href="/auth/login" style="text-decoration:none">Reconnect needed</a>':d.paused?'<span class="badge failed">Uploads paused</span>':'<span class="badge uploaded">Connected</span>'}
-    <div class="row" style="flex-basis:100%;flex-wrap:wrap;gap:6px;margin-top:6px">${!d.is_main?`<button class="btn outline sm" data-main="${d.id}">Make main</button>`:''}${DL.length>1?`<button class="btn outline sm" data-take="${d.id}">Move everything here</button>`:''}<label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label><button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div></div>`).join('')
+    <div class="row" style="flex-basis:100%;flex-wrap:wrap;gap:6px;margin-top:6px">${!d.is_main?`<button class="btn outline sm" data-main="${d.id}">Make main</button>`:''}${DL.length>1?`<button class="btn outline sm" data-take="${d.id}">Move everything here</button>`:''}<label class="btn ghost sm" title="Give this channel its own face">${ico('image')}Own face<input type="file" accept="image/jpeg,image/png,image/webp" data-face="${d.id}" hidden></label><select class="sm" data-tlang="${d.id}" title="Language of the titles, the first lines of the description and the hashtags. Credit and licence lines stay in English." style="width:auto"><option value="en" ${!d.title_lang||d.title_lang==='en'?'selected':''}>Titles in English</option><option value="hinglish" ${d.title_lang==='hinglish'?'selected':''}>Titles in Hinglish</option><option value="hi" ${d.title_lang==='hi'?'selected':''}>Titles in Hindi</option></select><button class="btn outline sm" data-pz="${d.id}" data-on="${d.paused?1:0}">${d.paused?'Resume':'Pause'}</button><button class="btn bad sm" data-dd="${d.id}">Disconnect</button></div></div>`).join('')
     +`<details class="sm" style="margin-top:10px"><summary style="cursor:pointer">How do I add or change a channel?</summary><ol class="mut" style="margin:8px 0 0;padding-left:18px;line-height:1.8"><li><b>Add another channel:</b> press “Connect a YouTube channel” and choose the other channel in Google's window. This one stays connected.</li><li><b>Use both:</b> in Sources choose the channel for each source. The <b>Main</b> channel gets everything new.</li><li><b>Switch to the new channel:</b> press “Move everything here” on it — all sources and waiting clips move.</li><li><b>Remove the old channel:</b> press Disconnect on it. Videos already on YouTube are never touched.</li></ol></details>`
     :empty('youtube','No channel connected','Connect your YouTube channel to enable uploads. Sources and clips that are waiting attach to it by themselves.','<a class="btn" href="/auth/login">'+ico('plus')+'Connect a YouTube channel</a>'));
   if($('#dl-keep'))$('#dl-keep').onclick=()=>{window.JUSTCONNECTED=null;loadDests();toast('Both channels stay. Sources → choose the channel for each source')};
@@ -1252,6 +1257,8 @@ async function loadDests(){
     $('#face-note').textContent='Removing the background… (first time can take a minute)';
     try{await api('/api/faces/'+inp.dataset.face,'POST',fd);toast('Face saved — thumbnails are being remade')}finally{$('#face-note').textContent='';inp.value=''}loadDests()}));
   $$('[data-pz]').forEach(b=>b.onclick=()=>once(async()=>{const on=b.dataset.on==='1';if(on&&!confirm('Resume uploads to this channel?'))return;await api(`/api/destinations/${b.dataset.pz}/${on?'resume':'pause'}`,'POST');toast(on?'Uploads resumed':'Uploads paused');loadDests()}));
+  $$('[data-tlang]').forEach(sel=>sel.onchange=()=>once(async()=>{await api(`/api/destinations/${sel.dataset.tlang}/language`,'POST',{language:sel.value});
+    toast({en:'English',hinglish:'Hinglish',hi:'Hindi'}[sel.value]+' titles from now on. Clips waiting for this channel are written again (not the ones you edited yourself).');loadDests()}));
   loadFace();loadFaceSize();loadPhone();loadWhatsApp();loadBackup();loadTelegram();loadAffiliate();loadPexels();loadGmail();loadMeta();loadMe();
 }
 function afRow(r){const d=document.createElement('div');d.className='row af';d.style.marginBottom='8px';
@@ -1262,11 +1269,28 @@ $('#af-add').onclick=()=>afRow({});
 $('#af-save').onclick=()=>once(async()=>{const rules=$$('#af-list .af').map(d=>({keywords:$('.af-k',d).value,text:$('.af-t',d).value})).filter(r=>r.keywords.trim()&&r.text.trim());
   await api('/api/settings/affiliate','POST',{rules});toast('Saved — used for new videos');loadAffiliate()},$('#af-save'));
 async function loadMeta(){const m=await api('/api/meta');const b=$('#mt-badge');b.className='badge '+(m.connected&&m.on?'uploaded':m.connected?'queued':'outline');b.textContent=m.connected?(m.on?'On':'Off'):'Not connected';
-  $('#mt-box').innerHTML=m.connected?`<div>Facebook Page: <b>${esc(m.page||'')}</b>${m.instagram?` · Instagram: <b>@${esc(m.instagram)}</b>`:' · <span class="mut">no Instagram linked to this Page</span>'}</div>
-    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="mt-tog">${m.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="mt-del">Disconnect</button></div>`
-    :`<ol class="mut sm" style="margin:0 0 10px;padding-left:18px;line-height:1.8"><li>Instagram → switch to a <b>Professional</b> account and link it to a <b>Facebook Page</b>.</li><li>Open developers.facebook.com → Graph API Explorer → choose your app → <b>Get User Access Token</b> with: pages_show_list, pages_read_engagement, pages_manage_posts, instagram_basic, instagram_content_publish.</li><li>Paste the token here and press Connect.</li></ol>
-    <div class="row"><input id="mt-token" class="grow" type="password" autocomplete="off" placeholder="Meta access token"><button class="btn" id="mt-save">Connect</button></div>`;
-  if($('#mt-save'))$('#mt-save').onclick=()=>once(async()=>{const r=await api('/api/meta/setup','POST',{token:$('#mt-token').value});toast('Connected: '+(r.page||'')+(r.instagram?' + @'+r.instagram:''));loadMeta()},$('#mt-save'));
+  const perms=(m.permissions||[]).join(', ');
+  const how=`<details class="sm" style="margin:10px 0" ${m.connected?'':'open'}><summary style="cursor:pointer;font-weight:500">How to connect — what to make on developers.facebook.com</summary><ol class="mut" style="margin:8px 0 0;padding-left:18px;line-height:1.8">
+    <li>Instagram app → <b>Settings → Account type and tools → Switch to professional account</b> (Creator or Business).</li>
+    <li>Link it to a <b>Facebook Page</b> you manage: Facebook → your Page → <b>Settings → Linked accounts → Instagram → Connect</b>. Make a Page first if you have none.</li>
+    <li>Open <b>developers.facebook.com</b> with the same Facebook login → <b>My Apps → Create app</b> → use case <b>Other</b> → app type <b>Business</b> → any name (for example “My channel posting”). It can stay in <b>Development</b> mode: it only posts to your own Page.</li>
+    <li>In that app: <b>App settings → Basic</b> → copy the <b>App ID</b> and the <b>App secret</b> (press Show) into the two boxes below and press <b>Save app</b>. This keeps the login working; without it the login stops after about an hour.</li>
+    <li><b>Tools → Graph API Explorer</b> → Meta App: your app → <b>User token</b> → add these permissions: <code>${esc(perms)}</code> → <b>Generate Access Token</b> → allow your Page and your Instagram account.</li>
+    <li>Copy that token into the box below and press <b>Connect</b>. If you manage more than one Page, choose the one to post to.</li></ol>
+    <div class="mut" style="margin-top:6px">Only Creative Commons, your own and original videos are posted (a creator's permission may cover YouTube only). A Short is posted when it is public on YouTube, also a scheduled one.</div></details>`;
+  const app=`<div class="row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px"><input id="mt-appid" style="width:180px" maxlength="30" inputmode="numeric" autocomplete="off" placeholder="App ID" value="${esc(m.app_id||'')}"><input id="mt-appsec" class="grow" type="password" maxlength="64" autocomplete="new-password" placeholder="${m.app_ready?'App secret saved — empty = keep it':'App secret'}"><button class="btn outline sm" id="mt-appsave">Save app</button><span class="badge ${m.app_ready?'uploaded':'outline'}">${m.app_ready?'App saved':'No app yet'}</span></div>`;
+  const warn=(m.error?`<div class="alert bad" style="margin-bottom:8px"><span>${esc(m.error)}</span></div>`:'')+(m.public_link===false?'<div class="mut sm" style="margin-bottom:8px">Instagram fetches each video from this server, so the server needs a public https address (BASE_URL).</div>':'');
+  $('#mt-box').innerHTML=warn+(m.connected?`<div>Facebook Page: <b>${esc(m.page||'')}</b>${m.instagram?` · Instagram: <b>@${esc(m.instagram)}</b>`:' · <span class="mut">no Instagram linked to this Page</span>'}${m.long_lived?'':' · <span class="mut">short login — save the app below and connect again so it keeps working</span>'}</div>
+    ${(m.pages||[]).length>1?`<label class="f" style="margin-top:8px;max-width:420px">Post to this Page<select id="mt-page">${m.pages.map(p=>`<option value="${esc(p.id)}" ${p.id===m.page_id?'selected':''}>${esc(p.name||p.id)}${p.instagram?' + @'+esc(p.instagram):''}</option>`).join('')}</select></label>`:''}
+    <div class="row sm" style="margin-top:8px;gap:14px;flex-wrap:wrap"><label class="row" style="gap:6px"><input type="checkbox" id="mt-ig" ${m.instagram_on&&m.instagram?'checked':''} ${m.instagram?'':'disabled'}>Instagram Reels</label><label class="row" style="gap:6px"><input type="checkbox" id="mt-fb" ${m.facebook_on?'checked':''}>Facebook Page</label>${m.pending?`<span class="mut">${m.pending} Reel${m.pending===1?'':'s'} being processed by Instagram</span>`:''}</div>
+    <div class="row" style="margin-top:8px"><button class="btn outline sm" id="mt-tog">${m.on?'Turn off':'Turn on'}</button><button class="btn ghost sm" id="mt-del">Disconnect</button></div>${how}${app}
+    <div class="row"><input id="mt-token" class="grow" type="password" autocomplete="off" placeholder="New access token (only to connect again)"><button class="btn outline sm" id="mt-save">Connect again</button></div>`
+    :how+app+`<div class="row"><input id="mt-token" class="grow" type="password" autocomplete="off" placeholder="Access token from Graph API Explorer"><button class="btn" id="mt-save">Connect</button></div>`);
+  $('#mt-save').onclick=()=>once(async()=>{const r=await api('/api/meta/setup','POST',{token:$('#mt-token').value});toast('Connected: '+(r.page||'')+(r.instagram?' + @'+r.instagram:'')+(r.long_lived?'':' — short login: save the app and connect again'));loadMeta()},$('#mt-save'));
+  $('#mt-appsave').onclick=()=>once(async()=>{await api('/api/meta/app','POST',{app_id:$('#mt-appid').value.trim(),app_secret:$('#mt-appsec').value.trim()});toast('Meta app saved. Now connect with a new token so the login keeps working.');loadMeta()},$('#mt-appsave'));
+  if($('#mt-page'))$('#mt-page').onchange=()=>once(async()=>{const r=await api('/api/meta/page','POST',{page_id:$('#mt-page').value});toast('Posting to '+(r.page||'')+(r.instagram?' + @'+r.instagram:''));loadMeta()});
+  if($('#mt-ig'))$('#mt-ig').onchange=()=>once(async()=>{await api('/api/meta/targets','POST',{instagram:$('#mt-ig').checked});loadMeta()});
+  if($('#mt-fb'))$('#mt-fb').onchange=()=>once(async()=>{await api('/api/meta/targets','POST',{facebook:$('#mt-fb').checked});loadMeta()});
   if($('#mt-tog'))$('#mt-tog').onclick=()=>once(async()=>{await api('/api/meta/toggle','POST');loadMeta()},$('#mt-tog'));
   if($('#mt-del'))$('#mt-del').onclick=()=>once(async()=>{if(confirm('Disconnect Instagram/Facebook?')){await api('/api/meta','DELETE');loadMeta()}});
 }
@@ -1619,7 +1643,7 @@ function fill(c){
   $('#e-cnote').textContent=cs.source==='whisper'?'These captions were written automatically by the helper PC (offline Whisper) because the video has no subtitles — please check the words.':'';
   $('#e-credit').checked=c.credit_on!==false;$('#e-reframe').checked=c.reframe!==false;
   $('#e-thumb').src=c.thumb_path?`/api/clips/${c.id}/thumbnail?t=${Date.now()}`:'';$('#e-thumb').style.aspectRatio=c.aspect==='9:16'?'9/16':'16/9';$('#e-thumb').style.width=c.aspect==='9:16'?'160px':'280px';
-  $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
+  $('#e-ttext').value=c.thumb_text||'';$('#e-tface').checked=c.thumb_face!==false;$('#e-tcover').checked=c.short_cover!==false;$('#e-tcover-row').classList.toggle('hide',c.aspect!=='9:16');$('#e-tnote').textContent=c.thumb_note||(c.thumb_path?'':'Made automatically after render.');{let tl=$('#e-tab');if(!tl){tl=document.createElement('div');tl.id='e-tab';tl.className='sm';tl.style.marginTop='6px';$('#e-tnote').parentNode.after(tl)}tl.textContent=c.thumb_test_line||'';tl.classList.toggle('hide',!c.thumb_test_line)}$('#e-tpush').classList.toggle('hide',!(c.youtube_id&&c.thumb_path));
   $('#e-dest').value=DESTS.some(d=>d.id===c.destination_id)?c.destination_id:(DESTS[0]?DESTS[0].id:'');
   $('#e-when').value=(c.status==='queued'||(c.status==='rendered'&&c.kw&&c.kw.basis))&&c.publish_at&&new Date(c.publish_at)>new Date()?localInput(new Date(c.publish_at)):'';
   $('#e-mt').value=c.title||'';$('#e-md').value=c.description||'';$('#e-mg').value=(c.tags||[]).join(', ');kwFill(c);fcEditor(c);
@@ -1878,6 +1902,10 @@ async function loadMe(){
   if(ME.role==='super'&&!ME.viewing){try{const u=await api('/api/admin/users');const n=u.users.filter(x=>x.status==='pending'||x.upgrade).length;const b=$('#b-users');b.style.display=n?'':'none';b.textContent=n}catch(e){}}
   applyAccess();
   renderPlan();
+  let tb=$('#trial-bar');const t=ME.trial;
+  if(t){if(!tb){tb=document.createElement('div');tb.id='trial-bar';tb.className='alert';tb.style.marginBottom='12px';$('main').prepend(tb)}
+    tb.innerHTML=ico('alert')+`<span>Free trial: <b>${t.days_left} day${t.days_left===1?'':'s'} left</b> (until ${esc(new Date(t.ends).toLocaleDateString([], {dateStyle:'medium'}))}). No card needed. <a href="#" id="trial-go">Choose a plan</a> to keep everything switched on after that.</span>`;
+    $('#trial-go').onclick=e=>{e.preventDefault();window.PLANOPEN=1;go('settings')}}else if(tb)tb.remove();
 }
 /* ---------- access control (customers): what the administrator switched off is hidden. The server refuses it anyway. ---------- */
 function can(k){return !(ME&&ME.access&&ME.access.perms&&ME.access.perms[k]===false)}
@@ -1888,7 +1916,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'sources.add':'#top-add,#open-add,.card:has(#h-go),[onclick="openAdd()"],[data-su="source"],[data-wwsrc],#nz-add,[data-nzon]',
   'sources.edit':'[data-sedit],[data-tog],[data-scripts],label:has(#ww-tune),#ww-undo,[data-nzoff]','sources.delete':'[data-del]','sources.run':'[data-run]','source.viral':'[data-vrpick]',
   'channels.connect':'#p-settings .page-h a[href="/auth/login"],#dest-list .empty a[href="/auth/login"]','channels.disconnect':'[data-dd]',
-  'channels.main':'[data-main],[data-take]','channels.pause':'[data-pz],[data-resume]',
+  'channels.main':'[data-main],[data-take]','channels.language':'[data-tlang]','channels.pause':'[data-pz],[data-resume]',
   'clips.create':'[data-alact-do=again],#top-new,#new-clip,[onclick="openNewModal()"],[data-again],#e-again','clips.own_video':'#up-video',
   'clips.edit':'#e-kw,#e-meta,#e-meta,#e-addov','clips.approve':'#e-approve,#e-unq,[data-approve],[data-pca],#pc-all','clips.discard':'#e-gone-rm,[data-alact-do=remove],[data-alact-do=restore],#e-del,#e-rewrite,[data-pcs],[data-pcu]','uploads.auto':'label:has(#pc-auto)',
   'clips.rerender':'[data-alact-do=retry_clip],#re-all,#e-render,#e-refetch','uploads.comment':'.card:has(#fc-on),#e-fc-box','clips.upload_now':'#e-now','clips.thumbnail':'#e-tgen,#e-tpush,#e-tfile',
@@ -2028,6 +2056,7 @@ async function openAccess(id,fresh){
     <div class="row" style="justify-content:space-between"><b>Access of ${esc(a.name)}</b><button class="btn ghost sm" data-aclose>Close</button></div>
     <div class="mut sm">Every change applies at once — the customer does not have to sign in again. What is switched off is hidden in their dashboard and refused by the server.</div>
     <div style="margin-top:14px"><b>Plan</b><div class="row" style="margin-top:4px"><select data-aplan style="width:auto"><option value="">No plan (default switches)</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${p.name===d.plan?'selected':''}>${esc(p.name)}</option>`).join('')}</select><button class="btn outline sm" data-aplango>Put on this plan</button><span class="mut sm">This replaces the switches and limits set only for this customer (marked •).</span></div></div>
+    ${d.trial?`<div style="margin-top:14px"><b>Free trial</b><div class="row sm" style="margin-top:4px;flex-wrap:wrap;gap:8px"><span>Plan “${esc(d.trial.plan||'')}” until ${new Date(d.trial.ends).toLocaleDateString([], {dateStyle:'medium'})} (${d.trial.days_left} day${d.trial.days_left===1?'':'s'} left)</span><input type="number" min="1" max="90" value="7" data-atrd style="width:70px" title="Days to add"><button class="btn outline sm" data-atrx>Extend by these days</button><button class="btn bad sm" data-atre>End the trial now</button></div></div>`:''}
     <div style="margin-top:14px"><b>Do now</b><div class="row" style="margin-top:4px;flex-wrap:wrap">
       <button class="btn ${c.uploads_paused?'ok':'bad'} sm" data-actl="${c.uploads_paused?'resume_uploads':'pause_uploads'}">${c.uploads_paused?'Resume uploads':'Pause all uploads now'}</button>
       <button class="btn ${c.sources_stopped?'ok':'bad'} sm" data-actl="${c.sources_stopped?'start_sources':'stop_sources'}">${c.sources_stopped?'Start sources again':'Stop all sources now'}</button>
@@ -2039,6 +2068,10 @@ async function openAccess(id,fresh){
     ${permGrid(d.perms,'data-ap',d.own_perms)}
     <div style="margin-top:14px"><b>Recent activity</b><div style="margin-top:6px;max-height:260px;overflow:auto">${(d.activity||[]).length?d.activity.map(r=>actRow(r)).join(''):'<span class="mut sm">Nothing yet.</span>'}</div></div>
     <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px"><b style="color:var(--bad)">Delete everything</b><div class="row" style="margin-top:4px"><button class="btn bad sm" data-awipe>Delete all data of this account…</button><span class="mut sm">Removes their channels' connections, sources, clips, files and settings for good. Videos already on YouTube are not touched. The login stays, blocked.</span></div></div></div>`;
+  if($('[data-atrx]',box))$('[data-atrx]',box).onclick=e=>once(async()=>{const n=+$('[data-atrd]',box).value;if(!Number.isInteger(n)||n<1||n>90){toast('Write a number of days from 1 to 90.',true);return}
+    const r=await api(`/api/admin/users/${id}/trial`,'POST',{action:'extend',days:n});toast('Trial extended until '+new Date(r.ends).toLocaleDateString([], {dateStyle:'medium'}));await loadUsers();openAccess(id)},e.target);
+  if($('[data-atre]',box))$('[data-atre]',box).onclick=e=>once(async()=>{if(!confirm(`End the free trial of ${a.name} now?\n\nThe account goes back to the free plan. Nothing is deleted.`))return;
+    await api(`/api/admin/users/${id}/trial`,'POST',{action:'end'});toast('Trial ended — back to the free plan');await loadUsers();openAccess(id)},e.target);
   $('[data-aclose]',box).onclick=()=>{UOPEN.delete(id);box.classList.add('hide');box.innerHTML=''};
   $$('[data-ap]',box).forEach(i=>i.onchange=async()=>{i.disabled=true;try{const r=await api(`/api/admin/users/${id}/access`,'POST',{perms:{[i.dataset.ap]:i.checked}});toast((r.changed||[]).join(' · ')||'Saved');
       const l=$('#ual-'+id);if(l)l.innerHTML=aclLine({plan:r.plan,controls:r.controls,off:Object.values(r.perms).filter(v=>!v).length})}catch(e){i.checked=!i.checked;fail(e)}finally{i.disabled=false}});
@@ -2097,7 +2130,23 @@ async function loadLog(more){
 }
 $('#lg-go').onclick=()=>once(()=>loadLog(false),$('#lg-go'));$('#lg-more').onclick=()=>once(()=>loadLog(true),$('#lg-more'));
 $('#lg-acc').onchange=$('#lg-who').onchange=()=>loadLog(false).catch(fail);$('#lg-q').onkeydown=e=>{if(e.key==='Enter')loadLog(false).catch(fail)};
+async function loadSignup(){
+  const el=$('#su-box');if(!el)return;let c;try{c=await api('/api/admin/signup');if(!ACL)await loadAcl()}catch(e){return}
+  const b=$('#su-badge');b.className='badge '+(c.active?'uploaded':'outline');b.textContent=c.active?c.trial_days+'-day trial on':'No trial';
+  el.innerHTML=`<label class="f" style="max-width:460px">When someone registers<select id="su-approve"><option value="hand" ${c.approve==='hand'?'selected':''}>Approve new accounts by hand (as before)</option><option value="auto" ${c.approve==='auto'?'selected':''}>Start the trial at once (no approval)</option></select></label>
+    <div class="row sm" style="flex-wrap:wrap;gap:12px;align-items:flex-end;margin-top:10px"><label class="row" style="gap:6px"><input type="checkbox" id="su-on" ${c.trial_on?'checked':''}>Free trial</label>
+      <label class="f">Days<input type="number" id="su-days" min="1" max="90" value="${c.trial_days}" style="width:80px"></label>
+      <label class="f">Trial plan<select id="su-plan" style="width:auto"><option value="">the plan new accounts start on${ACL.new_plan?' (“'+esc(ACL.new_plan)+'”)':''}</option>${ACL.plans.map(p=>`<option value="${esc(p.name)}" ${c.trial_plan===p.name?'selected':''}>“${esc(p.name)}”</option>`).join('')}</select></label>
+      <button class="btn sm" id="su-save">Save</button></div>
+    ${c.note?`<div class="sm" style="color:var(--bad);margin-top:8px">${esc(c.note)}</div>`:c.active?`<div class="mut sm" style="margin-top:8px">A new account gets the plan “${esc(c.plan)}” for ${c.trial_days} days from its approval, a reminder 2 days before the end, then the free plan. Extend or end a trial in the customer's Access panel.</div>`:''}`;
+  $('#su-approve').onchange=()=>once(async()=>{const v=$('#su-approve').value;
+    if(v==='auto'&&!confirm('Start every new account at once, without your approval?\n\nAnyone who registers can then use the system (and the free trial) straight away.')){$('#su-approve').value='hand';return}
+    await api('/api/admin/signup','POST',{approve:v});toast(v==='auto'?'New accounts start at once':'New accounts wait for your approval');loadSignup()});
+  $('#su-save').onclick=()=>once(async()=>{const n=+$('#su-days').value;if(!Number.isInteger(n)||n<1||n>90){toast('A trial lasts 1 to 90 days.',true);return}
+    await api('/api/admin/signup','POST',{trial_on:$('#su-on').checked,trial_days:n,trial_plan:$('#su-plan').value});toast('Saved — used for accounts approved from now on');loadSignup()},$('#su-save'));
+}
 async function loadUsers(){
+  loadSignup();
   const d=await api('/api/admin/users');const U=d.users,pay=d.pay||{};
   $('#pay-upi').value=pay.upi||'';$('#pay-price').value=pay.price||'';$('#pay-text').value=pay.text||'';
   const pend=U.filter(u=>u.status==='pending').length,req=U.filter(u=>u.upgrade).length;
@@ -2106,7 +2155,7 @@ async function loadUsers(){
   const lab={pending:['Waiting for approval','queued'],active:['Active','uploaded'],blocked:['Blocked','failed']};
   $('#us-list').innerHTML=U.length?U.map(u=>{const g=u.usage||{};return `<div class="item" style="flex-wrap:wrap;align-items:flex-start"><div class="avatar">${esc((u.name||'?')[0].toUpperCase())}</div>
     <div class="tx grow"><b>${esc(u.name)}</b> <span class="badge ${lab[u.status][1]}">${lab[u.status][0]}</span> <span class="mut sm">${esc(u.email)}</span>
-      <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
+      <span class="mut sm" style="display:block">System: “${esc(u.brand||'')}” · registered ${new Date(u.created_at).toLocaleDateString()}${u.trial&&u.plan_expires?' · <b>free trial</b> until '+new Date(u.plan_expires).toLocaleDateString():''}${u.last_login?' · last sign-in '+new Date(u.last_login).toLocaleDateString():''}</span>
       ${u.usage&&!g.error?`<span class="sm" style="display:block">Setup: ${g.setup_done?'finished':esc(g.setup||'')+' steps done'} · Google project: ${g.own_google?'their own':g.shared_google?'<b>yours (shared uploads)</b>':'none yet'}</span>`:''}
       ${u.usage?`<span class="sm" style="display:block">${g.error?esc(g.error):`${g.channels} of ${u.channel_limit} channel(s) · ${g.sources} sources · ${g.clips} clips · ${g.uploaded} uploaded · helper ${g.helper?'online':'offline'}`}</span>`:''}
       ${u.acl?`<span class="sm" style="display:block" id="ual-${u.id}">${aclLine(u.acl)}</span>`:''}

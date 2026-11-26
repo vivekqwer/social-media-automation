@@ -389,15 +389,29 @@ def topic_words(title: str, channel: str = "") -> list[str]:
     return words
 
 
+LANGS = ("en", "hinglish", "hi")  # a channel's title language (Destination.title_lang)
+HINDI_WORDS = HINGLISH | {"hindi", "हिंदी", "हिन्दी"}
+
+
+def _hindi_flavour(phrase: str, lang: str) -> int:
+    """How well a phrase fits a Hindi / Hinglish channel: 2 = written in Hindi (Devanagari), 1 = Hinglish words."""
+    if DEVA.search(phrase or ""):
+        return 2 if lang == "hi" else 1
+    return 1 if set(tokens(phrase)) & HINDI_WORDS else 0
+
+
 def plan(title: str, tags=None, description: str = "", channel: str = "", extra=None, hint: str = "",
-         fresh: bool = False, depth: str = "clip") -> dict:
+         fresh: bool = False, depth: str = "clip", lang: str = "en") -> dict:
     """Choose the keywords for one video. Never raises; with no network the video's own tags are used.
 
     Returns {"at", "lead", "top", "hashtags", "items": [{"k", "src": [...], "hot"}], "net", "hint", "topic"}:
       lead      the strongest phrase people type that this video is really about (None when unknown)
       top       the few strongest phrases, for the first lines of the description
       items     every chosen keyword, strongest first; src = typed | video | trending | extra
+    lang "hinglish" / "hi": YouTube's suggestions are also asked in Hindi (hl=hi, "... in hindi"), Hindi / Hinglish
+    phrases may lead the title and come first among the hashtags. "en" is exactly the behaviour from before.
     """
+    lang = lang if lang in LANGS else "en"
     title, description, hint = str(title or ""), str(description or ""), _norm(hint)[:120]
     tags = [str(t) for t in (tags or []) if t]
     own_words = set(tokens(title)) | set(tokens(hint))
@@ -418,6 +432,8 @@ def plan(title: str, tags=None, description: str = "", channel: str = "", extra=
     ext = core | {t for k in own for t in _sig(tokens(k))}
     if DEVA.search(title) or ext & {"hindi", "हिंदी", "हिन्दी"}:
         ext |= {"hindi", "हिंदी", "हिन्दी"}
+    if lang != "en":  # a Hindi / Hinglish channel: phrases like "... kaise banaye" / "... in hindi" are about the video too
+        ext |= HINDI_WORDS
     ext.add(str(utcnow().year))
 
     # 2. what people type: the title's topic (longest form that people really type), its Hindi-region ranking,
@@ -437,10 +453,10 @@ def plan(title: str, tags=None, description: str = "", channel: str = "", extra=
             c = run.fetch(" ".join(words[:2]))
             results.append((0.8, c))
             working = " ".join(words[:2]) if c else full
-        if REGION == "IN":
-            results.append((0.8, run.fetch(working, "hi")))
+        if REGION == "IN" or lang != "en":
+            results.append((0.8 if lang == "en" else 1.0, run.fetch(working, "hi")))
             if "hindi" in ext and "hindi" not in tokens(working) and not DEVA.search(working):
-                results.append((0.6, run.fetch(working + " in hindi", "hi")))
+                results.append((0.6 if lang == "en" else 0.9, run.fetch(working + " in hindi", "hi")))
     if hint and hint != full:
         results.append((1.0, run.fetch(hint)))
     seeds = [k for k in own if 1 < len(tokens(k)) <= 5 or (len(tokens(k)) == 1 and len(k) >= 4)]
@@ -521,9 +537,12 @@ def plan(title: str, tags=None, description: str = "", channel: str = "", extra=
     # the title's lead phrase: the most typed one (tags and trending do not count here), made only of this video's
     # own words, 2-6 words
     lead = None
-    for e in sorted(ranked, key=lambda e: -e["typed"]):
+    order = sorted(ranked, key=lambda e: -e["typed"])
+    if lang != "en":  # a Hindi / Hinglish phrase people type leads when there is one (most typed first among them)
+        order = sorted(order, key=lambda e: -_hindi_flavour(e["k"], lang))
+    for e in order:
         tk = tokens(e["k"])
-        sg = set(_sig(tk))
+        sg = set(_sig(tk)) - (HINDI_WORDS if lang != "en" else set())
         if e["typed"] > 0 and sg and sg <= anchor and len(e["k"]) <= 45 and (2 <= len(tk) <= 6 or len(words) == 1):
             lead = e["k"]
             break
@@ -535,13 +554,13 @@ def plan(title: str, tags=None, description: str = "", channel: str = "", extra=
             top.append(e["k"])
             said |= sg
     tags_out, hseen = [], set()
-    for e in ranked:
+    for e in (sorted(ranked, key=lambda e: -_hindi_flavour(e["k"], lang)) if lang != "en" else ranked):
         h = hashtag(e["k"]) if len(tokens(e["k"])) <= 3 else None
         if h and h not in hseen and h not in JUNK_TAGS and len(tags_out) < 4:
             hseen.add(h)
             tags_out.append(h)
     return {"v": 1, "at": utcnow().isoformat() + "Z", "topic": working, "hint": hint, "lead": lead, "top": top,
-            "hashtags": tags_out, "net": run.state(),
+            "hashtags": tags_out, "net": run.state(), "lang": lang,
             "items": [{"k": e["k"], "src": e["src"], "hot": bool(e["hot"])} for e in ranked]}
 
 

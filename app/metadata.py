@@ -18,6 +18,52 @@ SOON_HOURS = 6  # the timed job looks at clips that go up within this many hours
 META_FIELDS = ("title", "description", "tags")
 _HASH = re.compile(r"#(?=[^\W_]|[ऀ-ॣ०-෿])")
 
+# Title language of a channel (My channels → the channel → Title language). The credit lines, the licence line and
+# the original description stay in English whatever is chosen; only the title's hook, the description's first
+# lines and the hashtags follow the language. Plain templates: no translation service, no AI.
+LANGS = ("en", "hinglish", "hi")
+LANG_NAMES = {"en": "English", "hinglish": "Hinglish", "hi": "Hindi"}
+HOOK = {"en": "Best Moment", "hinglish": "Best Moment Dekho", "hi": "सबसे बढ़िया पल"}
+LANG_TAGS = {"en": [], "hinglish": ["hindi"], "hi": ["हिंदी", "hindi"]}
+INTRO = {  # {p} = the strongest phrase, {who} = the credited creator
+    "hinglish": {"original": "{p}.", "own": "{p} — meri full video ka sabse best moment.",
+                 "who": "{p} — {who} ki video ka sabse best moment.", "none": "{p} — full video ka sabse best moment.",
+                 "about": "Is video mein: {x}.", "and": " aur "},
+    "hi": {"original": "{p}।", "own": "{p} — मेरी पूरी वीडियो का सबसे बढ़िया पल।",
+           "who": "{p} — {who} की वीडियो का सबसे बढ़िया पल।", "none": "{p} — पूरी वीडियो का सबसे बढ़िया पल।",
+           "about": "इस वीडियो में: {x}।", "and": " और "},
+}
+
+
+def lang_of(clip) -> str:
+    """The title language of the channel the clip goes to ("en" when unknown)."""
+    did = getattr(clip, "destination_id", None)
+    if not did:
+        return "en"
+    try:
+        from .db import Destination
+
+        with SessionLocal() as s:
+            d = s.get(Destination, did)
+            v = (d.title_lang if d else None) or "en"
+    except Exception:  # noqa: BLE001
+        return "en"
+    return v if v in LANGS else "en"
+
+
+def _hook_line(project: Project, lang: str) -> str:
+    """The description's first line on a Hindi / Hinglish channel when no keyword research is there to lead it."""
+    if lang == "en":
+        return ""
+    t = INTRO[lang]
+    p, who = _clean(project.title).strip(), _clean(project.channel).strip()
+    if project.mode == "original":
+        return t["original"].format(p=p)
+    if project.mode == "own":
+        return t["own"].format(p=p)
+    return t["who"].format(p=p, who=who) if who else t["none"].format(p=p)
+
+
 LICENSE_LINE = {
     "cc": "License: Creative Commons Attribution (CC BY). Changes made: clipped and edited.",
     "permission": "Used with the creator's permission.",
@@ -60,12 +106,14 @@ def _clean(s: str) -> str:
     return (s or "").replace("<", "").replace(">", "")
 
 
-def _build_original(project: Project, clip: Clip, keywords: list[str]) -> dict:
+def _build_original(project: Project, clip: Clip, keywords: list[str], lang: str = "en") -> dict:
     """My own reel: no credit block, the script itself is the description."""
     title = _clean(project.title)[:100]
     shorts = clip.aspect == "9:16"
-    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", k) for k in keywords[:3] if k])
-    description = _cut((hashtags + "\n\n" + _clean(project.description)).strip(), 4900)
+    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", k) for k in keywords[:3] if k]
+                        + ["#" + h for h in LANG_TAGS.get(lang, [])])
+    hook = _hook_line(project, lang) if lang != "en" and project.mode != "original" else ""
+    description = _cut(((hook + "\n" if hook else "") + hashtags + "\n\n" + _clean(project.description)).strip(), 4900)
     tags, total = [], 0
     for t in keywords + (["shorts"] if shorts else []):
         t = _clean(t).strip()
@@ -75,17 +123,19 @@ def _build_original(project: Project, clip: Clip, keywords: list[str]) -> dict:
     return {"title": title, "description": description, "tags": tags}
 
 
-def build(project: Project, clip: Clip, keywords: list[str]) -> dict:
+def build(project: Project, clip: Clip, keywords: list[str], lang: str | None = None) -> dict:
+    """lang None = the title language of the clip's channel (English unless the owner chose Hinglish / Hindi)."""
+    lang = lang_of(clip) if lang is None else (lang if lang in LANGS else "en")
     words = " ".join([project.title or "", " ".join(project.tags or []), " ".join(keywords)])
     if project.mode == "original":
-        return _with_affiliates(_build_original(project, clip, keywords), words)
+        return _with_affiliates(_build_original(project, clip, keywords, lang), words)
     if project.mode == "own":  # my own long video -> Short: link back to the full video, no credit block
-        meta = _build_original(project, clip, keywords)
-        meta["title"] = (_clean(project.title) + " | Best Moment")[:100]
+        meta = _build_original(project, clip, keywords, lang)
+        meta["title"] = (_clean(project.title) + " | " + HOOK[lang])[:100]
         meta["description"] = _cut(meta["description"].split("\n\n")[0] + f"\n\nFull video: https://youtu.be/{project.video_id}"
                                     + "\n\n" + _clean(project.description)[:1500], 4900)
         return _with_affiliates(meta, words)
-    return _with_affiliates(_build(project, clip, keywords), words)
+    return _with_affiliates(_build(project, clip, keywords, lang), words)
 
 
 def _credit_block(project: Project, clip: Clip) -> str:
@@ -101,15 +151,17 @@ def _credit_block(project: Project, clip: Clip) -> str:
     ])
 
 
-def _build(project: Project, clip: Clip, keywords: list[str]) -> dict:
+def _build(project: Project, clip: Clip, keywords: list[str], lang: str = "en") -> dict:
     base = _clean(project.title)
-    title = f"{base} | Best Moment"
+    title = f"{base} | {HOOK[lang]}"
     if len(title) > 100:
         title = base[:100]
     shorts = clip.aspect == "9:16"
     tag_src = [t for t in (list(project.tags or [])[:3] + keywords) if t][:3]
-    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", t) for t in tag_src])
-    description = _cut("\n".join([hashtags, "", _credit_block(project, clip)]).strip(), 4900)
+    hashtags = " ".join((["#shorts"] if shorts else []) + ["#" + re.sub(r"\W", "", t) for t in tag_src]
+                        + ["#" + h for h in LANG_TAGS[lang]])
+    hook = [_hook_line(project, lang)] if lang != "en" else []
+    description = _cut("\n".join(hook + [hashtags, "", _credit_block(project, clip)]).strip(), 4900)
 
     tags, total = [], 0
     extra = [project.channel] + (["shorts"] if shorts else [])
@@ -191,12 +243,16 @@ def _lead_title(project: Project, plan: dict, today: str) -> str:
     return (f"{head} | {rest}" if rest else head)[:100]
 
 
-def _intro(project: Project, plan: dict) -> list[str]:
-    """The first two lines of the description: the strongest phrases, in plain sentences."""
+def _intro(project: Project, plan: dict, lang: str = "en") -> list[str]:
+    """The first two lines of the description: the strongest phrases, in plain sentences (in the channel's language)."""
     top = [_nice(_clean(t).strip(), _clean(project.title), caps=False) for t in (plan.get("top") or []) if t]
     if not top:
-        return []
+        return [_hook_line(project, lang)] if lang != "en" else []
     p1, who = top[0][:1].upper() + top[0][1:], _clean(project.channel).strip()
+    if lang != "en":
+        t = INTRO[lang]
+        first = t["original" if project.mode == "original" else "own" if project.mode == "own" else "who" if who else "none"]
+        return [first.format(p=p1, who=who)] + ([t["about"].format(x=t["and"].join(top[1:3]))] if top[1:] else [])
     if project.mode == "original":
         first = f"{p1}."
     elif project.mode == "own":
@@ -212,14 +268,19 @@ def _cap_hashtags(text: str, allowed: int) -> str:
     return text if len(marks) <= allowed else text[:marks[max(0, allowed)]].rstrip()
 
 
-def compose(project: Project, clip: Clip, plan: dict) -> dict:
+def compose(project: Project, clip: Clip, plan: dict, lang: str | None = None) -> dict:
     """Title, description and tags from a keyword plan (keywords.plan). The credit lines, the licence note and the
     original description are the same lines build() writes; only what stands before them is new:
         two plain lines with the strongest phrases / 3-5 hashtags / the unchanged block."""
+    lang = (plan.get("lang") or lang_of(clip)) if lang is None else lang
+    lang = lang if lang in LANGS else "en"
     items = plan.get("items") or []
     ranked = [i["k"] for i in items]
     shorts = clip.aspect == "9:16"
-    title = _lead_title(project, plan, build(project, clip, [])["title"])
+    title = _lead_title(project, plan, build(project, clip, [], lang)["title"])
+    hook = HOOK[lang]
+    if lang != "en" and hook not in title and len(title) + 3 + len(hook) <= 100:  # the title also says it in the language
+        title = f"{title} | {hook}"
     if project.mode == "original":
         fixed, copied = _clean(project.description), ""
     elif project.mode == "own":
@@ -228,9 +289,11 @@ def compose(project: Project, clip: Clip, plan: dict) -> dict:
         copied = _clean(project.description)[:1500]
         block = _credit_block(project, clip)
         fixed = block[:len(block) - len(copied)]
-    intro = _intro(project, plan)
+    intro = _intro(project, plan, lang)
     taken = len(_HASH.findall(title)) + len(_HASH.findall("\n".join(intro))) + len(_HASH.findall(fixed))
-    mine = ((["shorts"] if shorts else []) + list(plan.get("hashtags") or [])[:3 if shorts else 4])[:max(0, MAX_HASHTAGS - taken)]
+    own_tags = [h for h in LANG_TAGS[lang] if h not in (plan.get("hashtags") or [])]
+    mine = ((["shorts"] if shorts else []) + list(plan.get("hashtags") or [])[:3 if shorts else 4]
+            + own_tags)[:max(0, MAX_HASHTAGS - taken)]
     copied = _cap_hashtags(copied, MAX_HASHTAGS - taken - len(mine))
     parts = intro + ([""] if intro else []) + ([" ".join("#" + h for h in mine), ""] if mine else []) + [fixed + copied]
     description = _cut("\n".join(parts).strip(), 4900)
@@ -251,16 +314,20 @@ def propose(clip_id: int, extra_keywords: list[str] | None = None, hint: str | N
         project = s.get(Project, clip.project_id)
     if hint is None:
         hint = (clip.kw or {}).get("hint") or ""
+    lang = lang_of(clip)
     try:
         plan = kw.plan(project.title, project.tags or [], project.description or "",
-                       "" if project.mode == "original" else project.channel or "", extra=extra_keywords, hint=hint, fresh=fresh)
-        meta = compose(project, clip, plan)
+                       "" if project.mode == "original" else project.channel or "", extra=extra_keywords, hint=hint, fresh=fresh,
+                       lang=lang)
+        meta = compose(project, clip, plan, lang)
     except Exception:  # noqa: BLE001  (research must never stop a clip: fall back to credit + the video's own tags)
         log.exception("keywords: research failed for clip %s", clip_id)
         plan = {"at": utcnow().isoformat() + "Z", "lead": None, "hint": hint, "net": "offline", "items": []}
-        meta = build(project, clip, list(extra_keywords or []))
+        meta = build(project, clip, list(extra_keywords or []), lang)
     meta["kw"] = {"v": 1, "at": plan["at"], "lead": plan.get("lead"), "hint": plan.get("hint") or "", "net": plan["net"],
                   "items": plan["items"], "note": kw.explain(plan["items"], plan["net"])}
+    if lang != "en":
+        meta["kw"]["lang"] = lang
     return meta
 
 
@@ -301,6 +368,8 @@ def needs_refresh(clip: Clip, now: datetime | None = None) -> bool:
         return False
     if not rec:
         return not clip.title  # nothing written yet -> write it; an older clip with a title may be hand-made
+    if (rec.get("lang") or "en") != lang_of(clip):  # the channel's title language was changed since
+        return True
     try:
         age = (now or utcnow()) - datetime.fromisoformat(str(rec.get("at") or "").rstrip("Z"))
     except ValueError:

@@ -48,6 +48,7 @@ class Account(CoreBase):
     paid_plan = Column(String(40))  # the plan the running payment is for; the end only acts while the account is still on it
     limit_before_pay = Column(Integer)  # channel limit before the first payment of this paid period (given back at the end)
     limit_by_hand = Column(Boolean)  # the Super Admin set the channel limit by hand: a payment's end leaves it alone
+    trial = Column(Boolean)  # the timed plan above is a free trial (app/trial.py); cleared by a payment or its end
     session_gen = Column(String(20), default="0")  # changes on logout / password change: old cookies stop working
     terms_at = Column(DateTime)
     created_at = Column(DateTime, default=utcnow)
@@ -77,7 +78,7 @@ def public(a: Account) -> dict:
             "created_at": a.created_at.isoformat() + "Z" if a.created_at else None,
             "approved_at": a.approved_at.isoformat() + "Z" if a.approved_at else None,
             "last_login": a.last_login.isoformat() + "Z" if a.last_login else None,
-            "plan_expires": a.plan_expires.isoformat() + "Z" if a.plan_expires else None}
+            "plan_expires": a.plan_expires.isoformat() + "Z" if a.plan_expires else None, "trial": bool(a.trial)}
 
 
 def clean_brand(text: str) -> str:
@@ -237,7 +238,12 @@ def approve(account_id: int) -> dict:
         a.status, a.approved_at = "active", a.approved_at or utcnow()
         s.commit()
         _changed()
-        return public(a)
+    if new:  # the first approval starts the free trial (app/trial.py; nothing when it is switched off)
+        from . import trial
+
+        trial.start(account_id)
+    with CoreSession() as s:
+        return public(s.get(Account, account_id))
 
 
 def update(account_id: int, **changes) -> dict:
