@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 from email.mime.text import MIMEText
 
 from google.auth.transport.requests import Request
@@ -54,6 +55,7 @@ def handle_callback(code: str, state: str) -> str:
     set_setting("gmail_token", encrypt(creds.to_json()))
     email = _email_from(creds) or ""
     set_setting("gmail_email", email)
+    set_setting("perm_auto_paused", "")  # a fresh sign-in lifts the pause of permission mails sent by themselves
     return email
 
 
@@ -84,23 +86,75 @@ def _sent_today() -> int:
     return int(get_setting("gmail_sent:" + utcnow().strftime("%Y-%m-%d")) or 0)
 
 
+class SignInError(ValueError):
+    """Gmail refused the sign-in (not connected, expired or revoked): nothing was sent."""
+
+
+_count_lock = threading.Lock()  # one process: the day's count is checked and taken in one step
+
+
+def _reserve() -> str | None:
+    key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")
+    with _count_lock:
+        n = int(get_setting(key) or 0)
+        if n >= MAX_PER_DAY:
+            return None
+        set_setting(key, str(n + 1))
+    return key
+
+
+def _unreserve(key: str):
+    with _count_lock:
+        set_setting(key, str(max(0, int(get_setting(key) or 0) - 1)))
+
+
+def _signed_in():
+    try:
+        return _service()
+    except Exception as e:  # noqa: BLE001
+        raise SignInError(f"Gmail sign-in failed ({type(e).__name__}) — reconnect Gmail in My channels. Nothing was sent.") from e
+
+
+def _auth_refused(e: Exception) -> bool:
+    """The send was refused at sign-in (so nothing left): expired / revoked token."""
+    try:
+        from google.auth.exceptions import RefreshError
+
+        if isinstance(e, RefreshError):
+            return True
+    except Exception:  # noqa: BLE001
+        pass
+    status = getattr(getattr(e, "resp", None), "status", None)
+    return status == 401 or str(status) == "401"
+
+
 def send(to: str, body: str, subject: str | None = None, kind: str = "permission") -> dict:
     """kind "strike": a request to a claimant after a strike (app/strikes.py). It has its own daily limit there and
-    does not use up (or wait for) the day's permission mails."""
+    does not use up (or wait for) the day's permission mails.
+    Raises ValueError when nothing was sent (SignInError for a sign-in problem); any other error may or may not have
+    sent the mail."""
     to = (to or "").strip()
     if not EMAIL_RE.match(to):
         raise ValueError("That email address does not look right.")
     if kind == "strike":
         return _deliver(to, body, subject)
-    if _sent_today() >= MAX_PER_DAY:
+    svc = _signed_in()  # an expired sign-in is "not sent", and takes no place of the day
+    key = _reserve()
+    if not key:
         raise ValueError(f"Already {MAX_PER_DAY} permission mails today — the rest go tomorrow (more would look like spam).")
-    res = _deliver(to, body, subject)
-    key = "gmail_sent:" + utcnow().strftime("%Y-%m-%d")
-    set_setting(key, str(_sent_today() + 1))
-    return res
+    try:
+        return _deliver(to, body, subject, svc)
+    except ValueError:
+        _unreserve(key)
+        raise
+    except Exception as e:  # noqa: BLE001
+        if _auth_refused(e):
+            _unreserve(key)
+            raise SignInError(f"Gmail refused the sign-in — reconnect Gmail in My channels. Nothing was sent.") from e
+        raise
 
 
-def _deliver(to: str, body: str, subject: str | None) -> dict:
+def _deliver(to: str, body: str, subject: str | None, svc=None) -> dict:
     msg = MIMEText(body, "plain", "utf-8")
     msg["to"], msg["subject"] = to, (subject or SUBJECT)[:150]
     me = connected_email()
@@ -111,7 +165,7 @@ def _deliver(to: str, body: str, subject: str | None) -> dict:
 
         msg["from"] = formataddr((mail_identity()[0], me))
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    res = _service().users().messages().send(userId="me", body={"raw": raw}).execute()
+    res = (svc or _signed_in()).users().messages().send(userId="me", body={"raw": raw}).execute()
     return {"thread_id": res.get("threadId"), "message_id": res.get("id")}
 
 
@@ -201,16 +255,33 @@ def read_message(message_id: str) -> dict:
             "snippet": (m.get("snippet") or "")[:500], "text": (text or m.get("snippet") or "")[:20000]}
 
 
-def reply_in_thread(thread_id: str) -> dict | None:
-    """The newest message in this thread that is not from me (the creator's reply), or None."""
+AUTO_HEADERS = ("Auto-Submitted", "X-Autoreply", "X-Autorespond", "Precedence")
+
+
+def is_auto(msg: dict) -> bool:
+    """An automatic message (out of office, auto-responder, mailing list) by its headers."""
+    a = _header(msg, "Auto-Submitted").strip().lower()
+    if a and a != "no":
+        return True
+    if _header(msg, "X-Autoreply").strip() or _header(msg, "X-Autorespond").strip():
+        return True
+    return _header(msg, "Precedence").strip().lower() in ("bulk", "auto_reply", "list", "junk")
+
+
+def reply_in_thread(thread_id: str, skip: tuple | list | set = ()) -> dict | None:
+    """The newest message in this thread written by someone else by hand: not from me, not in Spam / Trash, not an
+    automatic reply (headers), not one of `skip`. Automatic replies are passed over, so a later real reply is read."""
+    from email.utils import parseaddr
+
     me = (connected_email() or "").lower()
     t = _service().users().threads().get(userId="me", id=thread_id, format="metadata",
-                                         metadataHeaders=["From", "Date"]).execute()
+                                         metadataHeaders=["From", "Date", *AUTO_HEADERS]).execute()
     for m in reversed(t.get("messages", [])):
         frm = _header(m, "From")
-        if me and me in frm.lower():
+        labels = set(m.get("labelIds") or [])
+        if me and parseaddr(frm)[1].lower() == me:
             continue
-        if "SENT" in (m.get("labelIds") or []):
+        if labels & {"SENT", "SPAM", "TRASH", "DRAFT"} or m.get("id") in skip or is_auto(m):
             continue
         return {"from": frm, "date": _header(m, "Date"), "snippet": m.get("snippet", "")[:500], "id": m.get("id")}
     return None

@@ -301,6 +301,8 @@ def on_granted(channel_id: str):
 
 def _status(s, p: dict, creators: dict) -> dict:
     """Where this pick is right now, in plain words, plus the next step for the owner (if any)."""
+    from . import permissions
+
     if p.get("project_id"):
         pr = s.get(Project, p["project_id"])
         clips = s.query(Clip).filter(Clip.project_id == p["project_id"]).all()
@@ -340,8 +342,13 @@ def _status(s, p: dict, creators: dict) -> dict:
             pass
         return {"step": "wait", "text": f"Mail sent {sent} — waiting for their reply (checked every 15 min)"}
     if c.get("email"):
+        if permissions.auto_on() and not permissions.auto_block(c, creators):
+            return {"step": "mail", "text": "Mail ready — goes out by itself (or press Send)", "action": "send",
+                    "email": c["email"]}
         return {"step": "mail", "text": "Mail ready — press Send", "action": "send", "email": c["email"]}
-    return {"step": "mail", "text": "Needs the creator's email", "action": "email"}
+    if (c.get("email_search") or {}).get("tries", 0) >= permissions.SEARCH_TRIES:
+        return {"step": "mail", "text": "No public e-mail found — add it by hand", "action": "email"}
+    return {"step": "mail", "text": "Looking for the creator's e-mail", "action": "email"}
 
 
 def view(day: str | None = None) -> dict:

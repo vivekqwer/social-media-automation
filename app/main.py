@@ -77,6 +77,9 @@ async def lifespan(app: FastAPI):
     migrate()
     accounts.init()
     encrypt_existing()
+    from . import permissions as _perm
+
+    _perm.migrate_auto_send()  # owner's copy only: ON when the owner's Gmail is already connected (once)
     sch = scheduler.start()
     yield
     sch.shutdown(wait=False)
@@ -3286,7 +3289,8 @@ def viral_send():
 def perm_find_emails():
     from . import permissions
 
-    return {"found": permissions.find_emails()}
+    found = permissions.find_emails(deadline_s=25)  # what is not reached in time, the timed round does
+    return {"found": found}
 
 
 @app.post("/api/permissions/{cid}/find-email")
@@ -3294,6 +3298,28 @@ def perm_find_email(cid: str):
     from . import permissions
 
     return {"found": permissions.find_emails(only=cid)}
+
+
+class PermAutoIn(BaseModel):
+    auto: bool
+
+
+@app.get("/api/settings/perm-auto")
+def perm_auto_get():
+    from . import permissions
+
+    return permissions.auto_public()
+
+
+@app.post("/api/settings/perm-auto")
+def perm_auto_set(body: PermAutoIn):
+    """The account's own choice: permission mails go out by themselves (off unless switched on here)."""
+    from . import permissions
+
+    if body.auto:  # switching it OFF is always possible
+        acl.need("permissions.auto")
+        acl.need("gmail.send")
+    return permissions.save_auto(body.auto)
 
 
 @app.post("/api/ai/setup")
@@ -3316,12 +3342,25 @@ def perm_email(cid: str, body: EmailIn):
         raise HTTPException(404, "Not in the list")
 
 
+@app.post("/api/permissions/{cid}/confirm-email")
+def perm_confirm_email(cid: str):
+    """The owner checked an address found in videos / on a website: it may now be mailed by itself."""
+    from . import permissions
+
+    try:
+        return permissions.confirm_email(cid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except KeyError:
+        raise HTTPException(404, "Not in the list")
+
+
 @app.post("/api/permissions/{cid}/send")
 def perm_send(cid: str):
     from . import permissions
 
     try:
-        return permissions.send_mail(cid)
+        return permissions.send_mail(cid, by="dashboard")
     except ValueError as e:
         raise HTTPException(400, str(e))
     except KeyError:

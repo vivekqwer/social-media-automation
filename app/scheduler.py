@@ -481,7 +481,10 @@ def start():
     #   poll (Telegram)      "Telegram"
     #   swap_weak_thumbnails "Thumbnails"
     #   weekly_report        "Analytics page"
-    #   check_replies        "Permission mails to creators"
+    #   check_replies        "Permission mails to creators" (each account's own Gmail; yes -> source, no -> declined)
+    #   email_round          finding creators' e-mails: "Permission inbox"; sending by itself: the account's own switch
+    #                        (off unless switched on) and "Permission mails to creators" -> permissions.email_round
+    #   perm_summary         one message a day per account (mailed / replied / yes / no), only when there is something
     #   refresh_inbox        "Permission inbox"
     #   viral_refresh        "Viral today page" or "Viral picks" (viral.refresh; picks only with "Viral picks")
     #   scan_if_due          "Competitor tracker"
@@ -517,8 +520,15 @@ def start():
                 coalesce=True)
     add(when_on("page.analytics", lambda: executor.submit(weekly_report)), "cron", day_of_week="sun", hour=15, minute=35,
                 max_instances=1, coalesce=True)  # Sunday 9:05 PM IST
-    from .permissions import check_replies, refresh_inbox
-    add(when_on("gmail.send", lambda: executor.submit(check_replies)), "interval", minutes=15, max_instances=1, coalesce=True)
+    from .permissions import check_replies, daily_summary as perm_summary, email_round, refresh_inbox
+    # every account with Gmail connected reads ITS OWN replies (its own Gmail token). In the scheduler's own thread,
+    # never the single render worker; max_instances=1 + coalesce: one round at a time, never queued up
+    add(when_on("gmail.send", check_replies), "interval", minutes=15, max_instances=1, coalesce=True)
+    # creators' public e-mails (description -> recent videos -> their linked pages) and, when the account switched it
+    # on, at most one permission mail by itself (5 a day, 1 every 2 hours). Scheduler thread, one round at a time.
+    add(email_round, "interval", minutes=30, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=11))
+    add(perm_summary, "cron", hour=15, minute=40, max_instances=1, coalesce=True)  # 9:10 PM IST: one summary per account
     add(when_on("permissions.manage", lambda: executor.submit(refresh_inbox)), "cron", hour=4, minute=30, max_instances=1,
                 coalesce=True)  # 10 AM IST
     from .viral import refresh as viral_refresh
