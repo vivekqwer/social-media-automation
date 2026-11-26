@@ -86,6 +86,9 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Raji Studio", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+from .quality import router as _quality_router  # noqa: E402  the quality check's addresses (app/quality.py)
+
+app.router.routes.extend(_quality_router.routes)  # each one a plain route of the app (route lists see them)
 
 
 @app.exception_handler(Exception)
@@ -1712,6 +1715,9 @@ def schedule(cid: int, body: ScheduleIn):
         errs = check_edit(p, c)
         if errs:
             raise HTTPException(400, " ".join(errs))
+        from . import quality
+
+        quality.need_ok(s, c, p)  # no real content: refused with the reasons (Use anyway lets it go)
         if not c.title or not c.description:  # same automatic credit/tags/keywords as Approve
             meta = build_meta(p, c, [])
             c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]
@@ -2139,6 +2145,9 @@ def approve_clip(cid: int, body: ApproveIn):
             raise HTTPException(400, " ".join(errs))
         if not c.output_path or not Path(c.output_path).exists():
             raise HTTPException(400, "Render the clip first")
+        from . import quality
+
+        quality.need_ok(s, c, p)  # no real content: refused with the reasons (Use anyway lets it go)
         if not c.title or not c.description:
             meta = build_meta(p, c, [])
             c.title, c.description, c.tags = meta["title"], meta["description"], meta["tags"]

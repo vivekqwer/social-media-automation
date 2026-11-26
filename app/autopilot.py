@@ -226,6 +226,9 @@ def make_clips_for_project(pid: int):
 
 def _make_clips(s, ch: Channel, p: Project, log: list):
     moments = p.moments or _fallback_moments(p, ch.clip_len, ch.clips_per_video)
+    from .quality import pick_moments
+
+    moments = pick_moments(p, moments)  # not the end screen, a silent part or "subscribe" talk (app/quality.py)
     if not moments:
         log.append(f"skip {p.video_id}: video too short")
         return

@@ -83,6 +83,7 @@ PERMS = [
     ("clips.voice", "clips", "Voice-over (make or upload)", True),
     ("clips.reminder", "clips", "Like, share & subscribe reminder on their videos", True),
     ("clips.pc_folder", "clips", "Videos from a folder on their PC (Clips → From my PC)", True),
+    ("clips.quality", "clips", "Quality check (clips without real content never go to YouTube)", True),
 
     ("uploads.youtube", "uploads", "Upload to YouTube at all", True),
     ("uploads.auto", "uploads", "Automatic upload without review", True),
@@ -357,6 +358,13 @@ ROUTES = [
     ("GET", "/api/watchdog", "page.alerts", None),
     ("POST", "/api/watchdog/check", "watchdog.repair", None),
     ("POST", "/api/admin/watchdog", SUPER, "Changed self-repair"),
+    # quality check (app/quality.py): "Use anyway" writes its own line (also in the owner's copy), so None here
+    ("GET", "/api/quality", "page.clips", None),
+    ("GET", "/api/quality/rejected", "page.clips", None),
+    ("POST", "/api/clips/{cid}/quality/use", "clips.approve", None),
+    ("POST", "/api/clips/{cid}/quality/check", "clips.quality", None),
+    ("POST", "/api/quality/recheck", "clips.quality", "Checked the rejected clips again"),
+    ("POST", "/api/admin/quality", SUPER, "Changed the quality check"),
     ("POST", "/api/settings/reminder", "clips.reminder", "Changed the like & subscribe reminder"),  # clips.edit inside
     ("GET", "/api/settings/comment", SIGNED, None),
     ("POST", "/api/settings/comment", "uploads.comment", "Changed the first comment"),

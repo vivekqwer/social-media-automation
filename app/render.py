@@ -401,6 +401,11 @@ def run_render(clip_id: int):
         s.execute(update(Clip).where(Clip.id == clip_id, Clip.status == "rendering")
                   .values(status=final, error=error, **extra))
         s.commit()
+        if final in ("queued", "rendered"):  # the quality check: a clip without real content waits for nobody (app/quality.py)
+            from .quality import after_render
+
+            if after_render(clip_id) is False:
+                final = "rejected"
         if final in ("rendered", "failed"):
             try:  # Telegram (optional): review from the phone
                 from .telegram import esc, notify

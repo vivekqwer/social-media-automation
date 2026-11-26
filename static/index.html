@@ -267,6 +267,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
         <div class="card hide" id="pc-card" style="margin-bottom:16px"><div class="ch"><div><h3>From my PC</h3><p>Videos in the folder on your PC. Only their details are here — each video stays on the PC until about a day before its upload, then goes to YouTube on its own day and is deleted from the server.</p></div>
           <button class="btn ok sm hide" id="pc-all">Approve all</button></div>
           <div class="cb" id="pc-body"></div></div>
+        <div class="card hide" id="qc-card" style="margin-bottom:16px"><div class="ch"><div><h3>Quality check</h3><p>Every clip is checked after it is made and right before its upload. A clip without real content (black or frozen picture, silence, mostly "subscribe" talk, the end screen, a repeat) is not queued and never goes to YouTube — it waits in <b>Rejected by quality check</b>, where <b>Use anyway</b> brings it back.</p></div></div>
+          <div class="cb" id="qc-body"></div></div>
         <div class="tabs" id="tabs" style="margin-bottom:16px"></div>
         <div id="clip-grid" class="clips"></div>
       </section>
@@ -1588,22 +1590,65 @@ async function loadPc(){
   $$('[data-pcf]').forEach(b=>b.onclick=()=>once(async()=>{const f=prompt('Folder of videos on that PC (empty = do not watch a folder):',b.dataset.cur);if(f===null)return;
     await api(`/api/workers/${b.dataset.pcf}/pc-folder`,'POST',{folder:f.trim()});toast('Saved — the helper reads it within a minute');loadPc()},b));
 }
+/* ---------- quality check (app/quality.py): score + reasons on every clip, rejected clips, Use anyway ---------- */
+let QCS=null;
+async function loadQc(){try{QCS=await api('/api/quality')}catch(e){QCS=null}renderQcCard();return QCS}
+const qcRejected=x=>x.status==='draft'&&String(x.error||'').startsWith('Quality check:');
+function qcBadge(q){const min=QCS?QCS.threshold:40,s=q.score;const cls=s<min?'failed':s<min+20?'queued':'uploaded';
+  return `<span class="badge ${cls}" title="${esc((q.reasons||[]).join('; ')||'No problems found')}">Quality ${Number(s)}</span>`}
+function qcLine(x){const q=x.quality||{};if(q.score==null||!QCS||(!QCS.on&&!qcRejected(x)))return'';
+  const why=qcRejected(x)?'':(q.reasons||[]).slice(0,2).join('; ');
+  return `<div class="sm" data-qc style="margin-top:4px">${qcBadge(q)}${q.override?' <span class="mut">used anyway</span>':''}${why?' <span class="mut">'+esc(why)+'</span>':''}</div>`}
+function qcActs(x){return qcRejected(x)?`<button class="btn ok sm" data-qcuse="${x.id}">${ico('check')}Use anyway</button><button class="btn outline sm" data-qcchk="${x.id}">${ico('refresh')}Check again</button>`:''}
+async function qcUse(id){if(!confirm('Use this clip anyway? The quality check said it has little real content. It goes back to where it was (queued or ready for review), and this is written in the activity log.'))return;
+  const r=await api(`/api/clips/${id}/quality/use`,'POST');toast(r.status==='queued'?'Back in the queue — goes up '+when(r.publish_at):r.status==='rendered'?'Back in Ready to review':'Back in Drafts — press Render to make it again');return r}
+async function qcCheck(id){const r=await api(`/api/clips/${id}/quality/check`,'POST');const q=r.quality||{};
+  toast(`Quality ${q.score}/100 — `+(q.score<r.threshold?'still below '+r.threshold+(q.reasons&&q.reasons.length?': '+q.reasons.join('; '):''):'passes'+(r.status==='queued'?', back in the queue':r.status==='rendered'?', back in Ready to review':'')));return r}
+function wireQc(root){$$('[data-qcuse]',root).forEach(b=>b.onclick=()=>once(async()=>{if(await qcUse(+b.dataset.qcuse))loadClips()},b));
+  $$('[data-qcchk]',root).forEach(b=>b.onclick=()=>once(async()=>{await qcCheck(+b.dataset.qcchk);loadClips()},b))}
+function renderQcCard(){const card=$('#qc-card');if(!card)return;const sup=ME&&ME.role==='super',r=QCS;card.classList.toggle('hide',!sup||!r);if(!sup||!r)return;
+  const w=r.week||{};
+  $('#qc-body').innerHTML=`${r.allowed?'':`<div class="alert bad" style="margin-bottom:10px">${ico('alert')}<span>Switched off for this account (Access → Quality check). Nothing is checked or rejected.</span></div>`}
+    <div class="row" style="gap:16px;flex-wrap:wrap;align-items:center">
+      <label class="row" style="gap:10px"><span class="switch"><input type="checkbox" id="qc-on" ${r.on?'checked':''} ${r.allowed?'':'disabled'}><i></i></span><span>Quality check</span></label>
+      <label class="row sm" style="gap:8px;flex:1;min-width:220px">Reject below <input type="range" id="qc-min" min="0" max="100" step="1" value="${Number(r.threshold)}" style="flex:1"><b id="qc-minv">${Number(r.threshold)}</b><span class="mut">(usual ${Number(r.default)})</span></label>
+      <button class="btn sm" id="qc-save">Save</button></div>
+    <div class="row sm" style="gap:6px;flex-wrap:wrap;margin-top:10px"><span class="badge outline">Checked this week ${Number(w.checked||0)}</span><span class="badge uploaded">Passed ${Number(w.passed||0)}</span><span class="badge failed">Rejected ${Number(w.rejected||0)}</span>${w.used_anyway?`<span class="badge queued">Used anyway ${Number(w.used_anyway)}</span>`:''}<span class="mut">Waiting clips are also checked by themselves, at most ${Number(r.per_day)} a day.</span></div>
+    ${r.rejected_now?`<div class="row" style="margin-top:10px;gap:8px"><button class="btn outline sm" id="qc-again">Check the ${Number(r.rejected_now)} rejected clip${r.rejected_now===1?'':'s'} again with this threshold</button></div>`:''}`;
+  $('#qc-min').oninput=e=>{$('#qc-minv').textContent=e.target.value};
+  $('#qc-save').onclick=()=>once(async()=>{await api('/api/admin/quality','POST',{on:$('#qc-on').checked,threshold:+$('#qc-min').value});toast('Saved');loadClips()},$('#qc-save'));
+  if($('#qc-again'))$('#qc-again').onclick=()=>once(async()=>{const x=await api('/api/quality/recheck','POST');toast(x.back?`${x.back} clip${x.back===1?'':'s'} passed and went back`:'None of them passes this threshold');loadClips()},$('#qc-again'));
+}
+async function qcEditor(c){let b=$('#e-qc');if(!b){b=document.createElement('div');b.id='e-qc';b.className='sm';b.style.margin='10px 0 0';$('#e-err').after(b)}
+  if(!QCS){try{QCS=await api('/api/quality')}catch(e){}}
+  const q=c.quality||{},rej=qcRejected(c),done=['uploading','uploaded'].includes(c.status);
+  if(!QCS||(!QCS.on&&!rej)||(done&&q.score==null)){b.classList.add('hide');b.innerHTML='';return}b.classList.remove('hide');
+  const head=q.score!=null?`${qcBadge(q)} <span>${(q.reasons||[]).length?esc(q.reasons.join('; ')):'No problems found.'}</span>`:`<span class="mut">${q.error?esc('Not checked: '+q.error):'Not checked yet — it is checked when it is made and before its upload.'}</span>`;
+  b.innerHTML=`<div class="row" style="gap:8px;flex-wrap:wrap;align-items:center"><b>Quality check</b>${head}</div>
+    ${q.override?`<div class="mut" style="margin-top:4px">Used anyway (${esc(q.override.by||'')}, ${when(q.override.at)}): it is not stopped by the check.</div>`:''}
+    ${done?'':`<div class="row" style="gap:6px;margin-top:6px">${rej?`<button class="btn ok sm" id="e-qcuse">${ico('check')}Use anyway</button>`:''}${['rendered','queued','draft','failed'].includes(c.status)?`<button class="btn outline sm" id="e-qcchk">${ico('refresh')}Check again</button>`:''}</div>`}`;
+  const id=c.id;
+  if($('#e-qcuse'))$('#e-qcuse').onclick=()=>once(async()=>{if(await qcUse(id)&&sameClip(id))fill(await api('/api/clips/'+id))},$('#e-qcuse'));
+  if($('#e-qcchk'))$('#e-qcchk').onclick=()=>once(async()=>{await qcCheck(id);if(sameClip(id))fill(await api('/api/clips/'+id))},$('#e-qcchk'));
+}
 async function loadClips(){
   loadPc();
   $('#clip-grid').innerHTML=Array.from({length:4},()=>'<div class="sk" style="height:250px"></div>').join('');
   await loadOverview();const c=OV.counts;
-  const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0),held:c.held||0};
+  const QC=await loadQc();
+  const cnt={rendered:c.rendered,queued:c.queued+c.uploading,uploaded:c.uploaded,failed:c.failed,'draft,rendering,fetching':c.draft+c.rendering+(c.fetching||0),held:c.held||0,quality:QC?QC.rejected_now:0};
   if(TAB==='held'&&!cnt.held)TAB='rendered';
-  $('#tabs').innerHTML=TABS.concat(cnt.held?[['held','Held after a strike']]:[]).map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} <span class="mut">${cnt[k]??0}</span></button>`).join('');
+  if(TAB==='quality'&&!cnt.quality)TAB='rendered';
+  $('#tabs').innerHTML=TABS.concat(cnt.held?[['held','Held after a strike']]:[]).concat(cnt.quality?[['quality','Rejected by quality check']]:[]).map(([k,l])=>`<button class="tab ${k===TAB?'on':''}" data-t="${k}">${l} <span class="mut">${cnt[k]??0}</span></button>`).join('');
   $$('#tabs .tab').forEach(t=>t.onclick=()=>{TAB=t.dataset.t;loadClips()});
   const st=TAB==='queued'?'queued,uploading':TAB;
-  const L=await api('/api/clips?status='+encodeURIComponent(st));
+  const L=TAB==='quality'?await api('/api/quality/rejected'):await api('/api/clips?status='+encodeURIComponent(st));
   $('#clip-grid').innerHTML=L.length?L.map(x=>`<div class="clip"><div class="thumb" style="background-image:url('${x.thumb_path?`/api/clips/${x.id}/thumbnail?v=${encodeURIComponent(x.thumb_note||'')}`:thumb(x.video_id)}')" data-open="${x.id}"><span class="badge ${x.status}${x.status==='rendering'?' pulse':''}">${LABEL[x.status]}</span><span class="dur">${T(x.end-x.start)}</span></div>
     <div class="body"><div class="t">${esc(x.title||x.source_title||'Clip #'+x.id)}</div><div class="mut sm">${esc(x.source_channel||'')} · ${T(x.start)}–${T(x.end)} · ${esc(x.aspect)}</div>
-    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.from_pc&&x.status==='queued'?`<div class="sm mut">From your PC — ${x.pc_on_server?'the video is on the server for its upload':'the video comes from your PC about a day before its upload'}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}
-    <div class="act">${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
+    ${x.status==='queued'?`<div class="sm" style="color:var(--warn)">${ico('clock')} ${when(x.publish_at)}</div>`:''}${x.from_pc&&x.status==='queued'?`<div class="sm mut">From your PC — ${x.pc_on_server?'the video is on the server for its upload':'the video comes from your PC about a day before its upload'}</div>`:''}${x.status==='uploaded'?`<div class="sm mut">${x.on_pc?'Video saved on your PC':'Video still on the server'}</div>`:''}${x.error?`<div class="sm" style="color:var(--bad)">${esc((x.error||'').slice(0,120))}</div>`:''}${qcLine(x)}
+    <div class="act">${qcActs(x)}${x.status==='rendered'?`<button class="btn ok sm" data-approve="${x.id}">${ico('check')}Approve</button>`:''}<button class="btn outline sm" data-open="${x.id}">${ico('pencil')}${x.status==='uploaded'?'View':'Edit'}</button>${x.youtube_id?`<a class="btn ghost sm" target="_blank" href="https://youtu.be/${esc(x.youtube_id)}">YouTube</a>`:''}${x.status==='uploaded'&&x.yt_state&&x.yt_state!=='ok'?`<button class="btn outline sm" data-again="${x.id}" data-ys="${esc(x.yt_state||'')}">${ico('refresh')}Upload again</button>`:''}</div>
     ${x.yt_state&&x.yt_state!=='ok'?`<div class="sm" style="color:var(--bad);margin-top:6px">${ico('alert')} ${esc(ytLabel(x.yt_state))}</div>`:''}</div></div>`).join(''):`<div style="grid-column:1/-1">${empty('film','No clips here yet','Add a source or create a clip from a video link.','<button class="btn" onclick="openNewModal()">'+ico('scissors')+'New clip</button>')}</div>`;
-  wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));
+  wireOpen($('#clip-grid'));wireAgain($('#clip-grid'));wireQc($('#clip-grid'));
 }
 function ytLabel(st){return st==='removed'?'Deleted on YouTube':st.startsWith('rejected:')?'Removed by YouTube ('+st.slice(9)+')':st.startsWith('blocked')?'Blocked in some countries':st.startsWith('failed')?'YouTube processing failed':st}
 const NO_AGAIN=st=>/^rejected:(copyright|claim|trademark|legal)/.test(st||'')||(st||'').startsWith('blocked');
@@ -1711,6 +1756,7 @@ function setStatus(c){
   $('#e-render').disabled=done||busy;$('#e-approve').disabled=done||busy||!ok;$('#e-now').disabled=done||busy||!['rendered','queued'].includes(c.status);
   $('#e-del').disabled=$('#e-refetch').disabled=done||busy;$('#e-unq').classList.toggle('hide',c.status!=='queued');
   $('#e-approve').innerHTML=ico('check')+(c.status==='queued'?'Re-queue':'Approve &amp; queue');
+  qcEditor(c);
 }
 $$('#e-seg .tab').forEach(b=>b.onclick=()=>{VIEW=b.dataset.v;if(CUR)setStatus(CUR)});
 function addOv(o){
@@ -1962,7 +2008,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
   'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
-  'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box'};
+  'clips.pc_folder':'#pc-card,[data-pcf]','clips.quality':'#qc-card,[data-qc],#e-qc','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){
   let st=$('#acl-style');if(!st){st=document.createElement('style');st.id='acl-style';document.head.appendChild(st)}

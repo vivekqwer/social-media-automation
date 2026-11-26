@@ -198,7 +198,7 @@ def _clip_items(s) -> list:
         })
     # a clip that is not failed but carries a note (e.g. the helper PC did not make its voice-over in time)
     for c in clips.filter(Clip.status.in_(["draft", "rendered"]), Clip.error.isnot(None), Clip.error != "",
-                          ~Clip.error.like("Parked%")) \
+                          ~Clip.error.like("Parked%"), ~Clip.error.like("Quality check:%")) \
             .order_by(Clip.id.desc()).limit(30).all():  # clips parked on purpose (too many waiting) are not a problem
         out.append({"id": f"clip:{c.id}:{zlib.crc32(c.error.encode('utf-8', 'replace')):08x}", "tab": "broken", "level": "warn",
                     "kind": "clip_note", "label": "Check", "at": _iso(c.created_at), "title": title(c), "clip_id": c.id,

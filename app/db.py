@@ -203,6 +203,7 @@ class Clip(Base):
     output_path = Column(String(500))
     youtube_id = Column(String(32))
     error = Column(Text)
+    quality = Column(JSON)  # quality check (app/quality.py): {v, score, reasons, kind, sig, at, signals, override, was}
     created_at = Column(DateTime, default=utcnow)
 
 

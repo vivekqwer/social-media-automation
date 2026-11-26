@@ -302,6 +302,10 @@ def _process_queue():
                 c.held_was, c.status, c.autoqueue, c.error = "queued", strikes.HELD, False, strikes.HELD_NOTE
                 s.commit()
                 continue
+            from . import quality
+
+            if not quality.upload_ok(s, c, p):  # the quality check, last gate: no real content -> never uploaded
+                continue
             # atomic claim: only one worker can flip queued -> uploading
             res = s.execute(update(Clip).where(Clip.id == cid, Clip.status == "queued").values(status="uploading"))
             s.commit()
@@ -496,6 +500,7 @@ def start():
     #   pc_due               "Videos from a folder on their PC"; uploads paused -> no file is asked for (inside pc_due)
     #   phone_events         "Phone notifications" (phone.enabled() also checks it, so no push goes out when it is off)
     #   weekly_due           "Weekly report" (and the account's own switch in My channels); acts on Mondays from 9 AM IST
+    #   quality_sweep        "Quality check" (and its on/off in Clips); the gate before every upload is in process_queue
     #   freshen_due          "Keyword helper" (keywords refreshed before upload)
     #   meta_due             "Instagram + Facebook" (Shorts that became public; Instagram posts finished; PC get-back)
     #   thumb_tests          "Thumbnails" (with swap_weak_thumbnails: the A/B test of the second thumbnail)
@@ -603,6 +608,9 @@ def start():
     # in the scheduler's own thread, NOT the single render worker (Gmail can be slow; the round never waits for a lock)
     add(when_on("gmail.send", strike_mails), "interval", minutes=15, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=9))  # YouTube's notices, the request, the answer
+    from .quality import sweep as quality_sweep
+    add(when_on("clips.quality", quality_sweep), "interval", hours=1, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=17))  # queued clips: a few an hour, 30 a day at most
     from . import watchdog
     add(watchdog.run, "interval", minutes=10, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=11))  # self-repair of known problems (app/watchdog.py)
