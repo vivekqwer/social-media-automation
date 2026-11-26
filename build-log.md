@@ -700,3 +700,9 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Merged viral-fixes (hook titles, retitle, niche guard, 20 s clips, 2 posts/day + re-spacing of waiting clips), subscribe-anim (animated Like/Subscribe/Bell on every waiting + new clip; already-uploaded videos untouched by owner's choice), thumb-designer (classical thumbnail designer, auto-attached) and quality-gate (clips with no real content never upload). Each branch had an independent review; all should-fix items fixed before merge.
 - Tests on merged main: viral 81, respace 8, subscribe 82, thumbs 62, quality 74, parity 240, creator-email 181, acl_routes 19 — all pass (test_growth_pack: 5 old "Best Moment" title checks + 1 switch count are stale by design).
 - Repo made private earlier today broke Railway auto-deploy (Railway lost GitHub access); owner chose to make it public again so deploys resume.
+
+## 2026-11-26 (late) — Live checks + fixes after deploy
+- Verified live: like/subscribe sticker on all 198 waiting clips (0 failed); retitles on YouTube working; quality check 22 checked / 2 rejected; posts 2 a day.
+- Foody had no niche → set niche words (food) via /api/admin/niche-guard; words limit 300→2000 and a typed subject pulls in its whole word list; 125 non-food waiting clips parked (32%, under the 40% cap), 267 food clips left.
+- PC-folder clips now follow posts-per-day times and are included in re-spacing: 195 waiting clips moved; queue now 2 a day from 2026-12-14 to 2027-04-26 (videos already on YouTube keep 1 a day until 2026-12-13).
+- Thumbnails: YouTube 429 (daily thumbnail limit) now pauses sending 20 h with a plain message; dashboard no longer blames phone verification for it (owner had verified).
