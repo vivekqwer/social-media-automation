@@ -401,7 +401,7 @@ def run_render(clip_id: int):
                     from .thumbs import make_thumbnail
 
                     clip.thumb_path = str(make_thumbnail(clip, project))
-                    extra.update(thumb_path=clip.thumb_path, thumb_note=None)
+                    extra.update(thumb_path=clip.thumb_path, thumb_note=None, thumb_style=clip.thumb_style)
                 except Exception as te:  # noqa: BLE001  (a thumbnail problem must not block the upload)
                     extra["thumb_note"] = f"Thumbnail could not be made: {str(te)[:150]}"
             apply_short_cover(clip)

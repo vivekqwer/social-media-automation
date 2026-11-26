@@ -318,6 +318,7 @@ def _process_queue():
             if res.rowcount != 1:
                 continue
             s.refresh(c)
+            _ensure_thumb(s, c, p)
             try:
                 publish_at = c.publish_at if c.publish_at and c.publish_at > now + timedelta(minutes=15) else None
                 c.youtube_id = youtube.upload(c.destination_id, c.output_path, c.title, c.description, c.tags or [], publish_at)
@@ -368,6 +369,24 @@ def _process_queue():
             c.attempted_at = utcnow()
             used += 1
             s.commit()
+
+
+def _ensure_thumb(s, c, p):
+    """Every video goes up with a thumbnail: one that has none yet (a video from the PC folder without its own picture,
+    or one whose thumbnail could not be made after the render) gets the automatic one now. Only the picture — the
+    video file is never changed here. A failure never stops the upload."""
+    if c.thumb_custom or (c.thumb_path and Path(c.thumb_path).exists()) or p is None:
+        return
+    if not (c.output_path and Path(c.output_path).exists()):
+        return
+    try:
+        from .thumbs import make_thumbnail
+
+        c.thumb_path, c.thumb_note = str(make_thumbnail(c, p)), None
+        s.commit()
+    except Exception as e:  # noqa: BLE001
+        s.rollback()
+        log.info("thumbnail before the upload of %s: %s", c.id, str(e)[:200])
 
 
 def retry_thumbnails():
@@ -511,6 +530,7 @@ def start():
     #   meta_due             "Instagram + Facebook" (Shorts that became public; Instagram posts finished; PC get-back)
     #   remake_tick          "Animated like + subscribe + bell" (and the account's own switch in My channels)
     #   thumb_tests          "Thumbnails" (with swap_weak_thumbnails: the A/B test of the second thumbnail)
+    #   thumb_redesign       "Thumbnail designer" (old-style thumbnails of waiting / not-yet-public clips re-made, 15 a day)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
     #   retitle_due          "Hook titles for videos already on YouTube" (and "Hook titles"; 20 a day, uploads first)
     #   guard_due            "One topic per channel" (parks off-topic waiting clips; never more than 40% of a channel's line)
@@ -556,6 +576,9 @@ def start():
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=10))
     add(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
+    from .thumbdesign import refresh_old as thumb_redesign  # old-style thumbnails of waiting clips re-made (15 a day max)
+    add(when_on("thumbs.designer", lambda: executor.submit(thumb_redesign)), "interval", hours=2, max_instances=1,
+        coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=17))
     # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)
     every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")
     add(lambda: executor.submit(check_uploads), "interval", hours=every, max_instances=1, coalesce=True,

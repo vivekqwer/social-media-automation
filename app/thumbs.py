@@ -4,6 +4,7 @@ Phone-safe layout: text is huge (few words, max 3 lines) and kept inside the are
 shows — away from the edges, the duration stamp (bottom-right of 16:9) and the cropped/overlaid parts of
 Shorts thumbnails (top and bottom of 9:16). Text is drawn by libass so Hindi is shaped correctly.
 """
+import logging
 import re
 import subprocess
 from pathlib import Path
@@ -18,6 +19,7 @@ from .render import DEVA, _esc, ass_text
 
 LATIN_FONT = ("Anton", FONTS_DIR / "Anton-Regular.ttf")
 HINDI_FONT = ("Noto Sans Devanagari", FONTS_DIR / "NotoSansDevanagari-Bold.ttf")
+log = logging.getLogger(__name__)
 
 
 def default_text(title: str) -> str:
@@ -95,7 +97,7 @@ def _best_time(src: Path, dur: float, rank: int = 0, avoid=()) -> float:
         t = _clear_of(dur * f, avoid, dur)
         if t is None or any(abs(t - x) < 0.05 for _s, x in scored):
             continue
-        r = subprocess.run([ffmpeg_bin(), "-v", "error", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
+        r = _ff([ffmpeg_bin(), "-v", "error", "-ss", f"{t:.2f}", "-i", str(src), "-frames:v", "1",
                             "-vf", "scale=192:108", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True)
         if r.returncode or len(r.stdout) != 192 * 108 * 3:
             continue
@@ -106,12 +108,22 @@ def _best_time(src: Path, dur: float, rank: int = 0, avoid=()) -> float:
     return scored[min(rank, len(scored) - 1)][1]  # rank 1 = second-best frame (for the auto-swap variant)
 
 
+def _ff(args, timeout: float = 90, **kw):
+    """ffmpeg with a deadline (a thumbnail can be made right before an upload: it must never hang there)."""
+    from .thumbdesign import _run
+
+    kw.pop("capture_output", None)
+    return _run(args, timeout, **kw)
+
+
 def _frame(src: Path, W: int, H: int, out: Path, variant: int = 0, avoid=()):
-    dur = stream_seconds(src, "v:0") or 10.0
+    from .thumbdesign import probe
+
+    dur = probe(src)[2] or 10.0
     at = _best_time(src, dur, rank=2 if variant else 0, avoid=avoid)
     vf = f"scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},eq=contrast=1.12:saturation=1.35"
-    r = subprocess.run([ffmpeg_bin(), "-y", "-ss", f"{at:.2f}", "-i", str(src), "-frames:v", "1", "-vf", vf, str(out)],
-                       capture_output=True, text=True)
+    r = _ff([ffmpeg_bin(), "-y", "-ss", f"{at:.2f}", "-i", str(src), "-frames:v", "1", "-vf", vf, str(out)],
+            capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("thumbnail frame failed: " + r.stderr[-300:])
 
@@ -152,6 +164,14 @@ def _thumb_source(clip, project) -> tuple[Path, Path, int, int]:
 
 def save_frame(clip, project, variant: int):
     """Keep one frame for a later thumbnail: the video itself is about to leave the server (saved on the PC)."""
+    from . import thumbdesign
+
+    if thumbdesign.enabled():  # the designer's own pick, full size (it crops it per layout later)
+        try:
+            thumbdesign.keep_frame(clip, project, variant)
+            return
+        except Exception as e:  # noqa: BLE001
+            log.info("thumb designer frame %s: %s", getattr(clip, "id", "?"), str(e)[:150])
     workdir, src, W, H = _thumb_source(clip, project)
     try:
         _frame(src, W, H, workdir / f"thumb_frame_v{variant}.png", variant, _avoid(clip, src))
@@ -169,6 +189,30 @@ def frame_ready(clip, project) -> bool:
 
 
 def make_thumbnail(clip, project) -> Path:
+    """The automatic thumbnail: the designer's (app/thumbdesign.py) while the Super Admin switch "thumbs.designer" is on,
+    else (or if the designer fails) the classic one below. clip.thumb_style records which one made it."""
+    from . import thumbdesign
+
+    if thumbdesign.enabled():
+        try:
+            out = thumbdesign.make(clip, project)
+            _mark(clip, thumbdesign.style_after(clip))
+            return out
+        except Exception as e:  # noqa: BLE001  (never no thumbnail: the classic one instead)
+            log.warning("thumb designer %s: %s", getattr(clip, "id", "?"), str(e)[:200])
+    out = _classic(clip, project)
+    _mark(clip, thumbdesign.CLASSIC)
+    return out
+
+
+def _mark(clip, style: str):
+    try:
+        clip.thumb_style = style
+    except Exception:  # noqa: BLE001  (an object without the column, e.g. a tool on the PC with an older database)
+        pass
+
+
+def _classic(clip, project) -> Path:
     workdir, src, W, H = _thumb_source(clip, project)
     portrait = clip.aspect == "9:16"
     variant = int(getattr(clip, "thumb_variant", 0) or 0)
@@ -180,6 +224,10 @@ def make_thumbnail(clip, project) -> Path:
     else:
         _frame(src, W, H, workdir / "thumb_frame.png", variant, _avoid(clip, src))
     base = Image.open(workdir / "thumb_frame.png").convert("RGBA")
+    if base.size != (W, H):  # a full-size frame kept by the designer
+        from PIL import ImageOps
+
+        base = ImageOps.fit(base, (W, H), Image.LANCZOS)
 
     from .branding import face_scale
 
@@ -232,15 +280,16 @@ def make_thumbnail(clip, project) -> Path:
         *events, "",
     ])
     (workdir / "thumb.ass").write_text(ass, encoding="utf-8")
-    r = subprocess.run([ffmpeg_bin(), "-y", "-i", "thumb_base.png", "-vf", f"ass=thumb.ass:fontsdir='{_esc(FONTS_DIR)}'",
-                        "-frames:v", "1", "-q:v", "2", "thumb.jpg"], cwd=workdir, capture_output=True, text=True)
+    r = _ff([ffmpeg_bin(), "-y", "-i", "thumb_base.png", "-vf", f"ass=thumb.ass:fontsdir='{_esc(FONTS_DIR)}'",
+             "-frames:v", "1", "-q:v", "2", "thumb.jpg"], cwd=workdir, capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError("thumbnail failed: " + r.stderr[-300:])
     for q in ("5", "8", "12"):  # YouTube refuses thumbnails over 2 MB (busy frames can exceed it)
         if (workdir / "thumb.jpg").stat().st_size <= 1_900_000:
             break
-        subprocess.run([ffmpeg_bin(), "-y", "-i", "thumb.jpg", "-q:v", q, "thumb_small.jpg"], cwd=workdir, capture_output=True)
-        (workdir / "thumb_small.jpg").replace(workdir / "thumb.jpg")
+        r = _ff([ffmpeg_bin(), "-y", "-i", "thumb.jpg", "-q:v", q, "thumb_small.jpg"], cwd=workdir, capture_output=True)
+        if r.returncode == 0 and (workdir / "thumb_small.jpg").exists():
+            (workdir / "thumb_small.jpg").replace(workdir / "thumb.jpg")
     for f in ("thumb_frame.png", "thumb_base.png"):
         (workdir / f).unlink(missing_ok=True)
     return workdir / "thumb.jpg"

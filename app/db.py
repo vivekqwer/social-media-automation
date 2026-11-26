@@ -178,6 +178,7 @@ class Clip(Base):
     # thumbnail A/B (app/growth.py): {"state": "a"|"b"|"done", "a_at", "a_views", "b_at", "b_views", "end_views",
     #  "a_rate", "b_rate", "by": "ctr"|"views", "winner": "A"|"B", "note"}
     thumb_test = Column(JSON)
+    thumb_style = Column(String(12))  # who made the automatic thumbnail: "d1" / "d1:<layout>" designer, "classic", "xd1" failed
     fetch_since = Column(DateTime)  # waiting for the helper PC since
     fetch_tries = Column(Integer, default=0)  # times a helper took the download job
     job_lease = Column(DateTime)  # a helper took this clip's job at; others wait until it expires

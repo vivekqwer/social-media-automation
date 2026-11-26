@@ -80,6 +80,7 @@ PERMS = [
     ("clips.upload_now", "clips", "Upload now / choose the upload time", True),
     ("clips.thumbnail", "clips", "Thumbnails (make, upload, send to YouTube)", True),
     ("clips.face", "clips", "Face photo for thumbnails", True),
+    ("thumbs.designer", "clips", "Thumbnail designer (strong automatic thumbnails; old ones of waiting clips re-made)", True),
     ("clips.captions", "clips", "Captions from YouTube", True),
     ("clips.voice", "clips", "Voice-over (make or upload)", True),
     ("clips.reminder", "clips", "Like, share & subscribe reminder on their videos", True),
@@ -339,6 +340,7 @@ ROUTES = [
     ("POST", "/api/clips/{cid}/thumbnail", "clips.thumbnail", None),
     ("POST", "/api/clips/{cid}/thumbnail-upload", "clips.thumbnail", "Uploaded a thumbnail"),
     ("POST", "/api/clips/{cid}/thumbnail/push", "clips.thumbnail", None),
+    ("POST", "/api/clips/{cid}/thumbnail/design", "thumbs.designer", None),  # "Another design": the next layout
     ("POST", "/api/faces/{did}", "clips.face", "Changed the face photo"),
     ("DELETE", "/api/faces/{did}", "clips.face", "Removed the face photo"),
     ("GET", "/api/faces/{did}", SIGNED, None),
