@@ -1,0 +1,7 @@
+- [SaaS multi-user plan](saas-multi-user-plan.md) — owner wants to sell Raji Studio; tenant-per-customer architecture, rules, phase order
+- [Review agent before deploy](review-agent-before-deploy.md) — one independent agent checks big changes before they go live
+- [Re-make queued clips on look change](remake-queued-clips-on-look-change.md) — owner wants burned-in changes on every waiting clip, not only new ones
+- [Six-month unattended goal](six-month-unattended-goal.md) — 200 clips, one a day, no attention from the owner; what can silently stop it
+- [Helper checkout and archive](helper-checkout-and-archive.md) — laptop helper runs from D:\social medi engin (keep it clean so it self-updates); videos archived to C:\Users\hp\RajiStudioArchive
+- [Viral diagnosis 2026-11-26](viral-diagnosis-2026-11-26.md) — low views causes + proposed fixes; 40a6aa4 deployed
+- [Local parked-clip renderer](local-parked-renderer.md) — D:\youtube\tool\make_local.py makes parked clips into videos on the PC from a backup
