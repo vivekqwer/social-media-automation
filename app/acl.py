@@ -82,6 +82,7 @@ PERMS = [
     ("clips.captions", "clips", "Captions from YouTube", True),
     ("clips.voice", "clips", "Voice-over (make or upload)", True),
     ("clips.reminder", "clips", "Like, share & subscribe reminder on their videos", True),
+    ("clips.subscribe_anim", "clips", "Animated like + subscribe + bell at the top of their videos", True),
     ("clips.pc_folder", "clips", "Videos from a folder on their PC (Clips → From my PC)", True),
 
     ("uploads.youtube", "uploads", "Upload to YouTube at all", True),
@@ -358,6 +359,10 @@ ROUTES = [
     ("POST", "/api/watchdog/check", "watchdog.repair", None),
     ("POST", "/api/admin/watchdog", SUPER, "Changed self-repair"),
     ("POST", "/api/settings/reminder", "clips.reminder", "Changed the like & subscribe reminder"),  # clips.edit inside
+    ("GET", "/api/settings/subscribe-anim", SIGNED, None),
+    ("GET", "/api/settings/subscribe-anim/preview.png", SIGNED, None),
+    ("POST", "/api/settings/subscribe-anim", "clips.subscribe_anim", "Changed the like & subscribe animation"),  # clips.edit inside
+    ("POST", "/api/subscribe-anim/remake", "clips.subscribe_anim", "Re-made waiting clips with the like & subscribe animation"),  # clips.rerender inside
     ("GET", "/api/settings/comment", SIGNED, None),
     ("POST", "/api/settings/comment", "uploads.comment", "Changed the first comment"),
     ("POST", "/api/clips/{cid}/comment", "uploads.comment", None),

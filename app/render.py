@@ -329,7 +329,14 @@ def apply_short_cover(clip: Clip) -> bool:
     body, thumb = workdir / "body.mp4", Path(clip.thumb_path or "")
     if not body.exists():
         return False
+    from . import subscribe_anim  # the animated like + subscribe + bell at the top, burned in here (body.mp4 stays clean)
+
+    stk = subscribe_anim.plan_for(clip, body)  # None = not on this clip
+    clip.sub_anim_v = 0 if stk is None else -1  # what out.mp4 carries (the version once it is burned in)
     if clip.aspect != "9:16" or clip.short_cover is False or not clip.thumb_path or not thumb.exists():
+        if stk and subscribe_anim.burn(workdir, "body.mp4", stk):
+            clip.sub_anim_v = subscribe_anim.VERSION
+            return False
         shutil.copyfile(body, workdir / "out.tmp.mp4")
         (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
         return False
@@ -337,13 +344,21 @@ def apply_short_cover(clip: Clip) -> bool:
     f = COVER_SECONDS
     fc = (f"[1:v]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},format=yuva420p,"
           f"fade=t=out:st={f - 0.25:.2f}:d=0.25:alpha=1[c];[0:v][c]overlay=0:0:enable='lte(t,{f})'[v]")
-    r = subprocess.run([ffmpeg_bin(), "-y", "-i", "body.mp4", "-loop", "1", "-t", f"{f}", "-i", str(thumb),
-                        "-filter_complex", fc, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
-                        "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", "out.tmp.mp4"],
-                       cwd=workdir, capture_output=True, text=True)
-    if r.returncode != 0:
+    for with_stk in ([True] if stk else []) + [False]:  # with the sticker; if that fails, without it (as before)
+        sargs, sfc = subscribe_anim.with_cover(stk, fc) if with_stk else ([], fc)
+        if sfc is None:  # the sticker could not be made (already noted): the Short as before
+            continue
+        r = subprocess.run([ffmpeg_bin(), "-y", "-i", "body.mp4", "-loop", "1", "-t", f"{f}", "-i", str(thumb), *sargs,
+                            "-filter_complex", sfc, "-map", "[v]", "-map", "0:a?", "-c:v", "libx264", "-preset", "veryfast",
+                            "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", "out.tmp.mp4"],
+                           cwd=workdir, capture_output=True, text=True)
+        if r.returncode == 0:
+            clip.sub_anim_v = subscribe_anim.VERSION if with_stk else clip.sub_anim_v
+            break
         (workdir / "out.tmp.mp4").unlink(missing_ok=True)
-        _note("Showing the thumbnail at the start of a Short", RuntimeError("ffmpeg: " + r.stderr[-300:]))
+        _note("Putting the like & subscribe animation on a video" if with_stk else "Showing the thumbnail at the start of a Short",
+              RuntimeError("ffmpeg: " + r.stderr[-300:]))
+    else:
         return False
     (workdir / "out.tmp.mp4").replace(workdir / "out.mp4")
     return True
@@ -390,6 +405,7 @@ def run_render(clip_id: int):
                 except Exception as te:  # noqa: BLE001  (a thumbnail problem must not block the upload)
                     extra["thumb_note"] = f"Thumbnail could not be made: {str(te)[:150]}"
             apply_short_cover(clip)
+            extra["sub_anim_v"] = clip.sub_anim_v  # what the finished video carries (subscribe_anim.py)
         except Exception as e:  # noqa: BLE001
             if (is_bot_block(e) or isinstance(e, NeedsHelper)) and workers.any_recent("reel" if isinstance(e, NeedsHelper) else "source"):
                 final = "fetching"  # the helper PC downloads the section, then we render

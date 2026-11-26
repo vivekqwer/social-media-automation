@@ -398,6 +398,13 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="rm-on" checked><i></i></span>Show it on my videos</label>
                 <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Words<select id="rm-preset"></select></label><label class="f grow hide" id="rm-custom-wrap">Your own words (up to 40 letters, no emoji)<input id="rm-custom" maxlength="40" placeholder="Like, share and subscribe for more"></label><button class="btn" id="rm-save">Save</button></div>
                 <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
+            <div class="card"><div class="ch"><div><h3>Like &amp; subscribe animation</h3><p>YouTube-style buttons at the top of every video: a small hand taps LIKE, SUBSCRIBE and the bell (about 3.5 seconds, early in the video, and once more near the end of clips of 25 seconds or longer). It never covers your face or the title, and never shows at the same time as the reminder line.</p></div><span class="badge" id="sa-badge">…</span></div>
+              <div class="cb"><div style="background:#26303d;border-radius:12px;padding:10px;text-align:center"><img id="sa-prev" alt="How the animation looks" style="max-width:100%;height:auto;display:inline-block"></div>
+                <label class="row" style="gap:10px;font-weight:500;margin-top:10px"><span class="switch"><input type="checkbox" id="sa-on" checked><i></i></span>Show it on my videos</label>
+                <div class="row" style="margin-top:10px;align-items:flex-end"><label class="f grow">Where<select id="sa-pos"><option value="top">At the top (under the title and face)</option><option value="auto">Automatic (lower down when text is at the top)</option></select></label><button class="btn" id="sa-save">Save</button></div>
+                <div class="mut sm" id="sa-note" style="margin-top:8px"></div>
+                <button class="btn outline sm" id="sa-remake" style="margin-top:8px" title="Adds it to every clip that is waiting to upload (or waiting for review); upload times, titles and thumbnails stay the same">Re-make all waiting clips</button>
+                <span class="mut sm" style="display:block;margin-top:8px">One clip can be different: open the clip → Trim &amp; look.</span></div></div>
             <div class="card"><div class="ch"><div><h3>First comment</h3><p>After every upload your channel writes the first comment under the new video, as soon as the video is public (a scheduled video: at its publish time, within about 10 minutes). <b>YouTube does not let any app pin a comment</b> — so you get a message with the video link: open it, tap ⋮ next to your comment → Pin.</p></div><span class="badge" id="fc-badge">…</span></div>
               <div class="cb"><label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="fc-on" checked><i></i></span>Post a first comment on my new videos</label>
                 <span class="mut sm" style="display:block;margin-top:4px">Off: nothing is posted, not even for single clips. Comments that were still waiting are held and go out if you switch it on again within 14 days; videos uploaded while it is off get none.</span>
@@ -473,6 +480,7 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
       <label class="row" style="gap:10px;font-weight:500"><span class="switch"><input type="checkbox" id="e-credit" checked><i></i></span>Show “Credit: channel” on the video</label>
       <label class="row sm" id="e-ftitle-row" style="gap:8px;margin-top:6px" title="YouTube shows its own frame of a Short, not your thumbnail. With this on, the title and your small face are at the top of every frame, so that frame always carries them."><span class="switch"><input type="checkbox" id="e-ftitle" checked><i></i></span>Title and my face at the top of the whole Short (so YouTube's picture of it shows them)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="One short line in a small pill, shown once near the end. No sound. The words are chosen in My channels."><span class="switch"><input type="checkbox" id="e-cta" checked><i></i></span>Small “Like, share and subscribe” line near the end (about 3 seconds)</label>
+      <label class="row sm" style="gap:8px;margin-top:6px" title="YouTube-style like, subscribe and bell buttons at the top, tapped by a small hand. Switched on or off for all videos in My channels."><span class="switch"><input type="checkbox" id="e-sa" checked><i></i></span>Animated like + subscribe + bell at the top (about 3.5 seconds)</label>
       <label class="row sm" style="gap:8px;margin-top:6px" title="Shorts: the crop follows the person instead of the centre"><span class="switch"><input type="checkbox" id="e-reframe" checked><i></i></span>Smart reframe (Shorts follow the person on screen)</label>
       <div class="fx" id="e-fx"><label><input type="checkbox" value="fade"> Fade</label><label><input type="checkbox" value="punch_in"> Punch-in</label><label><input type="checkbox" value="shake"> Shake</label><label><input type="checkbox" value="bw"> B&amp;W</label></div>
     </div>
@@ -1392,11 +1400,16 @@ async function loadPhone(){let p;try{p=await api('/api/phone')}catch(e){return}c
   if($('#ph-tog'))$('#ph-tog').onclick=()=>once(async()=>{await api('/api/phone','POST',{action:p.on?'off':'on'});loadPhone()},$('#ph-tog'));
   if($('#ph-new'))$('#ph-new').onclick=()=>once(async()=>{if(!confirm('Make a new QR code? The phone that scanned the old one stops getting messages until it scans the new one.'))return;await api('/api/phone','POST',{action:'new'});loadPhone()},$('#ph-new'));
 }
-async function loadFaceSize(){loadReminder();loadComment();loadWeekly();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
+async function loadFaceSize(){loadReminder();loadSubAnim();loadComment();loadWeekly();try{$('#face-size').value=(await api('/api/settings/face-size')).size}catch(e){}}
 async function loadReminder(){let r;try{r=await api('/api/settings/reminder')}catch(e){return}
   $('#rm-on').checked=!!r.on;$('#rm-preset').innerHTML=r.presets.map(p=>`<option value="${esc(p.key)}">${esc(p.text)}</option>`).join('')+'<option value="custom">My own words…</option>';
   $('#rm-preset').value=r.preset;$('#rm-custom').value=r.custom||'';rmShow();
   const b=$('#rm-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off'}
+async function loadSubAnim(){let r;try{r=await api('/api/settings/subscribe-anim')}catch(e){return}
+  $('#sa-on').checked=!!r.on;$('#sa-pos').value=r.pos||'top';
+  const b=$('#sa-badge');b.className='badge '+(r.on?'uploaded':'outline');b.textContent=r.on?'On':'Off';
+  if(!$('#sa-prev').getAttribute('src'))$('#sa-prev').src='/api/settings/subscribe-anim/preview.png';
+  const m=r.remake||{};$('#sa-note').textContent=!m.on?'':m.stopped?m.stopped:m.waiting?`${m.waiting} waiting clip(s) still need it. They get it by themselves, one at a time (about ${m.minutes} min in all); upload times stay the same.`+(m.done?` ${m.done} done so far.`:''):'Every waiting clip has it.'+(m.done?` (${m.done} clip(s) re-made)`:'')}
 function rmShow(){$('#rm-custom-wrap').classList.toggle('hide',$('#rm-preset').value!=='custom')}
 $('#rm-preset').onchange=rmShow;
 let FC=null;
@@ -1447,6 +1460,8 @@ function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;
   if(!done&&c.comment_can===false&&st!=='no permission')n+='<div>This channel must be reconnected once to allow comments (My channels).</div>';
   $('#e-fc-note').innerHTML=n}
 $('#e-fc-save').onclick=()=>once(async()=>{const id=CUR.id;const c=await api(`/api/clips/${id}/comment`,'POST',{on:$('#e-fc-on').checked,text:$('#e-fc-text').value});if(!sameClip(id))return;Object.assign(CUR,c);fcEditor(CUR);toast('Comment saved')},$('#e-fc-save'));
+$('#sa-save').onclick=()=>once(async()=>{await api('/api/settings/subscribe-anim','POST',{on:$('#sa-on').checked,pos:$('#sa-pos').value});toast('Saved — new clips use it; clips that are waiting get it by themselves, one at a time.');loadSubAnim()},$('#sa-save'));
+$('#sa-remake').onclick=()=>once(async()=>{const r=await api('/api/subscribe-anim/remake','POST',{});toast(r.waiting?`${r.waiting} waiting clip(s) get the animation, one at a time (about ${r.minutes} min). Upload times stay the same.`:'Every waiting clip already has it.');loadSubAnim()},$('#sa-remake'));
 $('#rm-save').onclick=()=>once(async()=>{await api('/api/settings/reminder','POST',{on:$('#rm-on').checked,preset:$('#rm-preset').value,custom:$('#rm-custom').value});toast('Saved — new clips use it. Clips that are already made: Clips → “Make all waiting clips again”.');loadReminder()},$('#rm-save'));
 $('#face-size').onchange=()=>once(async()=>{await api('/api/settings/face-size','POST',{size:$('#face-size').value});toast('Saved — thumbnails of clips that are not uploaded yet are being made again')});
 async function loadGmail(){const g=await api('/api/gmail');const b=$('#gm-badge');b.className='badge '+(g.email?'uploaded':'outline');b.textContent=g.email?'Connected':'Not connected';
@@ -1668,7 +1683,7 @@ function fill(c){
   $('#e-s').value=c.start;$('#e-e').value=c.end;$('#e-asp').value=c.aspect;$('#e-vol').value=c.orig_volume??1;$('#e-voff').value=c.voice_offset||0;
   $('#e-rewrite').classList.toggle('hide',!(AISRC.has(c.source_id)&&!['uploaded','uploading'].includes(c.status)));
   $('#e-refetch').parentElement.classList.toggle('hide',!!c.own_upload);
-  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
+  $('#e-ftitle').checked=c.frame_title!==false;$('#e-cta').checked=c.cta_on!==false;$('#e-sa').checked=c.sub_anim_on!==false;$('#e-ftitle-row').classList.toggle('hide',c.aspect==='16:9');
   $('#e-fit').value=c.fit||'full';$('#e-fit-wrap').classList.toggle('hide',c.aspect==='16:9');loadSync();
   $$('#e-fx input').forEach(x=>x.checked=(c.effects||[]).includes(x.value));
   $('#e-ovs').innerHTML='';(c.overlays||[]).forEach(addOv);
@@ -1753,7 +1768,7 @@ function collect(){
     overlays:$$('.ov').map(d=>({text:$('.o-text',d).value,start:+$('.o-s',d).value,end:+$('.o-e',d).value,pos:$('.o-pos',d).value,anim:$('.o-anim',d).value,size:+$('.o-size',d).value,color:$('.o-color',d).value})).filter(o=>o.text.trim()),
     title:$('#e-mt').value,description:$('#e-md').value,tags:$('#e-mg').value.split(',').map(s=>s.trim()).filter(Boolean),voice_text:$('#e-vtext').value,
     captions:$$('#e-cues .cue').map(d=>({s:+$('.c-s',d).value,e:+$('.c-e',d).value,t:$('.c-t',d).value})).filter(c=>c.t.trim()),
-    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,
+    credit_on:$('#e-credit').checked,short_cover:$('#e-tcover').checked,reframe:$('#e-reframe').checked,fit:$('#e-fit').value,frame_title:$('#e-ftitle').checked,cta_on:$('#e-cta').checked,sub_anim_on:$('#e-sa').checked,
     comment_on:$('#e-fc-on').checked,comment_text:$('#e-fc-text').value,
     caption_style:{on:$('#e-con').checked,lang:$('#e-clang').value,pos:$('#e-cpos').value,size:$('#e-csize').value,color:$('#e-ccol').value}};
 }
@@ -1961,7 +1976,7 @@ const PERM_HIDE={'page.quick':'#top-quick,#nav-quick',
   'ideas.competitors':'#id-add,#id-scan,#id-q','meta.use':'.card:has(#mt-box)','telegram.use':'.card:has(#tg-box)','report.weekly':'.card:has(#wr-on)','whatsapp.use':'.card:has(#wa-box)','watchdog.repair':'#wd-run','pexels.use':'.card:has(#px-key)',
   'ai.reels':'label:has(#s-ai),[data-su="ai"]','helper.manage':'[data-wa],[data-wd],[data-pcf],#wk-key,#wk-claim,#wk-phone-cmd,#wk-shared,a[href="/api/helper/download"]','google.keys':'#gk-box',
   'cookies.manage':'.card:has(#ck-text)','affiliate.use':'.card:has(#af-list)','account.rename':'details:has(#br-name)','account.upgrade':'details:has(#up-n)',
-  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)',
+  'phone.use':'#ph-card','keywords.use':'#e-kw,#e-meta,.card:has(#kr-out)','ideas.autotune':'label:has(#ww-tune)','clips.reminder':'.card:has(#rm-on),label:has(#e-cta)','clips.subscribe_anim':'.card:has(#sa-on),label:has(#e-sa)',
   'clips.pc_folder':'#pc-card,[data-pcf]','backup.use':'#bk-card','strikes.reply':'label:has(#st-auto),[data-st=send]','permissions.auto':'#pm-auto-box'};
 const PERM_LOCK={'sources.edit':'[data-sdest],[data-lang],label.switch:has([data-autoup])'};
 function applyAccess(){

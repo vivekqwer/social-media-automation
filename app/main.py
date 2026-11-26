@@ -1140,6 +1140,7 @@ class ClipUpdate(BaseModel):
     voice_fit: Literal["", "speed"] | None = None
     frame_title: bool | None = None
     cta_on: bool | None = None
+    sub_anim_on: bool | None = None
     comment_on: bool | None = None
     comment_text: str | None = Field(None, max_length=500)
 
@@ -1326,7 +1327,7 @@ def _render_sig(c: Clip) -> tuple:
     return (r2(c.start), r2(c.end), c.aspect, ovs, tuple(sorted(c.effects or [])), r2(c.voice_offset),
             r2(c.orig_volume, 1.0), caps, c.credit_on is not False, c.aspect == "9:16" and c.short_cover is not False,
             c.reframe is not False, c.fit or "full", c.voice_fit or "", c.aspect != "16:9" and c.frame_title is not False,
-            c.cta_on is not False)
+            c.cta_on is not False, c.sub_anim_on is not False)
 
 
 @app.put("/api/clips/{cid}")
@@ -2095,7 +2096,7 @@ def reupload_clip(cid: int, body: ReuploadIn):
         new = Clip(**{k: getattr(c, k) for k in (
             "project_id", "start", "end", "aspect", "overlays", "effects", "voice_text", "voice_offset", "orig_volume",
             "title", "description", "tags", "destination_id", "captions", "caption_style", "thumb_text", "thumb_face",
-            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on", "comment_on",
+            "credit_on", "fit", "voice_fit", "reframe", "short_cover", "frame_title", "cta_on", "sub_anim_on", "comment_on",
             "comment_text")}, status="draft")
         s.add(new)
         s.commit()
@@ -2737,6 +2738,11 @@ def reminder_set(body: ReminderIn):
         if len(custom) < 3:
             raise HTTPException(400, "Type a few plain words (letters only — emoji and symbols cannot be shown on the video).")
     return reminder.save(body.on, body.preset, custom)
+
+
+from . import subscribe_anim as _subscribe_anim  # noqa: E402  (the animated like + subscribe + bell: its own addresses)
+
+app.include_router(_subscribe_anim.router())
 
 
 class CommentIn(BaseModel):

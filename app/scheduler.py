@@ -498,6 +498,7 @@ def start():
     #   weekly_due           "Weekly report" (and the account's own switch in My channels); acts on Mondays from 9 AM IST
     #   freshen_due          "Keyword helper" (keywords refreshed before upload)
     #   meta_due             "Instagram + Facebook" (Shorts that became public; Instagram posts finished; PC get-back)
+    #   remake_tick          "Animated like + subscribe + bell" (and the account's own switch in My channels)
     #   thumb_tests          "Thumbnails" (with swap_weak_thumbnails: the A/B test of the second thumbnail)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
     #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
@@ -594,6 +595,9 @@ def start():
     from .pcfolder import due as pc_due
     add(when_on("clips.pc_folder", pc_due), "interval", minutes=2, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=4))  # PC-folder videos: ask for files, move missed times
+    from .subscribe_anim import remake_tick  # waiting clips made before the animation existed get it, one at a time,
+    add(when_on("clips.subscribe_anim", remake_tick), "interval", minutes=2, max_instances=1, coalesce=True,  # only
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=9))  # when nothing else is being made
     from .autopilot import unpark_due
     add(unpark_due, "interval", hours=1, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=12))  # parked clips back, a few a day (once a day)
