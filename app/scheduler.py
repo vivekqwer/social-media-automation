@@ -577,7 +577,7 @@ def start():
     add(lambda: executor.submit(retry_thumbnails), "interval", minutes=30, max_instances=1, coalesce=True,
                 next_run_time=datetime.now(timezone.utc) + timedelta(minutes=2))
     from .thumbdesign import refresh_old as thumb_redesign  # old-style thumbnails of waiting clips re-made (15 a day max)
-    add(when_on("thumbs.designer", lambda: executor.submit(thumb_redesign)), "interval", hours=2, max_instances=1,
+    add(when_on("thumbs.designer", lambda: executor.submit(thumb_redesign)), "interval", hours=1, max_instances=1,
         coalesce=True, next_run_time=datetime.now(timezone.utc) + timedelta(minutes=17))
     # watch uploaded videos for deletions / copyright rejections / blocks (1 quota unit per 50 videos)
     every = int(os.getenv("MONITOR_INTERVAL_HOURS") or "2")

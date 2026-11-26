@@ -38,7 +38,7 @@ VERSION = "d1"  # clip.thumb_style of a designer thumbnail ("d1" or "d1:<layout 
 CLASSIC = "classic"
 LAYOUTS = ["top", "box", "band", "arrow"]
 MAX_BYTES = 1_900_000
-PER_DAY = int(os.getenv("THUMB_REDESIGN_PER_DAY") or "15")  # re-made old thumbnails a day, per account
+PER_DAY = int(os.getenv("THUMB_REDESIGN_PER_DAY") or "60")  # re-made old thumbnails a day, per account
 PER_RUN = 5
 # every ffmpeg call has a deadline: a thumbnail is also made right before an upload (scheduler._ensure_thumb), and a
 # hung ffmpeg must never leave a clip stuck in "uploading"
