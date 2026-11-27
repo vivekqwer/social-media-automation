@@ -2818,6 +2818,7 @@ class NicheGuardIn(BaseModel):
     private: bool = False  # also keep off-topic videos already on YouTube (not public yet) private now
     purge: bool = False  # DELETE off-topic: parked clips on the dashboard + PRIVATE videos on YouTube (never public ones)
     dry: bool = False  # with purge: only list what would be deleted
+    clip_ids: list[int] = Field(default_factory=list, max_length=50)  # with purge: these clips too (the owner named them)
     dest_id: int | None = None  # with words: the niche words of this channel ("" = remove them)
     words: str | None = Field(None, max_length=2000)
 
@@ -2850,7 +2851,7 @@ def admin_niche_guard(body: NicheGuardIn):
     if body.purge:
         if not body.dry:
             set_setting(niche_guard.PURGE_KEY, utcnow().isoformat())  # finished by the 6-hourly job if YouTube's budget runs out
-        out["purge"] = niche_guard.purge(dry=body.dry)
+        out["purge"] = niche_guard.purge(dry=body.dry, also=body.clip_ids)
     out["preview"] = niche_guard.preview()
     return out
 

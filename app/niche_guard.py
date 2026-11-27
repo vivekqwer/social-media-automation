@@ -405,7 +405,8 @@ def purge(limit: int = 20, dry: bool = False, also: list | None = None) -> dict:
             if c.destination_id not in cache:
                 cache[c.destination_id] = profile(s, c.destination_id) if c.destination_id else None
             p = s.get(Project, c.project_id)
-            if p is not None and why_off(cache[c.destination_id], p.title, p.tags, p.channel_url, p.mode):
+            if c.id in set(also or []) or (p is not None and why_off(cache[c.destination_id], p.title, p.tags,
+                                                                     p.channel_url, p.mode)):
                 if c.publish_at is None or c.publish_at > utcnow() or c.kept_private:
                     yt.append((c.id, c.destination_id, c.youtube_id, c.title or ""))
     out["left_youtube"] = len(yt)
