@@ -533,6 +533,7 @@ def start():
     #   thumb_redesign       "Thumbnail designer" (old-style thumbnails of waiting / not-yet-public clips re-made, 15 a day)
     #   learn_daily          "Auto-tune" (and the account's own auto-tune switch; sources only with "Change sources")
     #   retitle_due          "Hook titles for videos already on YouTube" (and "Hook titles"; 20 a day, uploads first)
+    #   pull_forward_due     no switch: only copies whose posts-per-day the Super Admin set (videos on YouTube to earlier slots)
     #   guard_due            "One topic per channel" (parks off-topic waiting clips; never more than 40% of a channel's line)
     #   strike_mails         sending the request needs "Strike responder" too (strikes.send_due); reading YouTube's notices
     #                        and the creators' answers stays with "Permission mails to creators"
@@ -634,6 +635,9 @@ def start():
     from .hooks import retitle_due
     add(when_on("titles.retitle", retitle_due), "interval", hours=1, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=14))  # hook titles on scheduled videos, 20 a day max
+    from .tuneups import pull_forward_due  # posts a day from today: scheduled videos to earlier free slots (uploads first)
+    add(pull_forward_due, "interval", hours=1, max_instances=1, coalesce=True,
+        next_run_time=datetime.now(timezone.utc) + timedelta(minutes=19))
     from .niche_guard import guard_due
     add(when_on("niche.guard", guard_due), "interval", hours=6, max_instances=1, coalesce=True,
         next_run_time=datetime.now(timezone.utc) + timedelta(minutes=16))  # one topic per channel: park off-topic waiting clips
