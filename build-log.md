@@ -715,3 +715,11 @@ Reviews: security, backend reliability, helper/media, dashboard. ~60 findings; f
 - Uploader checked: process_queue sorts by publish_at (earliest first) within the lead window, 5 a day max -> fills the next days first.
 - Hourly pull_forward_due also runs respace_waiting(ahead=True) first (database only; clips due within 48 h stay). The migration re-spaces with ahead=True too.
 - Tests: D:\rs-tests\test_five_a_day.py 49/49; test_respace (RS_WT, new day rule) 14/14; test_viral_fixes 81/81 (5-a-day aware); test_quality_gate 74/74; test_acl_routes copy 19/19; test_customer_parity copy 240/240 (its 2 upload-budget checks are flaky: they fail the same way on unmodified main 1a41131 in some runs).
+
+## 2026-11-27 — Food only, deletes, 5 a day
+- Owner asked: only food, delete everything else (dashboard + channel), 5 videos a day from today, long videos too.
+- Deleted (owner confirmed, irreversible): 125 off-topic parked clips + files from the dashboard; 14 off-topic PRIVATE videos from YouTube (public ones never touched — all 5 public videos are food); 5 non-food sources (GTA/Avengers topics, AfroTalesTV24, C Daily, OUR STUPID REACTIONS).
+- Added 8 CC food topic sources (Mumbai/Delhi/Kolkata/South Indian/famous/viral street food, recipe in Hindi, Hyderabad biryani).
+- New: niche_guard.purge (+ clip_ids), youtube.delete_private_video (refuses non-private), hide_uploaded (keep private), cleaner hook topics.
+- Merged five-a-day: posts 1–5 a day (5 at 09/12/15/18/21 IST), days filled up to n incl. days with YouTube videos, pull_forward moves scheduled YouTube videos earlier (quota-guarded, hourly). Live 04ca14f: today +2, tomorrow 4+, then 5 a day as uploads allow (5 uploads/day budget).
+- Long-video compilation branch in progress.
