@@ -387,7 +387,8 @@ label.f{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:50
                 <div id="gf-retitle"><b>Scheduled videos get the new titles</b> — videos already on YouTube but not public yet, <span id="gf-rt-n">up to 20 a day</span>. Uploads always come first.</div>
                 <div id="gf-niche"><b>One topic per channel</b> — clips clearly off your channel's topic are parked (never deleted) and such videos are skipped. <span id="gf-nz-n"></span></div>
                 <div id="gf-short"><b>Shorter clips</b> — new sources make 20-second clips that end at a pause in the speech when captions are there.</div>
-                <div id="gf-posts" class="mut"></div></div></div>
+                <div id="gf-posts" class="mut"></div>
+                <div id="gf-pset" class="row hide" style="gap:8px;margin-top:6px;flex-wrap:wrap"><span class="mut">Super Admin — public posts a day:</span><select id="gf-pn" style="width:auto"></select><button class="btn sm" id="gf-pgo">Set</button></div></div></div>
             <div class="card"><div class="ch"><div><h3>Telegram (phone alerts &amp; control)</h3><p>Uploads, strikes, failures and helper alerts on your phone; approve clips with one tap; /status, /stats, /pause, /resume.</p></div><span class="badge" id="tg-badge">…</span></div>
               <div class="cb" id="tg-box"></div></div>
             <div class="card"><div class="ch"><div><h3>Instagram + Facebook</h3><p>Every Short that goes up on YouTube is also posted as an Instagram Reel and on your Facebook Page (Creative Commons, own and original videos only).</p></div><span class="badge" id="mt-badge">…</span></div>
@@ -1453,7 +1454,14 @@ async function loadGrowth(){try{const r=await api('/api/settings/growth'),on=r.o
   ['hook','retitle','niche','short'].forEach((k,i)=>{const el=$('#gf-'+k);if(el)el.classList.toggle('hide',!on[['titles.hook','titles.retitle','niche.guard','clips.short'][i]])});
   if(r.retitle)$('#gf-rt-n').textContent=`up to ${r.retitle.per_day} a day (${r.retitle.done} done so far, ${r.retitle.today} today)`;
   const nz=r.niche||{};$('#gf-nz-n').textContent=nz.at?`Last check ${when(nz.at)}: ${nz.parked||0} parked.`:'';
-  const p=r.posts||{};$('#gf-posts').textContent=p.n?`Public posts a day: ${p.n} (${p.times} India time).`:''}catch(e){}}
+  const p=r.posts||{};$('#gf-posts').textContent=p.n?`Public posts a day: ${p.n} (${p.times} India time).`:'';
+  const ps=$('#gf-pset'),pn=$('#gf-pn');if(ps&&pn){const sup=ME&&ME.role==='super';ps.classList.toggle('hide',!sup);
+    if(sup){const ch=p.choices||{};pn.innerHTML=[1,2,3,4,5].map(k=>`<option value="${k}">${k} a day${ch[k]?' — '+esc(ch[k]):''}</option>`).join('');pn.value=String(p.n||2)}}}catch(e){}}
+$('#gf-pgo').onclick=()=>once(async()=>{const n=+$('#gf-pn').value;
+  if(!confirm(`${n} public posts a day for this copy?
+
+Waiting clips move to the new times; videos already on YouTube move EARLIER into free times from today (uploads always come first).`))return;
+  const r=await api('/api/admin/posts-per-day','POST',{n});toast(`${r.n} a day at ${r.times} — ${r.respaced?r.respaced.moved:0} waiting clips moved; videos on YouTube are being moved earlier`);loadGrowth()},$('#gf-pgo'));
 $('#wr-on').onchange=async()=>{const el=$('#wr-on'),on=el.checked;if(LOCK){el.checked=!on;toast('Still working on the previous action…');return}
   LOCK=true;el.disabled=true;try{const r=await api('/api/settings/weekly-report','POST',{on});wrPaint(r);toast(r.on?'Weekly report on — every Monday at 9 AM':'Weekly report off')}catch(e){el.checked=!on;fail(e)}finally{LOCK=false;el.disabled=false}};
 function fcEditor(c){const st=c.comment_state||'',done=!!c.comment_id;

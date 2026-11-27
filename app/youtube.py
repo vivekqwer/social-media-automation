@@ -266,6 +266,41 @@ def keep_private(dest_id: int, video_id: str) -> str:
     return was
 
 
+class NotScheduled(LookupError):
+    """The video is not private with a publish time any more (public already, kept private, or gone): nothing to move."""
+
+
+def set_publish_time(dest_id: int, video_id: str, when) -> dict:
+    """Move one of my scheduled videos (private + publishAt) to an EARLIER publish time `when` (naive UTC):
+    videos.list part=status (1 unit), then videos.update part=status (50 units) with the other status settings sent
+    back unchanged (KEEP_STATUS, as keep_private). Never moves a video later: when YouTube's own time is already at or
+    before `when`, nothing is sent ({"changed": False}). Raises NotScheduled when the video is gone, public or has no
+    publish time. Needs the wider login (youtube.force-ssl): an older login raises NeedsReconnect."""
+    from datetime import datetime, timezone
+
+    yt = comment_client(dest_id)
+    r = yt.videos().list(part="status", id=video_id, maxResults=1).execute()
+    quota.spend("read")
+    items = r.get("items") or []
+    if not items:
+        raise NotScheduled("The video is no longer on YouTube.")
+    old = items[0].get("status") or {}
+    was = str(old.get("publishAt") or "")
+    if old.get("privacyStatus") != "private" or not was:
+        raise NotScheduled("The video is not scheduled (already public, or private with no publish time).")
+    try:
+        old_t = datetime.fromisoformat(was.replace("Z", "+00:00")).astimezone(timezone.utc).replace(tzinfo=None)
+    except ValueError:
+        old_t = None
+    if old_t is not None and old_t <= when:
+        return {"changed": False, "was": was}
+    status = {k: old[k] for k in KEEP_STATUS if k in old}
+    status["privacyStatus"], status["publishAt"] = "private", when.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    quota.spend("update")
+    yt.videos().update(part="status", body={"id": video_id, "status": status}).execute()
+    return {"changed": True, "was": was}
+
+
 def _email_from(creds) -> str | None:
     """Verified e-mail of the signed-in Google account, from the OpenID id_token."""
     try:
