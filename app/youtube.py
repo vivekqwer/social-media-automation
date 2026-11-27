@@ -240,6 +240,23 @@ def video_status(dest_id: int, ids: list[str]) -> dict:
     return out
 
 
+def delete_private_video(dest_id: int, video_id: str) -> str:
+    """Delete one of my videos from YouTube — ONLY when it is private (never a public / unlisted one): 1 + 50 units.
+    Returns "deleted", "gone" (not on YouTube any more) or "kept:<privacy>" (not private: left alone)."""
+    yt = comment_client(dest_id)
+    r = yt.videos().list(part="status", id=video_id, maxResults=1).execute()
+    quota.spend("read")
+    items = r.get("items") or []
+    if not items:
+        return "gone"
+    was = str((items[0].get("status") or {}).get("privacyStatus") or "")
+    if was != "private":
+        return "kept:" + was
+    quota.spend("update")
+    yt.videos().delete(id=video_id).execute()
+    return "deleted"
+
+
 KEEP_STATUS = ("embeddable", "license", "publicStatsViewable", "selfDeclaredMadeForKids", "containsSyntheticMedia")
 
 

@@ -2816,6 +2816,8 @@ def posts_per_day_set(body: PostsIn):
 class NicheGuardIn(BaseModel):
     apply: bool = False  # False = only set words / show the dry run
     private: bool = False  # also keep off-topic videos already on YouTube (not public yet) private now
+    purge: bool = False  # DELETE off-topic: parked clips on the dashboard + PRIVATE videos on YouTube (never public ones)
+    dry: bool = False  # with purge: only list what would be deleted
     dest_id: int | None = None  # with words: the niche words of this channel ("" = remove them)
     words: str | None = Field(None, max_length=2000)
 
@@ -2845,6 +2847,10 @@ def admin_niche_guard(body: NicheGuardIn):
         out["result"] = niche_guard.apply()
     if body.private:
         out["private"] = niche_guard.hide_uploaded()
+    if body.purge:
+        if not body.dry:
+            set_setting(niche_guard.PURGE_KEY, utcnow().isoformat())  # finished by the 6-hourly job if YouTube's budget runs out
+        out["purge"] = niche_guard.purge(dry=body.dry)
     out["preview"] = niche_guard.preview()
     return out
 

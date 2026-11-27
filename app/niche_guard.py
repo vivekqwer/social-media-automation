@@ -379,11 +379,104 @@ def hide_uploaded(limit: int = 12) -> dict:
     return out
 
 
+PURGE_KEY = "purge_offtopic"  # the owner asked (26-27 Nov 2026) to delete every off-topic video: runs until done
+
+
+def purge(limit: int = 20, dry: bool = False) -> dict:
+    """The owner's explicit request: delete what is off topic for the channel's niche.
+    * dashboard: clips parked as off topic (never uploaded) — row and files deleted;
+    * YouTube: off-topic videos of the channel that are still PRIVATE (scheduled, never public) — deleted on YouTube
+      (youtube.delete_private_video refuses anything public), then the clip row is marked removed.
+    Public videos are never touched. Within the day's YouTube budget (uploads first); the rest the next run."""
+    import shutil
+
+    from . import quota, youtube
+    from .comments import _uploads_due_here
+    from .config import DATA_DIR
+    from .db import utcnow
+
+    out = {"dashboard": 0, "youtube": 0, "left_youtube": 0, "kept": [], "stopped": "", "dry": dry}
+    with SessionLocal() as s:
+        parked = [c.id for c in s.query(Clip).filter(Clip.status == "draft", Clip.youtube_id.is_(None),
+                                                     Clip.error.like("Parked: off topic%"))]
+        cache, yt = {}, []
+        for c in s.query(Clip).filter(Clip.youtube_id.isnot(None), Clip.removed_at.is_(None),
+                                      Clip.status == "uploaded"):
+            if c.destination_id not in cache:
+                cache[c.destination_id] = profile(s, c.destination_id) if c.destination_id else None
+            p = s.get(Project, c.project_id)
+            if p is not None and why_off(cache[c.destination_id], p.title, p.tags, p.channel_url, p.mode):
+                if c.publish_at is None or c.publish_at > utcnow() or c.kept_private:
+                    yt.append((c.id, c.destination_id, c.youtube_id, c.title or ""))
+    out["left_youtube"] = len(yt)
+    if dry:
+        out["dashboard"], out["youtube"] = len(parked), len(yt)
+        out["titles"] = [t[:60] for *_x, t in yt]
+        return out
+    with SessionLocal() as s:
+        for cid in parked:
+            c = s.get(Clip, cid)
+            if c is not None and c.youtube_id is None and c.status == "draft":
+                shutil.rmtree(DATA_DIR / "clips" / str(cid), ignore_errors=True)
+                s.delete(c)
+                out["dashboard"] += 1
+        s.commit()
+    bad = set()
+    for cid, did, vid, title in yt[:limit]:
+        if did in bad:
+            continue
+        if not quota.can_update(_uploads_due_here()) or not quota.shared_room(quota.COST["update"] + quota.COST["read"]):
+            out["stopped"] = "today's YouTube budget is kept for uploads"
+            break
+        try:
+            res = youtube.delete_private_video(did, vid)
+        except youtube.NeedsReconnect:
+            bad.add(did)
+            continue
+        except Exception as e:  # noqa: BLE001
+            m = str(e)
+            log.warning("purge: could not delete %s: %s", vid, m[:200])
+            if "quotaExceeded" in m or "dailyLimitExceeded" in m:
+                quota.exhaust()
+                out["stopped"] = "YouTube's daily budget is used up"
+                break
+            continue
+        if res.startswith("kept:"):
+            out["kept"].append(vid)  # public / unlisted: never deleted by this
+            continue
+        with SessionLocal() as s:
+            c = s.get(Clip, cid)
+            if c is not None:
+                c.removed_at, c.yt_state, c.kept_private = utcnow(), "deleted", True
+                c.error = "Deleted from YouTube on the owner's request: off topic for this channel."
+                s.commit()
+        out["youtube"] += 1
+        out["left_youtube"] -= 1
+        try:
+            from . import acl
+
+            acl.record_here("niche.guard", f"Deleted off-topic private video {vid} (clip #{cid}: {title[:60]})")
+        except Exception:  # noqa: BLE001
+            pass
+    if out["youtube"]:
+        try:
+            from . import tuneups
+
+            out["respaced"] = tuneups.respace_waiting()  # their days get food clips
+        except Exception:  # noqa: BLE001
+            log.exception("purge: re-spacing")
+    if not out["left_youtube"] and not out["stopped"]:
+        set_setting(PURGE_KEY, "")
+    return out
+
+
 def guard_due() -> dict:
     """Timed job (switch "niche.guard", every 6 hours per account)."""
     out = apply()
     try:
         out = dict(out or {})
+        if get_setting(PURGE_KEY):
+            out["purge"] = purge()  # the owner's delete request, until everything off topic is gone
         out["private"] = hide_uploaded()
     except Exception:  # noqa: BLE001
         log.exception("niche guard: keeping off-topic videos private")
