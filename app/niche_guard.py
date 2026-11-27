@@ -148,7 +148,8 @@ def profile(s, dest_id: int) -> dict | None:
         n[0] += 1
         n[1] += int(on)
     typical = {u for u, (n, good) in seen.items() if n >= TYPICAL_MIN and good * 2 >= n}
-    return {"label": ", ".join(dict.fromkeys(labels))[:120], "stems": stems, "typical": typical}
+    # words the Super Admin typed are the rule: a creator who sometimes posts on topic does not bring the rest along
+    return {"label": ", ".join(dict.fromkeys(labels))[:120], "stems": stems, "typical": set() if typed else typical}
 
 
 def _video_stems(title, tags) -> set:
@@ -193,7 +194,7 @@ def still_off(s, c: Clip, cache: dict | None = None) -> bool:
     return bool(p and why_off(cache[c.destination_id], p.title, p.tags, p.channel_url, p.mode))
 
 
-def preview(s=None) -> dict:
+def preview(s=None, force: bool = False) -> dict:
     """What the guard would do now, per channel, without changing anything."""
     own = s is None
     s = s or SessionLocal()
@@ -206,7 +207,7 @@ def preview(s=None) -> dict:
                    "off": [], "action": "no niche: nothing is checked"}
             if prof:
                 for c in line:
-                    if c.status not in PARKABLE or c.meta_edited or (c.kw or {}).get("niche_parked"):
+                    if c.status not in PARKABLE or (not force and (c.meta_edited or (c.kw or {}).get("niche_parked"))):
                         continue  # parked once and brought back by the owner: his choice stays
                     p = s.get(Project, c.project_id)
                     why = why_off(prof, p.title, p.tags, p.channel_url, p.mode) if p else ""
@@ -218,12 +219,12 @@ def preview(s=None) -> dict:
                 row["share"] = round(share, 2)
                 if not row["off"]:
                     row["action"] = "all on topic"
-                elif share > MAX_SHARE:
+                elif share > MAX_SHARE and not force:
                     row["action"] = (f"too many ({len(row['off'])} of {len(line)} waiting clips): nothing is parked, "
                                      "the owner is told — check the channel's niche")
                 else:
                     row["action"] = f"park {len(row['off'])} of {len(line)}"
-                row["refused"] = bool(row["off"]) and share > MAX_SHARE
+                row["refused"] = bool(row["off"]) and share > MAX_SHARE and not force
             out.append(row)
         return {"on": enabled(), "max_share": MAX_SHARE, "channels": out}
     finally:
@@ -260,7 +261,7 @@ def _tell(dest_name: str, n: int, total: int, did: int):
     return True
 
 
-def apply() -> dict:
+def apply(force: bool = False) -> dict:
     """Park the off-topic waiting clips of every channel with a niche (never more than MAX_SHARE of a channel's line)."""
     from .autopilot import SLOT_LOCK
 
@@ -269,7 +270,7 @@ def apply() -> dict:
         res["off"] = True
         return res
     with SLOT_LOCK, SessionLocal() as s:
-        view = preview(s)
+        view = preview(s, force)
         for row in view["channels"]:
             if not row["off"]:
                 continue
@@ -283,8 +284,10 @@ def apply() -> dict:
                 c = s.get(Clip, o["clip_id"])
                 mark = dict((c.kw if c is not None else None) or {})
                 mark["niche_parked"] = utcnow().isoformat() + "Z"  # parked once: if the owner uses it anyway, it stays
-                done = s.execute(update(Clip).where(Clip.id == o["clip_id"], Clip.status == o["status"],
-                                                    Clip.youtube_id.is_(None), Clip.meta_edited.isnot(True))
+                cond = [Clip.id == o["clip_id"], Clip.status == o["status"], Clip.youtube_id.is_(None)]
+                if not force:
+                    cond.append(Clip.meta_edited.isnot(True))
+                done = s.execute(update(Clip).where(*cond)
                                  .values(status="draft", autoqueue=False, job_lease=None, fetch_since=None,
                                          publish_at=None, error=note, kw=mark))
                 if done.rowcount:

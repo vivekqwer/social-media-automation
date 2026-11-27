@@ -2818,6 +2818,7 @@ def posts_per_day_set(body: PostsIn):
 class NicheGuardIn(BaseModel):
     apply: bool = False  # False = only set words / show the dry run
     private: bool = False  # also keep off-topic videos already on YouTube (not public yet) private now
+    force: bool = False  # the owner's order: park every off-topic waiting clip (no 40% stop, also ones brought back)
     purge: bool = False  # DELETE off-topic: parked clips on the dashboard + PRIVATE videos on YouTube (never public ones)
     dry: bool = False  # with purge: only list what would be deleted
     clip_ids: list[int] = Field(default_factory=list, max_length=50)  # with purge: these clips too (the owner named them)
@@ -2847,7 +2848,7 @@ def admin_niche_guard(body: NicheGuardIn):
             _get(s, Destination, body.dest_id)
         out["words"] = niche_guard.set_words(body.dest_id, body.words)
     if body.apply:
-        out["result"] = niche_guard.apply()
+        out["result"] = niche_guard.apply(force=body.force)
     if body.private:
         out["private"] = niche_guard.hide_uploaded()
     if body.purge:
