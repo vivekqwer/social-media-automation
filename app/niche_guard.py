@@ -382,7 +382,7 @@ def hide_uploaded(limit: int = 12) -> dict:
 PURGE_KEY = "purge_offtopic"  # the owner asked (26-27 Nov 2026) to delete every off-topic video: runs until done
 
 
-def purge(limit: int = 20, dry: bool = False) -> dict:
+def purge(limit: int = 20, dry: bool = False, also: list | None = None) -> dict:
     """The owner's explicit request: delete what is off topic for the channel's niche.
     * dashboard: clips parked as off topic (never uploaded) — row and files deleted;
     * YouTube: off-topic videos of the channel that are still PRIVATE (scheduled, never public) — deleted on YouTube
